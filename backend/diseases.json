@@ -1,0 +1,69 @@
+{
+  "diseases": [
+    {
+      "id": "infectious_coryza",
+      "name": "Infectious Coryza",
+      "description": "Bacterial respiratory disease caused by Avibacterium paragallinarum",
+      "symptoms": [
+        "watery_eyes",
+        "swollen_eyes",
+        "nasal_discharge",
+        "facial_swelling"
+      ],
+      "affected_parts": [
+        "eye"
+      ],
+      "severity": "moderate",
+      "color": "#f59e0b"
+    },
+    {
+      "id": "fowl_pox",
+      "name": "Fowl Pox",
+      "description": "Viral disease causing lesions on skin and mucous membranes",
+      "symptoms": [
+        "eye_lesions",
+        "cloudy_eye",
+        "skin_lesions",
+        "scabs"
+      ],
+      "affected_parts": [
+        "eye",
+        "skin"
+      ],
+      "severity": "high",
+      "color": "#ef4444"
+    },
+    {
+      "id": "newcastle_disease",
+      "name": "Newcastle Disease",
+      "description": "Highly contagious viral disease affecting the nervous system",
+      "symptoms": [
+        "drooping_wings",
+        "severe_droop",
+        "wing_weakness",
+        "twisted_neck"
+      ],
+      "affected_parts": [
+        "wing",
+        "posture"
+      ],
+      "severity": "critical",
+      "color": "#dc2626"
+    },
+    {
+      "id": "healthy",
+      "name": "Healthy",
+      "description": "No disease detected - bird appears healthy",
+      "symptoms": [
+        "normal_eye",
+        "normal_posture",
+        "symmetrical_wings"
+      ],
+      "affected_parts": [
+        "all"
+      ],
+      "severity": "none",
+      "color": "#10b981"
+    }
+  ]
+}
