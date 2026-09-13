@@ -1,122 +1,329 @@
+import { useDarkMode } from '@/context/DarkModeContext';
+import { useNotifications } from '@/context/NotificationContext';
+import { deleteChickenForCurrentUser, loadChickensForCurrentUser, updateChickenForCurrentUser } from '@/utils/chickenStorage';
+import { Farm, getFarmName, loadFarms } from '@/utils/farms';
+import { persistChickenPhoto } from '@/utils/photoStorage';
+import { apiGetChickenHistory } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from "expo-router/react-navigation";
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
-import { apiGetChicken, apiGetChickenHistory } from '../../lib/api';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   Image,
+  Modal,
   Platform,
-  SafeAreaView,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ConfidenceBadge from '../../components/ui/ConfidenceBadge';
-import { useDarkMode } from '../../context/DarkModeContext';
+import ChickenIcon from '../../components/ui/ChickenIcon';
+import GuestBlockModal from '../../components/ui/GuestBlockModal';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-// Import images statically
-const birdImages = {
-  'CK-001': require('../../assets/images/CK-001.webp'),
-  'CK-002': require('../../assets/images/CK-002.webp'),
-  'CK-003': require('../../assets/images/CK-003.jpg'),
-  'CK-004': require('../../assets/images/CK-004.png'),
-  'CK-005': require('../../assets/images/CK-005.png'),
-  'CK-006': require('../../assets/images/CK-006.webp'),
-};
-
-const getBirdImage = (chickenId: string) => {
-  return birdImages[chickenId as keyof typeof birdImages] || require('../../assets/images/log.png');
-};
-
-// Sample scan history for each chicken - confidence represents AI accuracy
-const scanHistoryMap: { [key: string]: any[] } = {
-  '1': [
-    { id: '1', date: new Date('2026-03-20'), disease: null, confidence: 98, status: 'healthy' as const },
-    { id: '2', date: new Date('2026-03-19'), disease: 'Coryza', confidence: 87, status: 'warning' as const },
-    { id: '3', date: new Date('2026-03-15'), disease: null, confidence: 95, status: 'healthy' as const },
-  ],
-  '2': [
-    { id: '1', date: new Date('2026-03-19'), disease: null, confidence: 96, status: 'healthy' as const },
-    { id: '2', date: new Date('2026-03-12'), disease: null, confidence: 94, status: 'healthy' as const },
-  ],
-  '3': [
-    { id: '1', date: new Date('2026-03-18'), disease: 'Fowl Pox', confidence: 92, status: 'critical' as const },
-    { id: '2', date: new Date('2026-03-10'), disease: null, confidence: 90, status: 'warning' as const },
-  ],
-  '4': [
-    { id: '1', date: new Date('2026-03-20'), disease: null, confidence: 97, status: 'healthy' as const },
-  ],
-  '5': [
-    { id: '1', date: new Date('2026-03-19'), disease: null, confidence: 95, status: 'healthy' as const },
-  ],
-  '6': [
-    { id: '1', date: new Date('2026-03-18'), disease: 'Wing Droop', confidence: 79, status: 'warning' as const },
-  ],
-};
 
 export default function ChickenDetailScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDarkMode } = useDarkMode();
+  const { notify } = useNotifications();
   const [chicken, setChicken] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('info');
-  const [scanHistory, setScanHistory] = useState<any[]>([]);
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  const [updatingPhoto, setUpdatingPhoto] = useState(false);
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [chickenScans, setChickenScans] = useState<any[]>([]);
+  const [selectedScanHistory, setSelectedScanHistory] = useState<any | null>(null);
+
+  // --- 3-dot dropdown menu (Edit / Delete) ---
+  const [showMenu, setShowMenu] = useState(false);
+  const [menuStep, setMenuStep] = useState<'menu' | 'confirmDelete'>('menu');
+  const [deleting, setDeleting] = useState(false);
+
+  // --- Edit chicken state ---
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<ChickenFormData>({ name: '', photo: null, farmId: null });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Guest block modal (replaces native Alert for guest-blocked actions)
+  const [guestModalVisible, setGuestModalVisible] = useState(false);
+  const [guestFeature, setGuestFeature] = useState('this feature');
+
+  const guestAlert = (featureLabel: string = 'this feature') => {
+    setGuestFeature(featureLabel);
+    setGuestModalVisible(true);
+  };
+
+  // Fetches this chicken's real scan/detection history from the backend
+  // (health_history table). recorded_at is the actual scan timestamp —
+  // used both for the Capture History tab and to compute "Last Check"
+  // below, instead of relying on the chicken record's own created_at.
+  const loadScanHistory = async () => {
+    try {
+      const history = await apiGetChickenHistory(String(id));
+      const mapped = (history || []).map((h: any) => {
+        const severity = (h.severity || 'none').toLowerCase();
+        const status = severity === 'critical' ? 'critical' : severity === 'none' ? 'healthy' : 'warning';
+        return {
+          id: String(h.id),
+          date: h.recorded_at ? new Date(h.recorded_at) : new Date(),
+          disease: h.disease_name || null,
+          confidence: h.confidence_score != null ? Math.round(h.confidence_score) : 0,
+          status,
+          observation: h.observation,
+          scan_type: h.scan_type,
+          image_url: h.image_url,
+          captured_by_name: h.captured_by_name || 'Farm Member',
+          captured_by_role: (h.captured_by_role || 'member').charAt(0).toUpperCase() + (h.captured_by_role || 'member').slice(1),
+        };
+      });
+      setChickenScans(mapped);
+    } catch (error) {
+      console.error('Error loading chicken scan history:', error);
+    }
+  };
 
   useEffect(() => {
     loadChickenDetails();
+    loadScanHistory();
   }, [id]);
 
-  const loadChickenDetails = async () => {
-  try {
-    const [chickenData, history] = await Promise.all([
-      apiGetChicken(id as string),
-      apiGetChickenHistory(id as string),
-    ]);
-    setChicken(chickenData);
-    // Map history to scan format
-    const scans = history.map((h: any) => ({
-      id: h.id.toString(),
-      date: new Date(h.recorded_at),
-      disease: h.disease_name === 'Healthy' ? null : h.disease_name,
-      confidence: h.confidence_score || 0,
-      status: h.severity === 'critical' ? 'critical' : h.severity === 'none' ? 'healthy' : 'warning',
-    }));
-    setScanHistory(scans);
-  } catch(e) {
-    console.error('Chicken load error:', e);
-    loadDefaultChicken(); // fallback
-  } finally {
-    setLoading(false);
-  }
-};
+  useEffect(() => {
+    loadFarms().then(setFarms);
+  }, []);
 
-  const loadDefaultChicken = () => {
-    const defaultChickens = [
-      { id: '1', name: 'Rocky', chickenId: 'CK-001', status: 'WARNING', statusColor: '#FF9800', breed: 'Sweater', age: '8 months', weight: '2.3 kg', location: 'Pen A-1', lastScan: '2026-03-20', healthStatus: 'Warning', color: 'Red', dateAdded: '2026-01-15' },
-      { id: '2', name: 'Thunder', chickenId: 'CK-002', status: 'HEALTHY', statusColor: '#4CAF50', breed: 'Hatch', age: '6 months', weight: '1.8 kg', location: 'Pen B-2', lastScan: '2026-03-19', healthStatus: 'Healthy', color: 'Black', dateAdded: '2026-02-01' },
-      { id: '3', name: 'Lightning', chickenId: 'CK-003', status: 'CRITICAL', statusColor: '#f44336', breed: 'Kelso', age: '7 months', weight: '2.1 kg', location: 'Isolation Pen', lastScan: '2026-03-18', healthStatus: 'Critical', color: 'White', dateAdded: '2026-01-20' },
-      { id: '4', name: 'Eagle', chickenId: 'CK-004', status: 'HEALTHY', statusColor: '#4CAF50', breed: 'Roundhead', age: '9 months', weight: '2.5 kg', location: 'Pen A-3', lastScan: '2026-03-20', healthStatus: 'Healthy', color: 'Brown', dateAdded: '2026-01-10' },
-      { id: '5', name: 'Falcon', chickenId: 'CK-005', status: 'HEALTHY', statusColor: '#4CAF50', breed: 'Sweater', age: '5 months', weight: '1.9 kg', location: 'Pen C-1', lastScan: '2026-03-19', healthStatus: 'Healthy', color: 'Gray', dateAdded: '2026-02-15' },
-      { id: '6', name: 'Hawk', chickenId: 'CK-006', status: 'WARNING', statusColor: '#FF9800', breed: 'Hatch', age: '7 months', weight: '2.0 kg', location: 'Pen B-1', lastScan: '2026-03-18', healthStatus: 'Warning', color: 'Red', dateAdded: '2026-01-25' },
-    ];
-    const found = defaultChickens.find((c: any) => c.id === id);
-    setChicken(found);
+  // Refresh guest status every time this screen regains focus
+  // (e.g. after logging in from a guest-triggered login prompt)
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem('isGuestMode').then((v) => setIsGuestMode(v === 'true'));
+    }, [])
+  );
+
+  // Loads this chicken straight from the backend (via
+  // loadChickensForCurrentUser, which already scopes to whatever the
+  // logged-in account has access to — every chicken for an owner, only
+  // assigned-farm chickens for a caretaker) and finds the one matching
+  // this route's id/chickenId. No local/sample fallback data anymore —
+  // if it's not in the backend response, it's not found or not
+  // accessible to this account.
+  const loadChickenDetails = async () => {
+    setLoading(true);
+    try {
+      const chickens = await loadChickensForCurrentUser();
+      const found = (chickens || []).find((c: any) => c.id === id || c.chickenId === id);
+      setChicken(found || null);
+    } catch (error) {
+      console.error('Error loading chicken:', error);
+      setChicken(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const getScansForChicken = () => {
-  if (scanHistory.length > 0) return scanHistory;
-  const idStr = String(id);
-  return scanHistoryMap[idStr] || [];
-};
+  // Opens the device image picker, copies the chosen photo into this
+  // app's permanent storage (see utils/photoStorage — the raw picker uri
+  // is not guaranteed to still exist after the app reloads), then saves
+  // the resulting stable uri straight to the backend via
+  // updateChickenForCurrentUser so it persists and shows up everywhere
+  // else this chicken's photo is used — the Chickens list, Home cards, etc.
+  const handleChangePhoto = async () => {
+    if (isGuestMode) {
+      guestAlert('editing this profile');
+      return;
+    }
+
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          await notify({
+            title: 'Permission Needed',
+            message: 'Please grant photo library access to update the profile photo.',
+            type: 'warning',
+          });
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled) return;
+
+      const newPhotoUri = await persistChickenPhoto(result.assets[0].uri);
+      setUpdatingPhoto(true);
+
+      setChicken((prev: any) => ({ ...prev, photo: newPhotoUri }));
+      await updateChickenForCurrentUser(String(id), { photo: newPhotoUri });
+      await notify({
+        title: 'Photo Updated',
+        message: 'Profile photo has been successfully updated.',
+        type: 'success',
+      });
+    } catch (error: any) {
+      console.error('Error updating profile photo:', error);
+      await notify({
+        title: 'Update Failed',
+        message: error.message || 'Could not update the profile photo. Please try again.',
+        type: 'alert',
+      });
+    } finally {
+      setUpdatingPhoto(false);
+    }
+  };
+
+  // --- 3-dot dropdown ---
+  const handleMenuButtonPress = () => {
+    if (isGuestMode) {
+      guestAlert('this feature');
+      return;
+    }
+    setMenuStep('menu');
+    setShowMenu(true);
+  };
+
+  const closeMenu = () => {
+    setShowMenu(false);
+    setMenuStep('menu');
+  };
+
+  const handleMenuEditPress = () => {
+    setShowMenu(false);
+    setMenuStep('menu');
+    setTimeout(openEditModal, Platform.OS === 'ios' ? 250 : 0);
+  };
+
+  const handleMenuDeletePress = () => {
+    setMenuStep('confirmDelete');
+  };
+
+  // --- Edit chicken ---
+  const openEditModal = () => {
+    if (!chicken) return;
+    setEditForm({
+      name: chicken.name || '',
+      photo: chicken.photo || null,
+      farmId: chicken.farmId ?? null,
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditPickPhoto = async () => {
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          await notify({
+            title: 'Permission Needed',
+            message: 'Please grant photo library access to update the profile photo.',
+            type: 'warning',
+          });
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled) return;
+      const permanentUri = await persistChickenPhoto(result.assets[0].uri);
+      setEditForm((prev) => ({ ...prev, photo: permanentUri }));
+    } catch (error) {
+      console.error('Error picking photo:', error);
+      await notify({
+        title: 'Photo Error',
+        message: 'Could not open the photo picker. Please try again.',
+        type: 'alert',
+      });
+    }
+  };
+
+  // Saves the edited name/photo/farm straight to the backend via
+  // updateChickenForCurrentUser — a single PUT to this chicken's own
+  // record, not a read-modify-write of the whole flock.
+  const handleEditSubmit = async () => {
+    if (!editForm.name.trim()) {
+      await notify({
+        title: 'Missing Info',
+        message: 'Please enter a name for your chicken.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      const updated = await updateChickenForCurrentUser(String(id), {
+        name: editForm.name.trim(),
+        photo: editForm.photo,
+        farmId: editForm.farmId,
+      });
+
+      setChicken((prev: any) => ({ ...prev, ...updated }));
+      setShowEditModal(false);
+      await notify({
+        title: 'Chicken Updated',
+        message: `${updated.name}'s profile has been updated.`,
+        type: 'success',
+      });
+    } catch (error: any) {
+      console.error('Error saving chicken edits:', error);
+      await notify({
+        title: 'Save Failed',
+        message: error.message || 'Could not save changes. Please try again.',
+        type: 'alert',
+      });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // --- Delete chicken ---
+  const handleDeleteChicken = async () => {
+    setDeleting(true);
+    try {
+      await deleteChickenForCurrentUser(String(id));
+      setShowMenu(false);
+      setMenuStep('menu');
+      await notify({
+        title: 'Chicken Removed',
+        message: 'Chicken has been removed from flock.',
+        type: 'info',
+      });
+      router.back();
+    } catch (error: any) {
+      console.error('Error deleting chicken:', error);
+      await notify({
+        title: 'Delete Failed',
+        message: error.message || 'Could not delete this chicken. Please try again.',
+        type: 'alert',
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -138,29 +345,92 @@ export default function ChickenDetailScreen() {
     );
   }
 
-  const chickenScans = getScansForChicken();
   const lastScan = chickenScans.length > 0 ? chickenScans[0] : null;
+  // "Last Check" now comes from the real most-recent scan (health_history),
+  // not the chicken record's own created_at — a chicken can exist without
+  // ever being scanned, and its status can change well after creation.
+  const lastCheckLabel = lastScan ? lastScan.date.toLocaleDateString() : 'Never';
+  const addedLabel = chicken.dateAdded || 'N/A';
+
   const statusColor = chicken.statusColor || (chicken.status === 'HEALTHY' ? '#4CAF50' : chicken.status === 'WARNING' ? '#FF9800' : '#f44336');
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      
+
       {/* Header - Compact */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.primary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
-        <TouchableOpacity style={styles.menuButton} onPress={() => {
-          Alert.alert('Options', 'Export or share profile', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Export', onPress: () => Alert.alert('Export', 'Export feature coming soon') },
-          ]);
-        }}>
+        <TouchableOpacity style={styles.menuButton} onPress={handleMenuButtonPress}>
           <Ionicons name="ellipsis-horizontal" size={24} color={colors.primary} />
         </TouchableOpacity>
       </View>
+
+      {/* Dropdown menu — anchored under the 3-dot button. Shows the 2-choice
+          menu (Edit / Delete) or, after tapping Delete, swaps in place to a
+          confirmation view — all inside the same panel, no native Alert. */}
+      <Modal visible={showMenu} transparent animationType="fade" onRequestClose={closeMenu}>
+        <Pressable style={styles.dropdownOverlay} onPress={closeMenu}>
+          {menuStep === 'menu' ? (
+            <View style={[styles.dropdownMenu, { backgroundColor: colors.card, shadowColor: isDarkMode ? '#000' : '#333' }]}>
+              <TouchableOpacity
+                style={[styles.dropdownItem, { borderBottomColor: colors.divider }]}
+                onPress={handleMenuEditPress}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="create-outline" size={18} color={colors.text} />
+                <Text style={[styles.dropdownItemText, { color: colors.text }]}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dropdownItem}
+                onPress={handleMenuDeletePress}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={18} color="#f44336" />
+                <Text style={[styles.dropdownItemText, { color: '#f44336' }]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Pressable
+              style={[styles.confirmDeleteCard, { backgroundColor: colors.card, shadowColor: isDarkMode ? '#000' : '#333' }]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.confirmDeleteIconWrap}>
+                <Ionicons name="warning" size={22} color="#f44336" />
+              </View>
+              <Text style={[styles.confirmDeleteTitle, { color: colors.text }]}>Delete Chicken?</Text>
+              <Text style={[styles.confirmDeleteBody, { color: colors.textSecondary }]}>
+                {chicken?.name || 'This chicken'}'s entire profile will be permanently removed. This cannot be undone.
+              </Text>
+              <View style={styles.confirmDeleteActions}>
+                <TouchableOpacity
+                  style={[styles.confirmDeleteCancelBtn, { borderColor: colors.border }]}
+                  onPress={closeMenu}
+                  activeOpacity={0.75}
+                  disabled={deleting}
+                >
+                  <Text style={[styles.confirmDeleteCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmDeleteConfirmBtn, { backgroundColor: '#f44336' }]}
+                  onPress={handleDeleteChicken}
+                  activeOpacity={0.85}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.confirmDeleteConfirmText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          )}
+        </Pressable>
+      </Modal>
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Compact Profile Card - Small image, horizontal layout */}
@@ -169,16 +439,38 @@ export default function ChickenDetailScreen() {
           style={[styles.profileCard, { backgroundColor: colors.card }]}
         >
           <View style={styles.profileRow}>
-            <View style={[styles.avatarContainer, { borderColor: statusColor }]}>
-              <Image 
-                source={chicken.photo ? { uri: chicken.photo } : getBirdImage(chicken.chickenId || `CK-00${chicken.id}`)} 
-                style={styles.avatar}
-              />
+            <TouchableOpacity
+              style={[styles.avatarContainer, { borderColor: statusColor }]}
+              onPress={handleChangePhoto}
+              activeOpacity={0.8}
+              disabled={updatingPhoto}
+            >
+              {chicken.photo ? (
+                <Image
+                  source={{ uri: chicken.photo }}
+                  style={styles.avatar}
+                />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center' }]}>
+                  <ChickenIcon size={38} color="#4CAF50" />
+                </View>
+              )}
+              {updatingPhoto ? (
+                <View style={styles.avatarLoadingOverlay}>
+                  <ActivityIndicator size="small" color="#fff" />
+                </View>
+              ) : (
+                <View style={[styles.editPhotoBadge, { backgroundColor: colors.primary, borderColor: colors.card }]}>
+                  <Ionicons name="camera" size={12} color="#fff" />
+                </View>
+              )}
               <View style={[styles.statusIndicator, { backgroundColor: statusColor }]} />
-            </View>
+            </TouchableOpacity>
             <View style={styles.profileInfo}>
-              <Text style={[styles.chickenName, { color: colors.text }]}>{chicken.name}</Text>
-              <Text style={[styles.chickenBreed, { color: colors.textSecondary }]}>{chicken.breed}</Text>
+              <Text style={[styles.chickenName, { color: colors.text }]} numberOfLines={2}>{chicken.name}</Text>
+              <Text style={[styles.chickenBreed, { color: colors.textSecondary }]} numberOfLines={2}>
+                {getFarmName(farms, chicken.farmId)}
+              </Text>
               <View style={[styles.statusChip, { backgroundColor: statusColor + '20' }]}>
                 <Text style={[styles.statusChipText, { color: statusColor }]}>{chicken.status || chicken.healthStatus?.toUpperCase() || 'HEALTHY'}</Text>
               </View>
@@ -192,24 +484,23 @@ export default function ChickenDetailScreen() {
         {/* Quick Stats Row - Compact */}
         <View style={styles.statsContainer}>
           <View style={[styles.statItem, { backgroundColor: colors.card }]}>
+            <Ionicons name="home-outline" size={18} color={colors.primary} />
+            <Text style={[styles.statValue, { color: colors.text, fontSize: 12, textAlign: 'center' }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>
+              {getFarmName(farms, chicken.farmId)}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1}>Farm </Text>
+          </View>
+          <View style={[styles.statItem, { backgroundColor: colors.card }]}>
             <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{chicken.age?.split(' ')[0] || '?'}</Text>
-            <Text style={[styles.statLabel, { color: colors.textLight }]}>months</Text>
-          </View>
-          <View style={[styles.statItem, { backgroundColor: colors.card }]}>
-            <Ionicons name="fitness-outline" size={18} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{chicken.weight?.split(' ')[0] || '?'}</Text>
-            <Text style={[styles.statLabel, { color: colors.textLight }]}>kg</Text>
-          </View>
-          <View style={[styles.statItem, { backgroundColor: colors.card }]}>
-            <Ionicons name="location-outline" size={18} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text, fontSize: 12 }]} numberOfLines={1}>{chicken.location?.split(' ')[0] || '?'}</Text>
-            <Text style={[styles.statLabel, { color: colors.textLight }]}>pen</Text>
+            <Text style={[styles.statValue, { color: colors.text, fontSize: 12, textAlign: 'center' }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>
+              {lastCheckLabel}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>Last Check </Text>
           </View>
           <View style={[styles.statItem, { backgroundColor: colors.card }]}>
             <Ionicons name="scan-outline" size={18} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{chickenScans.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textLight }]}>scans</Text>
+            <Text style={[styles.statValue, { color: colors.text, textAlign: 'center' }]}>{chickenScans.length}</Text>
+            <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1}>Capture </Text>
           </View>
         </View>
 
@@ -221,107 +512,123 @@ export default function ChickenDetailScreen() {
               style={[styles.tab, activeTab === tab && styles.activeTab]}
               onPress={() => setActiveTab(tab)}
             >
-              <Text style={[
-                styles.tabText, 
-                activeTab === tab && { color: colors.primary, fontWeight: 'bold' }
-              ]}>
-                {tab === 'info' ? 'Information' : tab === 'scans' ? 'Scan History' : 'Health'}
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === tab && { color: colors.primary, fontWeight: 'bold' },
+                ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                {tab === 'info' ? 'Information' : tab === 'scans' ? 'Capture History' : 'Health'}
               </Text>
               {activeTab === tab && <View style={[styles.tabIndicator, { backgroundColor: colors.primary }]} />}
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Info Tab Content - Compact Grid */}
+        {/* Info Tab Content - Compact Grid (now 3 cards: Farm/Added/Last Check) */}
         {activeTab === 'info' && (
           <View style={styles.infoGrid}>
             <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
               <View style={styles.infoCardIcon}>
-                <Ionicons name="paw-outline" size={20} color={colors.primary} />
+                <Ionicons name="home-outline" size={20} color={colors.primary} />
               </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Breed</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.breed}</Text>
-            </View>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="color-palette-outline" size={20} color={colors.primary} />
-              </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Color</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.color || 'N/A'}</Text>
-            </View>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="location-outline" size={20} color={colors.primary} />
-              </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Location</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.location || 'N/A'}</Text>
+              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Farm</Text>
+              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={3}>
+                {getFarmName(farms, chicken.farmId)}
+              </Text>
             </View>
             <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
               <View style={styles.infoCardIcon}>
                 <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               </View>
               <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Added</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.dateAdded || chicken.lastScan || 'N/A'}</Text>
+              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{addedLabel}</Text>
             </View>
             <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
               <View style={styles.infoCardIcon}>
                 <Ionicons name="medkit-outline" size={20} color={colors.primary} />
               </View>
               <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Last Check</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.lastScan || 'Never'}</Text>
-            </View>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="fitness-outline" size={20} color={colors.primary} />
-              </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Weight</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text }]}>{chicken.weight || 'N/A'}</Text>
+              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{lastCheckLabel}</Text>
             </View>
           </View>
         )}
 
-        {/* Scans Tab Content - Shows AI Detection Confidence */}
+        {/* Scans Tab Content - Shows AI Detection Confidence, colored by
+            actual severity (red=critical, orange=warning, green=healthy) */}
         {activeTab === 'scans' && (
           <View style={styles.scansContainer}>
             {chickenScans.length === 0 ? (
               <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
                 <Ionicons name="scan-outline" size={48} color={colors.textLight} />
                 <Text style={[styles.emptyText, { color: colors.text }]}>No scans yet</Text>
-                <TouchableOpacity style={[styles.emptyButton, { backgroundColor: colors.primary }]} onPress={() => router.push('/(tabs)/capture')}>
-                  <Text style={styles.emptyButtonText}>Start First Scan</Text>
+                <TouchableOpacity style={[styles.emptyButton, { backgroundColor: colors.primary }]} onPress={() => {
+                  if (isGuestMode) {
+                    guestAlert('Scan & Detect');
+                    return;
+                  }
+                  router.push({
+                    pathname: '/(tabs)/capture',
+                    params: { chickenId: chicken.chickenId || String(chicken.id) },
+                  });
+                }}>
+                  <Text style={styles.emptyButtonText}>New Capture</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              chickenScans.map((scan, index) => (
-                <View key={scan.id} style={[styles.scanItem, { backgroundColor: colors.card }]}>
-                  <View style={styles.scanItemLeft}>
-                    <View style={[styles.scanDot, { backgroundColor: scan.status === 'healthy' ? '#4CAF50' : scan.status === 'warning' ? '#FF9800' : '#f44336' }]} />
-                    <View>
-                      <Text style={[styles.scanDate, { color: colors.text }]}>
-                        {scan.date.toLocaleDateString()}
-                      </Text>
-                      <Text style={[styles.scanCondition, { color: scan.status === 'healthy' ? '#4CAF50' : scan.status === 'warning' ? '#FF9800' : '#f44336' }]}>
-                        {scan.disease || 'Normal'}
-                      </Text>
+              chickenScans.map((scan) => {
+                const scanColor = scan.status === 'critical' ? '#f44336' : scan.status === 'warning' ? '#FF9800' : '#4CAF50';
+                return (
+                  <TouchableOpacity
+                    key={scan.id}
+                    style={[styles.scanItem, { backgroundColor: colors.card }]}
+                    onPress={() => setSelectedScanHistory(scan)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={styles.scanItemLeft}>
+                      <View style={[styles.scanDot, { backgroundColor: scanColor }]} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.scanDate, { color: colors.text }]}>
+                          {scan.date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                        </Text>
+                        <Text style={[styles.scanCondition, { color: scanColor }]}>
+                          {scan.disease || 'Healthy (Normal)'}
+                        </Text>
+                        {scan.captured_by_name && (
+                          <View style={styles.capturedByRow}>
+                            <Ionicons name="person-outline" size={11} color={colors.textLight} />
+                            <Text style={[styles.capturedByText, { color: colors.textSecondary }]} numberOfLines={1}>
+                              Captured by {scan.captured_by_name} ({scan.captured_by_role})
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                  <View style={styles.scanItemRight}>
-                    <Text style={[styles.scanConfidenceLabel, { color: colors.textLight }]}>AI Accuracy</Text>
-                    <Text style={[styles.scanConfidence, { color: colors.primary }]}>{scan.confidence}%</Text>
-                  </View>
-                </View>
-              ))
+                    <View style={styles.scanItemRight}>
+                      <Text style={[styles.scanConfidenceLabel, { color: colors.textLight }]}>AI Accuracy</Text>
+                      <Text style={[styles.scanConfidence, { color: scanColor }]}>{scan.confidence}%</Text>
+                      <Ionicons name="chevron-forward" size={16} color={colors.textLight} style={{ marginTop: 2 }} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
             )}
           </View>
         )}
 
-        {/* Health Tab Content - Shows AI Detection Confidence, NOT health percentage */}
+        {/* Health Tab Content - Confidence bar/text now colored by the
+            actual severity of the latest scan (status), not just the
+            raw confidence number — a 100%-confidence Critical detection
+            shows red, not green. */}
         {activeTab === 'health' && (
           <View style={styles.healthContainer}>
             {lastScan && (
               <View style={[styles.healthCard, { backgroundColor: colors.card }]}>
                 <Text style={[styles.healthCardTitle, { color: colors.text }]}>Latest AI Detection</Text>
-                <ConfidenceBadge score={lastScan.confidence} size="medium" showLabel={true} />
+                <ConfidenceBadge score={lastScan.confidence} size="medium" showLabel={true} status={lastScan.status} />
                 <View style={styles.healthFooter}>
                   <Text style={[styles.healthDate, { color: colors.textLight }]}>{lastScan.date.toLocaleDateString()}</Text>
                   <Text style={[styles.healthStatus, { color: lastScan.status === 'healthy' ? '#4CAF50' : lastScan.status === 'warning' ? '#FF9800' : '#f44336' }]}>
@@ -350,14 +657,18 @@ export default function ChickenDetailScreen() {
               </View>
             </View>
 
-            {chicken.status === 'WARNING' && (
+            {/* Uses the real latest scan's severity, not the chicken
+                record's own status field — those can drift out of sync
+                (e.g. chicken.status stays CRITICAL from an old scan even
+                after a newer healthy scan came in). */}
+            {lastScan?.status === 'warning' && (
               <View style={[styles.warningCard, { backgroundColor: '#FFF3E0' }]}>
                 <Ionicons name="alert-circle" size={20} color="#FF9800" />
                 <Text style={styles.warningText}>AI detected possible symptoms. Consult a veterinarian for confirmation.</Text>
               </View>
             )}
 
-            {chicken.status === 'CRITICAL' && (
+            {lastScan?.status === 'critical' && (
               <View style={[styles.criticalCard, { backgroundColor: '#FFEBEE' }]}>
                 <Ionicons name="warning" size={20} color="#f44336" />
                 <Text style={styles.criticalText}>AI indicates critical signs. Seek immediate veterinary attention!</Text>
@@ -368,20 +679,214 @@ export default function ChickenDetailScreen() {
 
         {/* Action Buttons - Compact */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.primary }]} onPress={() => router.push('/(tabs)/capture')}>
-            <Ionicons name="scan-outline" size={18} color="#fff" />
-            <Text style={styles.actionButtonText}>New Scan</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButtonOutline, { borderColor: colors.primary }]} onPress={() => {
-            Alert.alert('Export', `Exporting records for ${chicken.name}`);
+          <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.primary }]} onPress={() => {
+            if (isGuestMode) {
+              guestAlert('Scan & Detect');
+              return;
+            }
+            router.push({
+              pathname: '/(tabs)/capture',
+              params: { chickenId: chicken.chickenId || String(chicken.id) },
+            });
           }}>
-            <Ionicons name="download-outline" size={18} color={colors.primary} />
-            <Text style={[styles.actionButtonOutlineText, { color: colors.primary }]}>Export</Text>
+            <Ionicons name="camera-outline" size={18} color="#fff" />
+            <Text style={styles.actionButtonText}>{chickenScans.length > 0 ? 'Capture Again' : 'New Capture'}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Edit Chicken Modal — reuses the same sheet used to add a chicken */}
+      <AddChickenModal
+        visible={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onSubmit={handleEditSubmit}
+        form={editForm}
+        onChange={setEditForm}
+        onPickPhoto={handleEditPickPhoto}
+        colors={colors}
+        title="Edit Chicken"
+        submitLabel={savingEdit ? 'Saving…' : 'Save Changes'}
+      />
+
+      {/* Guest Block Modal — responsive, works across web/desktop/phone/tablet */}
+      <GuestBlockModal
+        visible={guestModalVisible}
+        onClose={() => setGuestModalVisible(false)}
+        featureLabel={guestFeature}
+      />
+
+      {/* Clickable Scan History Detail Modal */}
+      <Modal
+        visible={!!selectedScanHistory}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedScanHistory(null)}
+      >
+        <View style={styles.scanModalOverlay}>
+          <View style={[styles.scanModalCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.scanModalHeader, { borderBottomColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.scanModalTitle, { color: colors.text }]}>Capture Details</Text>
+                <Text style={[styles.scanModalSubtitle, { color: colors.textSecondary }]}>
+                  {selectedScanHistory?.date?.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedScanHistory(null)}
+                style={[styles.scanModalCloseBtn, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F0F0' }]}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.scanModalBody} showsVerticalScrollIndicator={false}>
+              {/* Scan Image */}
+              <View style={styles.scanModalImageWrap}>
+                {selectedScanHistory?.image_url || chicken?.photo ? (
+                  <Image
+                    source={{ uri: selectedScanHistory?.image_url || chicken?.photo }}
+                    style={styles.scanModalImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.scanModalImage, { backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center' }]}>
+                    <ChickenIcon size={72} color="#4CAF50" />
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.scanModalSeverityBadge,
+                    {
+                      backgroundColor:
+                        selectedScanHistory?.status === 'critical'
+                          ? '#f44336'
+                          : selectedScanHistory?.status === 'warning'
+                          ? '#FF9800'
+                          : '#4CAF50',
+                    },
+                  ]}
+                >
+                  <Text style={styles.scanModalSeverityText}>
+                    {(selectedScanHistory?.status || 'HEALTHY').toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Condition & Confidence Section */}
+              <View style={[styles.scanModalSection, { backgroundColor: isDarkMode ? '#1E1E1E' : '#F9FBF9', borderColor: colors.border }]}>
+                <Text style={[styles.scanModalSectionTitle, { color: colors.textLight }]}>Diagnosis Result</Text>
+                <Text
+                  style={[
+                    styles.scanModalDiseaseName,
+                    {
+                      color:
+                        selectedScanHistory?.status === 'critical'
+                          ? '#f44336'
+                          : selectedScanHistory?.status === 'warning'
+                          ? '#FF9800'
+                          : '#4CAF50',
+                    },
+                  ]}
+                >
+                  {selectedScanHistory?.disease || 'Healthy (No Disease Detected)'}
+                </Text>
+
+                <View style={styles.scanModalConfidenceRow}>
+                  <Text style={[styles.scanModalConfLabel, { color: colors.textSecondary }]}>Detection Confidence:</Text>
+                  <Text style={[styles.scanModalConfValue, { color: colors.text }]}>{selectedScanHistory?.confidence}%</Text>
+                </View>
+
+                {/* Progress bar */}
+                <View style={[styles.scanModalConfTrack, { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View
+                    style={[
+                      styles.scanModalConfFill,
+                      {
+                        width: `${Math.min(100, Math.max(10, selectedScanHistory?.confidence || 0))}%`,
+                        backgroundColor:
+                          selectedScanHistory?.status === 'critical'
+                            ? '#f44336'
+                            : selectedScanHistory?.status === 'warning'
+                            ? '#FF9800'
+                            : '#4CAF50',
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              {/* Symptoms & Observations */}
+              <View style={[styles.scanModalSection, { backgroundColor: isDarkMode ? '#1E1E1E' : '#F9FBF9', borderColor: colors.border }]}>
+                <Text style={[styles.scanModalSectionTitle, { color: colors.textLight }]}>Observations & Symptoms</Text>
+                <Text style={[styles.scanModalObservationText, { color: colors.text }]}>
+                  {selectedScanHistory?.observation || (selectedScanHistory?.status === 'healthy' ? 'Clear eyes, normal upright posture, and symmetrical wing alignment.' : 'Anatomical abnormalities detected during scan.')}
+                </Text>
+              </View>
+
+              {/* Captured By Attribution */}
+              <View style={[styles.scanModalSection, { backgroundColor: isDarkMode ? '#1E1E1E' : '#F9FBF9', borderColor: colors.border }]}>
+                <Text style={[styles.scanModalSectionTitle, { color: colors.textLight }]}>Captured By</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="person" size={16} color={colors.primary} />
+                    </View>
+                    <View>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
+                        {selectedScanHistory?.captured_by_name || 'Farm Member'}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {selectedScanHistory?.captured_by_role || 'Member'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ backgroundColor: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? '#2E7D3220' : '#2196F320', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? '#2E7D32' : '#1976D2' }}>
+                      {selectedScanHistory?.captured_by_role || 'Member'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Recommendations / Guide */}
+              <View style={[styles.scanModalSection, { backgroundColor: isDarkMode ? '#1E1E1E' : '#F9FBF9', borderColor: colors.border }]}>
+                <Text style={[styles.scanModalSectionTitle, { color: colors.textLight }]}>Care Recommendation</Text>
+                {selectedScanHistory?.status === 'critical' ? (
+                  <Text style={{ color: '#f44336', fontSize: 13, lineHeight: 18 }}>
+                    🚨 Immediately isolate this gamefowl in a quarantined coop. Disinfect feeders and water sources, restrict contact with other birds, and consult an avian veterinarian immediately.
+                  </Text>
+                ) : selectedScanHistory?.status === 'warning' ? (
+                  <Text style={{ color: '#FF9800', fontSize: 13, lineHeight: 18 }}>
+                    ⚠️ Early symptoms detected. Isolate bird for close observation over the next 24-48 hours. Ensure clean, warm shelter and electrolytes in water.
+                  </Text>
+                ) : (
+                  <Text style={{ color: '#4CAF50', fontSize: 13, lineHeight: 18 }}>
+                    ✓ Bird appears in healthy condition. Maintain regular vaccination schedules, clean water, and standard biosecurity measures.
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
+
+            <View style={[styles.scanModalFooter, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.scanModalDoneBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setSelectedScanHistory(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.scanModalDoneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -434,6 +939,96 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 8,
   },
+  // --- Dropdown menu (Edit / Delete), anchored top-right below the header ---
+  dropdownOverlay: {
+    flex: 1,
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 96 : 84,
+    right: 16,
+    width: 160,
+    borderRadius: 12,
+    paddingVertical: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  dropdownItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // --- Delete confirmation panel (same dropdown, swapped content) ---
+  confirmDeleteCard: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 96 : 84,
+    right: 16,
+    left: 16,
+    maxWidth: 340,
+    alignSelf: 'flex-end',
+    borderRadius: 16,
+    padding: 18,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  confirmDeleteIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(244,67,54,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  confirmDeleteTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  confirmDeleteBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  confirmDeleteActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmDeleteCancelBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeleteCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmDeleteConfirmBtn: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeleteConfirmText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   profileCard: {
     marginHorizontal: 16,
     marginTop: 8,
@@ -456,6 +1051,28 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
   },
+  avatarLoadingOverlay: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editPhotoBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+  },
   statusIndicator: {
     position: 'absolute',
     bottom: 2,
@@ -468,6 +1085,7 @@ const styles = StyleSheet.create({
   },
   profileInfo: {
     flex: 1,
+    minWidth: 0,
     marginLeft: 14,
   },
   chickenName: {
@@ -508,8 +1126,11 @@ const styles = StyleSheet.create({
   },
   statItem: {
     flex: 1,
+    minWidth: 0,
     alignItems: 'center',
-    paddingVertical: 10,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     borderRadius: 16,
     gap: 4,
   },
@@ -518,7 +1139,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: 11,
+    textAlign: 'center',
+    includeFontPadding: false,
+    paddingHorizontal: 2,
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -528,6 +1152,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
+    minWidth: 0,
     paddingVertical: 10,
     alignItems: 'center',
     position: 'relative',
@@ -570,6 +1195,9 @@ const styles = StyleSheet.create({
   },
   infoCardLabel: {
     fontSize: 11,
+    textAlign: 'center',
+    includeFontPadding: false,
+    paddingHorizontal: 2,
   },
   infoCardValue: {
     fontSize: 13,
@@ -588,9 +1216,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   scanItemLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginRight: 10,
   },
   scanDot: {
     width: 10,
@@ -602,11 +1232,23 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   scanCondition: {
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '600',
     marginTop: 2,
+  },
+  capturedByRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  capturedByText: {
+    fontSize: 11,
+    fontWeight: '500',
   },
   scanItemRight: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   scanConfidenceLabel: {
     fontSize: 9,
@@ -740,5 +1382,142 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 30,
+  },
+
+  // --- Scan History Detail Modal Styles ---
+  scanModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  scanModalCard: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    minHeight: '65%',
+    width: '100%',
+    overflow: 'hidden',
+  },
+  scanModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  scanModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  scanModalSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  scanModalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanModalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  scanModalImageWrap: {
+    width: '100%',
+    height: 220,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#000',
+    marginBottom: 16,
+  },
+  scanModalImage: {
+    width: '100%',
+    height: '100%',
+  },
+  scanModalSeverityBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  scanModalSeverityText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  scanModalSection: {
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  scanModalSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  scanModalDiseaseName: {
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  scanModalConfidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  scanModalConfLabel: {
+    fontSize: 13,
+  },
+  scanModalConfValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  scanModalConfTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  scanModalConfFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  scanModalObservationText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  scanModalFooter: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  scanModalDoneBtn: {
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanModalDoneBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

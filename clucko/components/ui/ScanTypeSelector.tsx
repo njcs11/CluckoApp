@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import ChickenIcon from './ChickenIcon';
+
 interface ScanTypeSelectorProps {
   selectedType: 'head' | 'wing' | 'full';
   onSelectType: (type: 'head' | 'wing' | 'full') => void;
@@ -9,9 +11,9 @@ interface ScanTypeSelectorProps {
 
 export default function ScanTypeSelector({ selectedType, onSelectType }: ScanTypeSelectorProps) {
   const options = [
-    { id: 'head', label: 'Head/Eyes', icon: 'eye', color: '#2196F3' },
-    { id: 'wing', label: 'Wings', icon: 'bird', color: '#4CAF50' },
-    { id: 'full', label: 'Full Body', icon: 'body', color: '#FF9800' },
+    { id: 'head', label: 'Head/Eyes', icon: 'eye-outline' as const, color: '#2196F3' },
+    { id: 'wing', label: 'Wings', icon: 'chicken' as const, color: '#4CAF50' },
+    { id: 'full', label: 'Full Body', icon: 'scan-outline' as const, color: '#FF9800' },
   ] as const;
 
   return (
@@ -29,11 +31,18 @@ export default function ScanTypeSelector({ selectedType, onSelectType }: ScanTyp
             ]}
             onPress={() => onSelectType(option.id)}
           >
-            <Ionicons 
-              name={option.icon as any} 
-              size={24} 
-              color={selectedType === option.id ? option.color : '#666'} 
-            />
+            {option.icon === 'chicken' ? (
+              <ChickenIcon
+                size={24}
+                color={selectedType === option.id ? option.color : '#666'}
+              />
+            ) : (
+              <Ionicons 
+                name={option.icon} 
+                size={24} 
+                color={selectedType === option.id ? option.color : '#666'} 
+              />
+            )}
             <Text style={[
               styles.optionLabel,
               selectedType === option.id && { color: option.color, fontWeight: 'bold' }

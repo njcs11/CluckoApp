@@ -6,3 +6,4 @@ numpy==1.26.4
 opencv-python==4.9.0.80
 PyMySQL==1.1.0
 PyJWT==2.8.0
+scikit-learn==1.4.2

@@ -13,6 +13,7 @@
       "affected_parts": [
         "eye"
       ],
+      "module": "eye",
       "severity": "moderate",
       "color": "#f59e0b"
     },
@@ -30,40 +31,75 @@
         "eye",
         "skin"
       ],
+      "module": "eye",
       "severity": "high",
       "color": "#ef4444"
     },
     {
-      "id": "newcastle_disease",
-      "name": "Newcastle Disease",
-      "description": "Highly contagious viral disease affecting the nervous system",
+      "id": "marek's_disease",
+      "name": "Marek's Disease (Ocular)",
+      "description": "Herpesvirus disease causing graying iris, irregular pupil, and ocular lymphoma",
       "symptoms": [
-        "drooping_wings",
-        "severe_droop",
-        "wing_weakness",
-        "twisted_neck"
+        "cloudy_eye",
+        "gray_iris",
+        "irregular_pupil",
+        "vision_loss"
+      ],
+      "affected_parts": [
+        "eye"
+      ],
+      "module": "eye",
+      "severity": "critical",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "healthy_eye",
+      "name": "Healthy Eye",
+      "description": "No disease detected - eyes appear clear, bright, and healthy",
+      "symptoms": [
+        "normal_eye"
+      ],
+      "affected_parts": [
+        "eye"
+      ],
+      "module": "eye",
+      "severity": "none",
+      "color": "#10b981"
+    },
+    {
+      "id": "healthy_wing",
+      "name": "Healthy Wing",
+      "description": "No disease detected - wings held tight, symmetrical, and healthy posture",
+      "symptoms": [
+        "normal_posture",
+        "symmetrical_wings"
       ],
       "affected_parts": [
         "wing",
         "posture"
       ],
-      "severity": "critical",
-      "color": "#dc2626"
-    },
-    {
-      "id": "healthy",
-      "name": "Healthy",
-      "description": "No disease detected - bird appears healthy",
-      "symptoms": [
-        "normal_eye",
-        "normal_posture",
-        "symmetrical_wings"
-      ],
-      "affected_parts": [
-        "all"
-      ],
+      "module": "wing",
       "severity": "none",
       "color": "#10b981"
+    },
+    {
+      "id": "newcastle_disease",
+      "name": "Newcastle Disease",
+      "description": "Highly contagious viral disease causing drooping wings, twisted neck, and posture impairment",
+      "symptoms": [
+        "drooping_wings",
+        "severe_droop",
+        "wing_weakness",
+        "twisted_neck",
+        "imbalance"
+      ],
+      "affected_parts": [
+        "wing",
+        "posture"
+      ],
+      "module": "wing",
+      "severity": "critical",
+      "color": "#dc2626"
     }
   ]
 }

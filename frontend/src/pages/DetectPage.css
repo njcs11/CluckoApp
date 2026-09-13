@@ -266,3 +266,172 @@
   padding: 6px 12px;
   border-radius: 6px;
 }
+
+/* ── Module Pill Group in Camera Header ── */
+.camera-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.module-pill-group {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-elevated);
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+.mod-pill {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 4px 10px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mod-pill:hover {
+  color: var(--text-primary);
+}
+
+.mod-pill.active {
+  background: var(--accent-green);
+  color: #080f08;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.4);
+}
+
+/* ── Grad-CAM Action Box & Button (Task 6) ── */
+.gradcam-action-box {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.btn-gradcam {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.15), rgba(96, 165, 250, 0.15));
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: var(--accent-green);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.btn-gradcam:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.25), rgba(96, 165, 250, 0.25));
+  border-color: var(--accent-green);
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-gradcam:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Grad-CAM Heatmap Display Card ── */
+.gradcam-card {
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  background: var(--bg-card);
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.gradcam-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.gradcam-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gradcam-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.btn-icon {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.gradcam-image-container {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 1px solid var(--border);
+}
+
+.gradcam-overlay-img {
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  display: block;
+}
+
+.gradcam-badge {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  background: rgba(8, 15, 8, 0.85);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.gradcam-caption {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-top: 12px;
+  line-height: 1.5;
+  text-align: center;
+  background: rgba(74, 222, 128, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.15);
+  padding: 10px 14px;
+  border-radius: 6px;
+}

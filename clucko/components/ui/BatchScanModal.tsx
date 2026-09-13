@@ -97,7 +97,7 @@ export default function BatchScanModal({ visible, onClose, onComplete }: BatchSc
                   }, 1500);
                 }}
               >
-                <Ionicons name="scan-outline" size={24} color="#FFF" />
+                <Ionicons name="scan" size={24} color="#FFF" />
                 <Text style={styles.scanButtonText}>Scan QR Code</Text>
               </TouchableOpacity>
             </View>

@@ -1,16 +1,97 @@
+import { useDarkMode } from '@/context/DarkModeContext';
 import { Feather, FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
-import React from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
-import { useDarkMode } from '../../context/DarkModeContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from "expo-router/react-navigation";
+import { Tabs, router } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Dimensions, StyleSheet, View } from 'react-native';
+import ChickenIcon from '../../components/ui/ChickenIcon';
+import GuestBlockModal from '../../components/ui/GuestBlockModal';
+import { useRole } from '../../hooks/useRole';
 
 const { width } = Dimensions.get('window');
 const isTablet = width >= 768;
 
 export default function TabLayout() {
   const { colors, isDarkMode } = useDarkMode();
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  const [guestModalVisible, setGuestModalVisible] = useState(false);
+  const [guestFeature, setGuestFeature] = useState('this feature');
+  // NEW: gate rendering of the tabs until we've confirmed the person is
+  // actually authenticated (logged in) or explicitly browsing as a guest.
+  // Without this, (tabs) routes were reachable directly — e.g. stale
+  // AsyncStorage/localStorage from a previous session, or just typing the
+  // URL — with no redirect back to /login.
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const { isCaretaker } = useRole();
+
+  // Runs once on mount: the actual access-control check for this whole
+  // route group. If neither flag is true, bounce to /login before anything
+  // under (tabs) ever renders.
+  useEffect(() => {
+    const verifyAccess = async () => {
+      try {
+        const [loggedIn, guestFlag] = await Promise.all([
+          AsyncStorage.getItem('isLoggedIn'),
+          AsyncStorage.getItem('isGuestMode'),
+        ]);
+
+        const isLoggedIn = loggedIn === 'true';
+        const isGuest = guestFlag === 'true';
+
+        if (!isLoggedIn && !isGuest) {
+          router.replace('/login');
+          return;
+        }
+
+        setIsGuestMode(isGuest);
+      } catch (error) {
+        console.error('Error verifying auth/guest status:', error);
+        // Fail closed — if we can't confirm access, send them to login
+        // rather than silently letting them through.
+        router.replace('/login');
+        return;
+      } finally {
+        setCheckingAuth(false);
+      }
+    };
+
+    verifyAccess();
+  }, []);
+
+  // Refresh guest status every time the tab bar regains focus
+  // (e.g. after logging in from a guest-triggered login prompt)
+  useFocusEffect(
+    useCallback(() => {
+      const checkGuestStatus = async () => {
+        try {
+          const guestFlag = await AsyncStorage.getItem('isGuestMode');
+          setIsGuestMode(guestFlag === 'true');
+        } catch (error) {
+          console.error('Error checking guest status:', error);
+        }
+      };
+      checkGuestStatus();
+    }, [])
+  );
+
+  const blockIfGuest = (e: any, featureLabel: string) => {
+    if (isGuestMode) {
+      // Prevent the default tab navigation
+      e.preventDefault();
+      setGuestFeature(featureLabel);
+      setGuestModalVisible(true);
+    }
+  };
+
+  // While we're confirming access, render nothing rather than flashing the
+  // tab bar/home screen before a possible redirect fires.
+  if (checkingAuth) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
 
   return (
+    <>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -49,7 +130,7 @@ export default function TabLayout() {
           title: 'Chickens',
           tabBarIcon: ({ focused, color }) => (
             <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <FontAwesome5 name="drumstick-bite" size={isTablet ? 24 : 20} color={color} />
+              <ChickenIcon size={isTablet ? 25 : 21} color={color} />
             </View>
           ),
         }}
@@ -65,6 +146,9 @@ export default function TabLayout() {
             </View>
           ),
         }}
+        listeners={{
+          tabPress: (e) => blockIfGuest(e, 'Scan & Detect'),
+        }}
       />
 
       <Tabs.Screen
@@ -73,7 +157,7 @@ export default function TabLayout() {
           title: 'Reports',
           tabBarIcon: ({ focused, color }) => (
             <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <MaterialIcons name="bar-chart" size={isTablet ? 26 : 22} color={color} />
+              <Ionicons name="stats-chart-outline" size={isTablet ? 25 : 21} color={color} />
             </View>
           ),
         }}
@@ -89,8 +173,17 @@ export default function TabLayout() {
             </View>
           ),
         }}
+        listeners={{
+          tabPress: (e) => blockIfGuest(e, 'your Profile'),
+        }}
       />
     </Tabs>
+    <GuestBlockModal
+      visible={guestModalVisible}
+      onClose={() => setGuestModalVisible(false)}
+      featureLabel={guestFeature}
+    />
+    </>
   );
 }
 

@@ -1,0 +1,36 @@
+# Python virtual environments & bytecode
+backend/venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Node & Package Managers
+frontend/node_modules/.cache/
+clucko/node_modules/
+.npm/
+.eslintcache
+
+# Frontend build output
+frontend/build/
+
+# Expo / Mobile build output
+clucko/.expo/
+clucko/dist/
+clucko/web-build/
+clucko/*.bak
+
+# IDE & Editor files
+.vscode/
+.idea/
+pyrefly.toml
+pyrightconfig.json
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

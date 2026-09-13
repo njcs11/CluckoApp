@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "clucko",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -15,17 +14,13 @@
       }
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA"
-      ]
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+      ],
+      "package": "com.anonymous.Clucko"
     },
     "web": {
       "output": "static",
@@ -34,6 +29,14 @@
     "plugins": [
       "expo-router",
       "expo-camera",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Clucko to access your photos.",
+          "savePhotosPermission": "Allow Clucko to save photos of your chickens.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -45,7 +48,12 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

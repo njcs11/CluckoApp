@@ -6,26 +6,42 @@ interface ConfidenceBadgeProps {
   score: number;
   size?: 'small' | 'medium' | 'large';
   showLabel?: boolean;
+  // When provided, the bar/text COLOR reflects the actual health outcome
+  // (a 100%-confidence Critical detection must show red, not green just
+  // because the confidence number is high). Falls back to score-based
+  // color only when status is omitted.
+  status?: 'healthy' | 'warning' | 'critical';
 }
 
-export default function ConfidenceBadge({ 
-  score, 
-  size = 'medium', 
-  showLabel = true 
+export default function ConfidenceBadge({
+  score,
+  size = 'medium',
+  showLabel = true,
+  status,
 }: ConfidenceBadgeProps) {
   const getColor = () => {
+    if (status === 'critical') return '#F44336';
+    if (status === 'warning') return '#FF9800';
+    if (status === 'healthy') return '#4CAF50';
+    // Fallback: no status given, color by confidence magnitude
     if (score >= 90) return '#4CAF50';
     if (score >= 70) return '#FF9800';
     return '#F44336';
   };
 
   const getStatusText = () => {
+    if (status === 'critical') return 'Critical — Seek vet attention';
+    if (status === 'warning') return 'Warning — Monitor closely';
+    if (status === 'healthy') return 'Healthy — No concerns detected';
     if (score >= 90) return 'High Confidence';
     if (score >= 70) return 'Medium Confidence';
     return 'Low Confidence - Consider Rescan';
   };
 
   const getIcon = () => {
+    if (status === 'critical') return 'warning';
+    if (status === 'warning') return 'alert-circle';
+    if (status === 'healthy') return 'checkmark-circle';
     if (score >= 90) return 'checkmark-circle';
     if (score >= 70) return 'warning';
     return 'alert-circle';
@@ -61,22 +77,22 @@ export default function ConfidenceBadge({
           </Text>
         </View>
       )}
-      
+
       <View style={[styles.barBackground, { height: sizeStyles.barHeight }]}>
-        <View 
+        <View
           style={[
-            styles.barFill, 
-            { 
-              width: `${score}%`, 
+            styles.barFill,
+            {
+              width: `${score}%`,
               height: sizeStyles.barHeight,
-              backgroundColor: color 
-            }
-          ]} 
+              backgroundColor: color,
+            },
+          ]}
         />
       </View>
 
       {showLabel && (
-        <Text style={[styles.statusText, { fontSize: sizeStyles.fontSize - 4, color }]}>
+        <Text style={[styles.statusText, { fontSize: sizeStyles.fontSize - 4, color }]} numberOfLines={2}>
           {getStatusText()}
         </Text>
       )}

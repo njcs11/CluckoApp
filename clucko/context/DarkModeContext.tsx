@@ -45,7 +45,7 @@ const lightColors: ThemeColors = {
   statCardWarning: '#FFF3E0',
   cardShadow: '#000000',
   modalBackground: '#FFFFFF',
-  badgeBackground: '#FFF3E0',
+  badgeBackground: '#E8F5E9',
 };
 
 const darkColors: ThemeColors = {
@@ -68,7 +68,7 @@ const darkColors: ThemeColors = {
   statCardWarning: '#3E2723',
   cardShadow: '#000000',
   modalBackground: '#1E1E1E',
-  badgeBackground: '#3E2723',
+  badgeBackground: '#2E3B2E',
 };
 
 interface DarkModeContextType {
