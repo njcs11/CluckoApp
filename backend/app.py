@@ -21,7 +21,17 @@ try:
 except Exception as e:
     print(f"Warning: pillow_heif could not be registered: {e}")
 
+from flask.json.provider import DefaultJSONProvider
+
+class CustomJSONProvider(DefaultJSONProvider):
+    def default(self, obj):
+        import datetime as dt_mod
+        if isinstance(obj, (dt_mod.date, dt_mod.datetime)):
+            return obj.isoformat()
+        return super().default(obj)
+
 app = Flask(__name__)
+app.json = CustomJSONProvider(app)
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
@@ -602,6 +612,7 @@ from routes_scans import *
 from routes_farms import *
 from routes_notifications import *
 from routes_tasks import *
+from routes_subscriptions import *
 
 if __name__ == '__main__':
     load_diseases()

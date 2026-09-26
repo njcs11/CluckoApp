@@ -21,6 +21,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDarkMode } from '../context/DarkModeContext';
 import { useNotifications } from '../context/NotificationContext';
 import { apiSignup } from '../lib/api';
+import FarmIcon from '../components/ui/FarmIcon';
 import {
   evaluatePasswordStrength,
   formatPhoneNumber,
@@ -34,7 +35,7 @@ const { width } = Dimensions.get('window');
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
-  const { colors, isDarkMode } = useDarkMode();
+  const { colors, isDarkMode, loadDarkModePreference } = useDarkMode();
   const { notify } = useNotifications();
 
   const [form, setForm] = useState({
@@ -177,6 +178,7 @@ export default function SignupScreen() {
         phone_number: form.phone_number.trim(),
         farm_name: form.farm_name.trim() || `${form.first_name.trim()}'s Farm`,
       });
+      await loadDarkModePreference();
 
       notify({
         title: 'Account Created!',
@@ -208,6 +210,10 @@ export default function SignupScreen() {
     try {
       const res = await performGoogleSignIn();
       if (res.success) {
+        if (res?.user?.id) {
+          await loadDarkModePreference(String(res.user.id));
+        }
+
         notify({
           title: 'Account Ready!',
           message: `Welcome to Clucko, ${res.user?.first_name || 'Google User'}! Your farm is created.`,
@@ -461,7 +467,7 @@ export default function SignupScreen() {
                   { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
                 ]}
               >
-                <Ionicons name="home-outline" size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
+                <FarmIcon size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
                   placeholder={

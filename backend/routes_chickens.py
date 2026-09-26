@@ -18,15 +18,23 @@ def get_chickens():
                 if not cur.fetchone():
                     return jsonify({'error': 'No access to this farm'}), 403
                 cur.execute('''
-                    SELECT c.*, f.farm_name FROM chickens c
+                    SELECT c.*, f.farm_name,
+                           TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
+                           u.role as added_by_role
+                    FROM chickens c
                     LEFT JOIN farms f ON f.id = c.farm_id
+                    LEFT JOIN users u ON u.id = c.user_id
                     WHERE c.farm_id=%s ORDER BY c.created_at DESC
                 ''', (farm_id,))
             else:
                 cur.execute('''
-                    SELECT DISTINCT c.*, f.farm_name FROM chickens c
+                    SELECT DISTINCT c.*, f.farm_name,
+                           TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
+                           u.role as added_by_role
+                    FROM chickens c
                     LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
                     LEFT JOIN farms f ON f.id = c.farm_id
+                    LEFT JOIN users u ON u.id = c.user_id
                     WHERE c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s
                     ORDER BY c.created_at DESC
                 ''', (request.user_id, request.user_id,
@@ -55,6 +63,47 @@ def create_chicken():
                 ''', (request.user_id, farm_id, request.user_id, request.user_id))
                 if not cur.fetchone():
                     return jsonify({'error': 'No access to this farm'}), 403
+
+            # Check subscription chicken quota per farm
+            owner_id = request.user_id
+            if farm_id:
+                cur.execute('SELECT owner_id FROM farms WHERE id = %s', (farm_id,))
+                f_owner = cur.fetchone()
+                if f_owner and f_owner.get('owner_id'):
+                    owner_id = f_owner['owner_id']
+
+            from routes_subscriptions import get_effective_subscription
+            sub = get_effective_subscription(owner_id, cur, db)
+            if sub:
+                max_chickens = sub['limits']['max_chickens_per_farm']
+                if farm_id:
+                    cur.execute('SELECT COUNT(*) as cnt FROM chickens WHERE farm_id = %s', (farm_id,))
+                else:
+                    cur.execute('SELECT COUNT(*) as cnt FROM chickens WHERE user_id = %s AND farm_id IS NULL', (owner_id,))
+                current_chickens = cur.fetchone()['cnt']
+                if current_chickens >= max_chickens:
+                    return jsonify({
+                        'error': f"Chicken limit reached ({current_chickens}/{max_chickens}). Please upgrade your plan to add more chickens.",
+                        'code': 'PLAN_CHICKEN_LIMIT_EXCEEDED',
+                        'max_chickens': max_chickens,
+                        'current_chickens': current_chickens,
+                        'plan': sub['plan'],
+                        'plan_name': sub['plan_name']
+                    }), 403
+
+            # Uniqueness check scoped per farm (or per user if unassigned)
+            if farm_id:
+                cur.execute('''
+                    SELECT id FROM chickens
+                    WHERE farm_id = %s AND qr_code = %s
+                ''', (farm_id, d['qr_code']))
+            else:
+                cur.execute('''
+                    SELECT id FROM chickens
+                    WHERE farm_id IS NULL AND user_id = %s AND qr_code = %s
+                ''', (request.user_id, d['qr_code']))
+            if cur.fetchone():
+                return jsonify({'error': 'QR code already exists in this farm'}), 400
 
             # Idempotency check: prevent duplicate chicken creation within 4 seconds by same user
             cur.execute('''
@@ -93,30 +142,100 @@ def create_chicken():
             chicken = cur.fetchone()
         return jsonify(chicken)
     except Exception as e:
-        if 'Duplicate entry' in str(e):
-            return jsonify({'error': 'QR code already exists'}), 400
+        if 'Duplicate entry' in str(e) or 'duplicate key' in str(e).lower() or 'unique' in str(e).lower():
+            return jsonify({'error': 'QR code already exists in this farm'}), 400
         return jsonify({'error': str(e)}), 500
     finally:
         db.close()
 
-def _resolve_chicken(cur, user_id, cid):
+import re
+
+@app.route('/api/chickens/next-code', methods=['GET'])
+@token_required
+def get_next_chicken_code():
+    farm_id = request.args.get('farm_id')
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            if farm_id:
+                cur.execute('SELECT qr_code FROM chickens WHERE farm_id = %s', (farm_id,))
+            else:
+                cur.execute('SELECT qr_code FROM chickens WHERE farm_id IS NULL AND user_id = %s', (request.user_id,))
+            rows = cur.fetchall()
+
+            existing_codes = set()
+            nums = []
+            for r in rows:
+                code = (r.get('qr_code') or '').strip()
+                if not code:
+                    continue
+                existing_codes.add(code.upper())
+                m = re.search(r'(?:CK|CH)[-_]?(\d+)', code, re.IGNORECASE)
+                if m:
+                    try:
+                        nums.append(int(m.group(1)))
+                    except ValueError:
+                        pass
+
+            candidate_num = (max(nums) + 1) if nums else 1
+            while f"CK-{candidate_num:03d}".upper() in existing_codes:
+                candidate_num += 1
+
+            return jsonify({'next_code': f"CK-{candidate_num:03d}"})
+    finally:
+        db.close()
+
+def _resolve_chicken(cur, user_id, cid, farm_id=None):
     """Resolve chicken by numeric id or qr_code string, checking access permissions."""
+    if not farm_id and request and hasattr(request, 'args'):
+        farm_id = request.args.get('farm_id')
+
+    select_fields = '''
+        c.*, f.farm_name,
+        TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
+        u.role as added_by_role
+    '''
+
     if str(cid).isdigit():
-        cur.execute('''
-            SELECT c.* FROM chickens c
-            LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
-            LEFT JOIN farms f ON f.id = c.farm_id
-            WHERE (c.id = %s OR c.qr_code = %s) AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
-            LIMIT 1
-        ''', (user_id, int(cid), str(cid), user_id, user_id, user_id))
+        if farm_id:
+            cur.execute(f'''
+                SELECT {select_fields} FROM chickens c
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                LEFT JOIN farms f ON f.id = c.farm_id
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE (c.id = %s OR (c.qr_code = %s AND c.farm_id = %s))
+                  AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+                LIMIT 1
+            ''', (user_id, int(cid), str(cid), farm_id, user_id, user_id, user_id))
+        else:
+            cur.execute(f'''
+                SELECT {select_fields} FROM chickens c
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                LEFT JOIN farms f ON f.id = c.farm_id
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE (c.id = %s OR c.qr_code = %s) AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+                LIMIT 1
+            ''', (user_id, int(cid), str(cid), user_id, user_id, user_id))
     else:
-        cur.execute('''
-            SELECT c.* FROM chickens c
-            LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
-            LEFT JOIN farms f ON f.id = c.farm_id
-            WHERE c.qr_code = %s AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
-            LIMIT 1
-        ''', (user_id, str(cid), user_id, user_id, user_id))
+        if farm_id:
+            cur.execute(f'''
+                SELECT {select_fields} FROM chickens c
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                LEFT JOIN farms f ON f.id = c.farm_id
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE c.qr_code = %s AND c.farm_id = %s
+                  AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+                LIMIT 1
+            ''', (user_id, str(cid), farm_id, user_id, user_id, user_id))
+        else:
+            cur.execute(f'''
+                SELECT {select_fields} FROM chickens c
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                LEFT JOIN farms f ON f.id = c.farm_id
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE c.qr_code = %s AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+                LIMIT 1
+            ''', (user_id, str(cid), user_id, user_id, user_id))
     return cur.fetchone()
 
 

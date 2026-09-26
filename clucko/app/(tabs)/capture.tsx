@@ -1,5 +1,6 @@
 import { useNotifications } from '@/context/NotificationContext';
 import { exitGuestMode } from '@/utils/guestMode';
+import { generateNextChickenCode } from '@/utils/chickenStorage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
@@ -33,7 +34,7 @@ import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
-import { apiCreateChicken, apiGetChickens, apiGetFarms, apiSaveScan, getApiUrl } from '../../lib/api';
+import { apiCreateChicken, apiGetChickens, apiGetFarms, apiRecordQrScan, apiSaveScan, getApiUrl } from '../../lib/api';
 
 // This screen doesn't use DarkModeContext (the camera viewfinder is always
 // dark), but the Add Chicken sheet itself is a plain light form — this is
@@ -54,6 +55,11 @@ const CAPTURE_FORM_COLORS = {
 // in this project's TS setup, so this alias casts to `any` at the
 // construction point only. Purely a types-visibility workaround.
 const ExpoFileAny = ExpoFile as any;
+
+// Stable barcode scanner settings outside component render loop for instant MLKit performance
+const BARCODE_SCANNER_SETTINGS = {
+  barcodeTypes: ['qr' as const],
+};
 
 // ---------------------------------------------------------------------------
 // Backend data shapes
@@ -138,7 +144,7 @@ export default function CaptureScreen() {
 
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [checkingGuest, setCheckingGuest] = useState(true);
-  const { chickenId: chickenIdParam } = useLocalSearchParams<{ chickenId?: string }>();
+  const { chickenId: chickenIdParam, mode: modeParam } = useLocalSearchParams<{ chickenId?: string; mode?: string }>();
 
   // --- Real device camera state -------------------------------------------------
   const [permission, requestPermission] = useCameraPermissions();
@@ -149,8 +155,17 @@ export default function CaptureScreen() {
 
   const [scanning, setScanning] = useState(false);
   const [checkingCapture, setCheckingCapture] = useState(false);
-  const [selectedMode, setSelectedMode] = useState('photo');
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<'photo' | 'scan'>(modeParam === 'scan' ? 'scan' : 'photo');
   const [gridOn, setGridOn] = useState(true);
+
+  useEffect(() => {
+    if (modeParam === 'scan') {
+      setSelectedMode('scan');
+    } else if (modeParam === 'photo') {
+      setSelectedMode('photo');
+    }
+  }, [modeParam]);
 
   // --- Farms / chickens (backend-backed) ------------------------------------
   const [farms, setFarms] = useState<Farm[]>([]);
@@ -222,6 +237,8 @@ export default function CaptureScreen() {
   const shutterAnim = useRef(new Animated.Value(1)).current;
   const flashAnim = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
+  const qrFocusAnim = useRef(new Animated.Value(1)).current;
+  const [qrDetected, setQrDetected] = useState(false);
   const qrRef = useRef<any>(null);
 
   const cameraModes = [
@@ -487,23 +504,42 @@ export default function CaptureScreen() {
   };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    if (barcodeLockRef.current || selectedMode !== 'scan') return;
+    if (barcodeLockRef.current) return;
     barcodeLockRef.current = true;
+
+    // Trigger snappy Expo Go style focus animation immediately
+    setQrDetected(true);
+    Animated.sequence([
+      Animated.timing(qrFocusAnim, {
+        toValue: 0.88,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.spring(qrFocusAnim, {
+        toValue: 1.0,
+        friction: 4,
+        tension: 90,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
     const trimmed = (data || '').trim();
     if (!trimmed) {
       barcodeLockRef.current = false;
+      setQrDetected(false);
       return;
     }
 
     let tagId = '';
     let tagName = '';
+    let tagFarmId: string | null = null;
 
     try {
       const parsed = JSON.parse(trimmed);
       if (typeof parsed === 'object' && parsed !== null) {
         tagId = String(parsed.chickenId || parsed.id || parsed.qr_code || parsed.code || '').trim();
         tagName = String(parsed.name || parsed.chicken_name || '').trim();
+        tagFarmId = parsed.farmId || parsed.farm_id ? String(parsed.farmId || parsed.farm_id) : null;
       } else {
         tagId = String(parsed).trim();
       }
@@ -513,20 +549,37 @@ export default function CaptureScreen() {
     }
 
     if (!tagId) {
-      showWrongSubjectAlert("That QR code isn't a recognized chicken tag — please scan a valid chicken QR code.");
-      setTimeout(() => { barcodeLockRef.current = false; }, 1800);
+      if (selectedMode === 'scan') {
+        showWrongSubjectAlert("That QR code isn't a recognized chicken tag — please scan a valid chicken QR code.");
+      }
+      setTimeout(() => {
+        barcodeLockRef.current = false;
+        setQrDetected(false);
+      }, 1500);
       return;
     }
 
     // Lookup matching chicken in user's flock
     const matched = chickens.find(
-      (c) =>
-        String(c.id) === tagId ||
-        (c.qr_code && c.qr_code.toLowerCase() === tagId.toLowerCase()) ||
-        (c.chicken_name && c.chicken_name.toLowerCase() === (tagName || tagId).toLowerCase())
+      (c) => {
+        if (tagFarmId && c.farm_id && String(c.farm_id) !== String(tagFarmId)) {
+          return false;
+        }
+        return (
+          String(c.id) === tagId ||
+          (c.qr_code && c.qr_code.toLowerCase() === tagId.toLowerCase()) ||
+          (c.chicken_name && c.chicken_name.toLowerCase() === (tagName || tagId).toLowerCase())
+        );
+      }
     );
 
     if (matched) {
+      // Auto-select this chicken so any photo taken immediately attaches to it
+      setSelectedChicken(matched);
+
+      // Persist to recent scans
+      apiRecordQrScan(matched.id).catch((err) => console.warn('Could not record QR scan:', err));
+
       setScannedTagInfo({
         chickenId: matched.qr_code || String(matched.id),
         name: matched.chicken_name,
@@ -559,46 +612,55 @@ export default function CaptureScreen() {
   };
 
   const handleCapture = () => {
-    if (checkingCapture || scanning) return;
+    if (checkingCapture || scanning || isCapturing) return;
+    setIsCapturing(true);
     setSelectedMode('photo');
     pressShutter(async () => {
-      if (!cameraRef.current || !cameraReady) return;
-
-      let photo;
       try {
-        photo = await cameraRef.current.takePictureAsync({ quality: 0.85, base64: true });
-      } catch (error) {
-        console.error('Error capturing photo:', error);
-        await notify({
-          title: 'Capture Error',
-          message: 'Could not capture photo. Please try again.',
-          type: 'alert',
-        });
-        return;
-      }
-
-      triggerFlash();
-      setLastPhotoUri(photo.uri);
-      setLastPhotoBase64(photo.base64 || null);
-
-      // Save-to-gallery is best-effort and isolated from the analysis flow —
-      // Expo Go on Android rejects requestPermissionsAsync entirely (a known
-      // Expo Go limitation, not fixable via config), so this must never block
-      // or fail the actual capture/analysis pipeline.
-      try {
-        const { status } = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
-        if (status === 'granted') {
-          MediaLibrary.saveToLibraryAsync(photo.uri).catch((err) =>
-            console.error('Error saving captured photo:', err)
-          );
+        if (!cameraRef.current || !cameraReady) {
+          setIsCapturing(false);
+          return;
         }
-      } catch (error) {
-        console.log('Media library permission unavailable (expected in Expo Go):', String(error));
-      }
 
-      setCheckingCapture(true);
-      await runScanResult(photo.base64);
-      setCheckingCapture(false);
+        let photo;
+        try {
+          photo = await cameraRef.current.takePictureAsync({ quality: 0.85, base64: true });
+        } catch (error) {
+          console.error('Error capturing photo:', error);
+          await notify({
+            title: 'Capture Error',
+            message: 'Could not capture photo. Please try again.',
+            type: 'alert',
+          });
+          setIsCapturing(false);
+          return;
+        }
+
+        triggerFlash();
+        setLastPhotoUri(photo.uri);
+        setLastPhotoBase64(photo.base64 || null);
+
+        // Save-to-gallery is best-effort and isolated from the analysis flow —
+        // Expo Go on Android rejects requestPermissionsAsync entirely (a known
+        // Expo Go limitation, not fixable via config), so this must never block
+        // or fail the actual capture/analysis pipeline.
+        try {
+          const { status } = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
+          if (status === 'granted') {
+            MediaLibrary.saveToLibraryAsync(photo.uri).catch((err) =>
+              console.error('Error saving captured photo:', err)
+            );
+          }
+        } catch (error) {
+          console.log('Media library permission unavailable (expected in Expo Go):', String(error));
+        }
+
+        setCheckingCapture(true);
+        await runScanResult(photo.base64);
+      } finally {
+        setCheckingCapture(false);
+        setIsCapturing(false);
+      }
     });
   };
 
@@ -724,23 +786,37 @@ export default function CaptureScreen() {
           title: scanResult.highConfidenceAlert ? 'Critical Health Warning' : 'Health Concern Detected',
           message: `${scanResult.disease} detected with ${scanResult.confidence}% confidence (${scanResult.module === 'wing' ? 'Wing' : 'Eye'}).`,
           type: scanResult.highConfidenceAlert ? 'alert' : 'warning',
+          chickenId: String(chickenId),
         });
       } else {
         await notify({
           title: 'Capture Saved',
           message: "The capture result has been saved to the chicken's health record.",
           type: 'success',
+          chickenId: String(chickenId),
         });
       }
 
       router.replace('/(tabs)/chickens');
     } catch (error: any) {
       console.error('Error saving scan:', error);
-      notify({
-        title: 'Save Failed',
-        message: error.message || 'Could not save the capture result.',
-        type: 'alert',
-      });
+      const msg = error.message || '';
+      if (msg.includes('Capture limit reached') || msg.includes('PLAN_CAPTURE_LIMIT_EXCEEDED')) {
+        Alert.alert(
+          'Capture Quota Reached',
+          'You have reached your 30 AI disease scan limit on the Free Trial. Upgrade to Pro or Premium for unlimited disease scans.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Plans & Upgrade', onPress: () => router.push('/subscription') }
+          ]
+        );
+      } else {
+        notify({
+          title: 'Save Failed',
+          message: msg || 'Could not save the capture result.',
+          type: 'alert',
+        });
+      }
     } finally {
       setIsSavingScan(false);
     }
@@ -757,8 +833,7 @@ export default function CaptureScreen() {
       return;
     }
 
-    const chickenNumber = chickens.length + 1;
-    const chickenCode = `CK-${String(chickenNumber).padStart(3, '0')}`;
+    const chickenCode = generateNextChickenCode(chickens, newChicken.farmId);
 
     setPendingChicken({
       chickenId: chickenCode,
@@ -792,17 +867,42 @@ export default function CaptureScreen() {
 
       setChickens((prev) => [created, ...prev]);
       setShowQRModal(false);
+      const savedName = pendingChicken.name;
+      const savedId = created.id;
       setPendingChicken(null);
       setNewChicken({ name: '', photo: null, farmId: null });
 
-      await persistScanToChicken(created.id);
+      if (scanResult) {
+        await persistScanToChicken(created.id);
+      } else {
+        await notify({
+          title: 'Chicken Added',
+          message: `${savedName} has been added to your flock.`,
+          type: 'success',
+          chickenId: String(savedId),
+          chickenName: savedName,
+        });
+        router.replace('/(tabs)/chickens');
+      }
     } catch (error: any) {
       console.error('Error creating chicken:', error);
-      await notify({
-        title: 'Save Failed',
-        message: error.message || 'Failed to save chicken.',
-        type: 'alert',
-      });
+      const msg = error.message || '';
+      if (msg.includes('Chicken limit reached') || msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED')) {
+        Alert.alert(
+          'Flock Limit Reached',
+          'This farm has reached its chicken quota for your current plan. Upgrade to Pro (70 chickens) or Premium (unlimited chickens) to add more.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Plans & Upgrade', onPress: () => router.push('/subscription') }
+          ]
+        );
+      } else {
+        await notify({
+          title: 'Save Failed',
+          message: msg || 'Failed to save chicken.',
+          type: 'alert',
+        });
+      }
     } finally {
       setIsCreatingChicken(false);
     }
@@ -920,6 +1020,7 @@ export default function CaptureScreen() {
   }, []);
 
   const isAnalyzing = scanning || checkingCapture;
+  const isBusyCapturing = isCapturing || checkingCapture || scanning || isAnalyzing;
   const analyzingColor = ANALYZING_COLORS[analyzingStep % ANALYZING_COLORS.length];
 
   if (checkingGuest) {
@@ -1000,9 +1101,10 @@ export default function CaptureScreen() {
               style={StyleSheet.absoluteFill}
               facing={facing}
               enableTorch={torchOn}
+              autofocus="on"
               onCameraReady={() => setCameraReady(true)}
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={selectedMode === 'scan' ? handleBarcodeScanned : undefined}
+              barcodeScannerSettings={BARCODE_SCANNER_SETTINGS}
+              onBarcodeScanned={handleBarcodeScanned}
             />
 
             {/* All overlay UI lives here, as a sibling of CameraView —
@@ -1037,7 +1139,7 @@ export default function CaptureScreen() {
                 style={[styles.flashOverlay, { opacity: flashAnim }]}
               />
 
-              {gridOn && (
+              {gridOn && !isBusyCapturing && !lastPhotoUri && (
                 <View style={styles.gridOverlay} pointerEvents="none">
                   <View style={[styles.gridLineV, { left: '33.3%' }]} />
                   <View style={[styles.gridLineV, { left: '66.6%' }]} />
@@ -1047,7 +1149,12 @@ export default function CaptureScreen() {
               )}
 
               <View style={styles.topBar}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.topIconButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <TouchableOpacity
+                  onPress={() => router.back()}
+                  style={styles.topIconButton}
+                  disabled={isBusyCapturing}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Ionicons name="chevron-down" size={22} color="#fff" />
                 </TouchableOpacity>
 
@@ -1056,31 +1163,33 @@ export default function CaptureScreen() {
                   <Text style={styles.topCenterText}>{selectedMode === 'scan' ? 'AI SCAN' : 'PHOTO'}</Text>
                 </View>
 
-                <View style={styles.topRightCluster}>
-                  <TouchableOpacity
-                    onPress={() => setShowQualityGuide(true)}
-                    style={styles.topIconButton}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name="help-circle-outline" size={20} color="#fff" />
-                  </TouchableOpacity>
-
-                  {facing === 'back' && (
+                {!isBusyCapturing && !lastPhotoUri ? (
+                  <View style={styles.topRightCluster}>
                     <TouchableOpacity
-                      onPress={() => setTorchOn((v) => !v)}
-                      style={[styles.topIconButton, torchOn && styles.topIconButtonActive]}
+                      onPress={() => setShowQualityGuide(true)}
+                      style={styles.topIconButton}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name={torchOn ? 'flash' : 'flash-off'} size={18} color={torchOn ? '#FFD54F' : '#fff'} />
+                      <Ionicons name="help-circle-outline" size={20} color="#fff" />
                     </TouchableOpacity>
-                  )}
-                </View>
+
+                    {facing === 'back' && (
+                      <TouchableOpacity
+                        onPress={() => setTorchOn((v) => !v)}
+                        style={[styles.topIconButton, torchOn && styles.topIconButtonActive]}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name={torchOn ? 'flash' : 'flash-off'} size={18} color={torchOn ? '#FFD54F' : '#fff'} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
+                  <View style={{ width: 40 }} />
+                )}
               </View>
 
-              {/* Chicken selection pill — only shown during PHOTO mode (capture).
-                  In SCAN mode (QR scanner), chicken selection is hidden so
-                  users scan the bird's QR tag directly. */}
-              {selectedMode === 'photo' && (
+              {/* Chicken selection pill — only shown during PHOTO mode (capture) when NOT capturing/analyzing */}
+              {selectedMode === 'photo' && !isBusyCapturing && !lastPhotoUri && (
                 <View style={styles.chickenSelectRow} pointerEvents="box-none">
                   <TouchableOpacity
                     style={styles.chickenSelectPill}
@@ -1141,15 +1250,20 @@ export default function CaptureScreen() {
                   <Animated.View
                     style={[
                       styles.focusFrame,
-                      { transform: [{ scale: isAnalyzing ? 1 : scaleAnim }] },
+                      {
+                        transform: [
+                          { scale: isAnalyzing ? 1 : scaleAnim },
+                          { scale: qrFocusAnim },
+                        ],
+                      },
                     ]}
                   >
                     {!isAnalyzing && (
                       <>
-                        <View style={[styles.corner, styles.cornerTL]} />
-                        <View style={[styles.corner, styles.cornerTR]} />
-                        <View style={[styles.corner, styles.cornerBL]} />
-                        <View style={[styles.corner, styles.cornerBR]} />
+                        <View style={[styles.corner, styles.cornerTL, qrDetected && styles.cornerDetected]} />
+                        <View style={[styles.corner, styles.cornerTR, qrDetected && styles.cornerDetected]} />
+                        <View style={[styles.corner, styles.cornerBL, qrDetected && styles.cornerDetected]} />
+                        <View style={[styles.corner, styles.cornerBR, qrDetected && styles.cornerDetected]} />
                       </>
                     )}
 
@@ -1200,7 +1314,7 @@ export default function CaptureScreen() {
                 {!isAnalyzing && !lastPhotoUri && (
                   <Text style={styles.focusHintText}>
                     {selectedMode === 'scan'
-                      ? 'Center your chicken inside the frame'
+                      ? 'Align chicken QR code within the frame'
                       : 'Point the camera at your chicken and fill the frame'}
                   </Text>
                 )}
@@ -1210,7 +1324,7 @@ export default function CaptureScreen() {
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.8)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
                 {/* Part selector: placed cleanly above PHOTO | SCAN strip, disappears only during active shutter / analyzing */}
-                {selectedMode === 'photo' && !isAnalyzing && !checkingCapture && (
+                {selectedMode === 'photo' && !isBusyCapturing && !lastPhotoUri && (
                   <View style={styles.partSelectorContainer}>
                     <View style={styles.partSelectorPill}>
                       {PART_MODULES.map((part) => {
@@ -1245,7 +1359,7 @@ export default function CaptureScreen() {
                   </View>
                 )}
 
-                <View style={styles.modeStrip}>
+                <View style={styles.modeStrip} pointerEvents={isBusyCapturing ? 'none' : 'auto'}>
                   {cameraModes.map((mode) => {
                     const active = selectedMode === mode.id;
                     return (
@@ -1370,6 +1484,7 @@ export default function CaptureScreen() {
         onRequestClose={() => {
           setShowScannedTagModal(false);
           barcodeLockRef.current = false;
+          setQrDetected(false);
         }}
       >
         <View style={styles.detectionOverlay}>
@@ -1388,6 +1503,7 @@ export default function CaptureScreen() {
                 onPress={() => {
                   setShowScannedTagModal(false);
                   barcodeLockRef.current = false;
+                  setQrDetected(false);
                 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
@@ -1435,6 +1551,7 @@ export default function CaptureScreen() {
                         setSelectedChicken(scannedTagInfo.chickenObj);
                       }
                       setShowScannedTagModal(false);
+                      setQrDetected(false);
                       setSelectedMode('photo');
                       setTimeout(() => {
                         barcodeLockRef.current = false;
@@ -1451,6 +1568,7 @@ export default function CaptureScreen() {
                     onPress={() => {
                       setShowScannedTagModal(false);
                       barcodeLockRef.current = false;
+                      setQrDetected(false);
                       router.push(`/chicken/${scannedTagInfo.chickenObj.id}`);
                     }}
                     activeOpacity={0.85}
@@ -1465,6 +1583,7 @@ export default function CaptureScreen() {
                   onPress={() => {
                     setShowScannedTagModal(false);
                     barcodeLockRef.current = false;
+                    setQrDetected(false);
                     setNewChicken({
                       name: scannedTagInfo?.name || '',
                       photo: null,
@@ -1489,6 +1608,7 @@ export default function CaptureScreen() {
                 style={styles.scannedTagDismissBtn}
                 onPress={() => {
                   setShowScannedTagModal(false);
+                  setQrDetected(false);
                   setTimeout(() => {
                     barcodeLockRef.current = false;
                   }, 800);
@@ -1780,6 +1900,7 @@ function ScrollViewVerifyBody({ pendingChicken, colors, qrRef, onShare, onDownlo
   const qrValue = JSON.stringify({
     chickenId: pendingChicken.chickenId,
     name: pendingChicken.name,
+    farmId: pendingChicken.farmId,
   });
 
   return (
@@ -1997,6 +2118,14 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderColor: '#FFD54F',
+  },
+  cornerDetected: {
+    borderColor: '#4CAF50',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 8,
   },
   cornerTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 6 },
   cornerTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 6 },

@@ -36,23 +36,6 @@
       "color": "#ef4444"
     },
     {
-      "id": "marek's_disease",
-      "name": "Marek's Disease (Ocular)",
-      "description": "Herpesvirus disease causing graying iris, irregular pupil, and ocular lymphoma",
-      "symptoms": [
-        "cloudy_eye",
-        "gray_iris",
-        "irregular_pupil",
-        "vision_loss"
-      ],
-      "affected_parts": [
-        "eye"
-      ],
-      "module": "eye",
-      "severity": "critical",
-      "color": "#8b5cf6"
-    },
-    {
       "id": "healthy_eye",
       "name": "Healthy Eye",
       "description": "No disease detected - eyes appear clear, bright, and healthy",
@@ -100,6 +83,20 @@
       "module": "wing",
       "severity": "critical",
       "color": "#dc2626"
+    },
+    {
+      "id": "mareks_disease",
+      "name": "Mareks Disease",
+      "description": "",
+      "symptoms": [
+        "drooping_wings",
+        "severe_droop",
+        "wing_weakness"
+      ],
+      "affected_parts": [],
+      "module": "wing",
+      "severity": "high",
+      "color": "#f87171"
     }
   ]
 }

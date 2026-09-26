@@ -1,8 +1,10 @@
 import { useDarkMode } from '@/context/DarkModeContext';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import ChickenIcon from './ChickenIcon';
+import FarmIcon from './FarmIcon';
 import {
   Animated,
   Modal,
@@ -13,6 +15,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+
 interface NotificationDetailModalProps {
   visible: boolean;
   notification: {
@@ -24,7 +27,10 @@ interface NotificationDetailModalProps {
     chickenName?: string;
   } | null;
   onClose: () => void;
-  onViewChicken: (chickenId: string) => void;
+  onViewChicken?: (chickenId: string) => void;
+  onViewProfile?: () => void;
+  onViewFarm?: () => void;
+  onViewTasks?: () => void;
 }
 
 const getBadge = (type: string) => {
@@ -54,6 +60,9 @@ export default function NotificationDetailModal({
   notification,
   onClose,
   onViewChicken,
+  onViewProfile,
+  onViewFarm,
+  onViewTasks,
 }: NotificationDetailModalProps) {
   const { colors, isDarkMode } = useDarkMode();
   const translateY = useRef(new Animated.Value(-40)).current;
@@ -73,11 +82,68 @@ export default function NotificationDetailModal({
   if (!notification) return null;
   const badge = getBadge(notification.type);
 
+  const titleLower = (notification.title || '').toLowerCase();
+  const messageLower = (notification.message || '').toLowerCase();
+  const isProfile = titleLower.includes('profile') || messageLower.includes('profile');
+  const isFarm = titleLower.includes('farm') || messageLower.includes('farm');
+  const isTask = titleLower.includes('task') || messageLower.includes('task');
+  const hasChicken = !!notification.chickenId;
+
+  const handleChickenPress = () => {
+    onClose();
+    if (notification.chickenId) {
+      if (onViewChicken) {
+        onViewChicken(notification.chickenId);
+      } else {
+        router.push(`/chicken/${notification.chickenId}`);
+      }
+    }
+  };
+
+  const handleProfilePress = () => {
+    onClose();
+    if (onViewProfile) {
+      onViewProfile();
+    } else {
+      router.push('/(tabs)/profile');
+    }
+  };
+
+  const handleFarmPress = () => {
+    onClose();
+    if (onViewFarm) {
+      onViewFarm();
+    } else {
+      router.push('/farm');
+    }
+  };
+
+  const handleTasksPress = () => {
+    onClose();
+    if (onViewTasks) {
+      onViewTasks();
+    } else {
+      router.push('/tasks');
+    }
+  };
+
+  const handleBannerPress = () => {
+    if (hasChicken) {
+      handleChickenPress();
+    } else if (isProfile) {
+      handleProfilePress();
+    } else if (isFarm) {
+      handleFarmPress();
+    } else if (isTask) {
+      handleTasksPress();
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
-          <TouchableWithoutFeedback>
+          <TouchableWithoutFeedback onPress={handleBannerPress}>
             <Animated.View
               style={[
                 styles.banner,
@@ -112,7 +178,14 @@ export default function NotificationDetailModal({
                   <Text style={[styles.timeText, { color: colors.textLight }]}>
                     {formatRelative(notification.timestamp)}
                   </Text>
-                  <Ionicons name="chevron-down" size={14} color={colors.textLight} style={{ marginLeft: 4 }} />
+                  <TouchableOpacity
+                    onPress={onClose}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    style={{ marginLeft: 8, padding: 2 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="close" size={16} color={colors.textLight} />
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -121,13 +194,14 @@ export default function NotificationDetailModal({
               </Text>
               <Text style={[styles.message, { color: colors.textSecondary }]}>{notification.message}</Text>
 
-              {notification.chickenId && (
+              {/* Contextual Action Strips */}
+              {hasChicken && (
                 <TouchableOpacity
                   style={[
                     styles.chickenStrip,
                     { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' },
                   ]}
-                  onPress={() => onViewChicken(notification.chickenId!)}
+                  onPress={handleChickenPress}
                   activeOpacity={0.75}
                 >
                   <View style={[styles.chickenStripIcon, { backgroundColor: colors.primary + '20' }]}>
@@ -140,24 +214,116 @@ export default function NotificationDetailModal({
                 </TouchableOpacity>
               )}
 
+              {!hasChicken && isProfile && (
+                <TouchableOpacity
+                  style={[
+                    styles.chickenStrip,
+                    { backgroundColor: '#2196F314', borderColor: '#2196F330' },
+                  ]}
+                  onPress={handleProfilePress}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.chickenStripIcon, { backgroundColor: '#2196F322' }]}>
+                    <Ionicons name="person-outline" size={14} color="#2196F3" />
+                  </View>
+                  <Text style={[styles.chickenStripText, { color: '#2196F3' }]} numberOfLines={1}>
+                    Go to your Profile
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#2196F3" />
+                </TouchableOpacity>
+              )}
+
+              {!hasChicken && !isProfile && isFarm && (
+                <TouchableOpacity
+                  style={[
+                    styles.chickenStrip,
+                    { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' },
+                  ]}
+                  onPress={handleFarmPress}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.chickenStripIcon, { backgroundColor: colors.primary + '20' }]}>
+                    <FarmIcon size={14} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.chickenStripText, { color: colors.primary }]} numberOfLines={1}>
+                    View Farms & Flock
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+
+              {!hasChicken && !isProfile && !isFarm && isTask && (
+                <TouchableOpacity
+                  style={[
+                    styles.chickenStrip,
+                    { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' },
+                  ]}
+                  onPress={handleTasksPress}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.chickenStripIcon, { backgroundColor: colors.primary + '20' }]}>
+                    <Ionicons name="checkbox-outline" size={14} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.chickenStripText, { color: colors.primary }]} numberOfLines={1}>
+                    View Scheduled Tasks
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+
               <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
               <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.dismissButton} onPress={onClose} activeOpacity={0.7}>
+                <TouchableOpacity
+                  style={styles.dismissButton}
+                  onPress={onClose}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  activeOpacity={0.7}
+                >
                   <Text style={[styles.dismissText, { color: colors.textLight }]}>Dismiss</Text>
                 </TouchableOpacity>
-                {notification.chickenId ? (
+
+                {hasChicken ? (
                   <TouchableOpacity
                     style={[styles.viewButton, { backgroundColor: colors.primary }]}
-                    onPress={() => onViewChicken(notification.chickenId!)}
+                    onPress={handleChickenPress}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     activeOpacity={0.85}
                   >
                     <Text style={styles.viewButtonText}>View Chicken</Text>
+                  </TouchableOpacity>
+                ) : isProfile ? (
+                  <TouchableOpacity
+                    style={[styles.viewButton, { backgroundColor: '#2196F3' }]}
+                    onPress={handleProfilePress}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.viewButtonText}>View Profile</Text>
+                  </TouchableOpacity>
+                ) : isFarm ? (
+                  <TouchableOpacity
+                    style={[styles.viewButton, { backgroundColor: colors.primary }]}
+                    onPress={handleFarmPress}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.viewButtonText}>View Farm</Text>
+                  </TouchableOpacity>
+                ) : isTask ? (
+                  <TouchableOpacity
+                    style={[styles.viewButton, { backgroundColor: colors.primary }]}
+                    onPress={handleTasksPress}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.viewButtonText}>View Tasks</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
                     style={[styles.viewButton, { backgroundColor: colors.primary }]}
                     onPress={onClose}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     activeOpacity={0.85}
                   >
                     <Text style={styles.viewButtonText}>Got it</Text>

@@ -3,10 +3,12 @@ import { NotificationItem } from '@/context/NotificationContext';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import ChickenIcon from './ChickenIcon';
+import FarmIcon from './FarmIcon';
 import {
     Animated,
     Dimensions,
     Modal,
+    PanResponder,
     Platform,
     ScrollView,
     StyleSheet,
@@ -48,7 +50,7 @@ const getStatusBadge = (type: NotificationItem['type']) => {
 const getMainIcon = (notification: NotificationItem) => {
   const title = notification.title.toLowerCase();
   if (title.includes('farm')) {
-    return { render: (color: string) => <Ionicons name="home-outline" size={18} color={color} />, bg: '#2E7D32' };
+    return { render: (color: string) => <FarmIcon size={18} color={color} />, bg: '#2E7D32' };
   }
   if (title.includes('profile')) {
     return { render: (color: string) => <Ionicons name="person-outline" size={18} color={color} />, bg: '#2196F3' };
@@ -94,6 +96,35 @@ export default function NotificationsListModal({
     }
   }, [visible]);
 
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy > 5;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.setValue(gestureState.dy);
+          const progress = Math.min(gestureState.dy / 250, 1);
+          backdropOpacity.setValue(1 - progress * 0.7);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+          Animated.parallel([
+            Animated.timing(translateY, { toValue: SCREEN_HEIGHT, duration: 200, useNativeDriver: true }),
+            Animated.timing(backdropOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+          ]).start(() => onClose());
+        } else {
+          Animated.parallel([
+            Animated.spring(translateY, { toValue: 0, damping: 18, stiffness: 160, useNativeDriver: true }),
+            Animated.timing(backdropOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+          ]).start();
+        }
+      },
+    })
+  ).current;
+
   const [confirmVisible, setConfirmVisible] = useState(false);
 
   const handleClose = () => {
@@ -131,28 +162,31 @@ export default function NotificationsListModal({
             },
           ]}
         >
-          <View style={styles.handleWrap}>
-            <View style={[styles.handle, { backgroundColor: colors.divider }]} />
-          </View>
+          {/* Draggable handle & header to support slide-down dismissal gesture */}
+          <View {...panResponder.panHandlers}>
+            <View style={styles.handleWrap}>
+              <View style={[styles.handle, { backgroundColor: colors.divider }]} />
+            </View>
 
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={[styles.headerIcon, { backgroundColor: colors.primary + '15' }]}>
-              <Ionicons name="notifications" size={20} color={colors.primary} />
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={[styles.headerIcon, { backgroundColor: colors.primary + '15' }]}>
+                <Ionicons name="notifications" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Notifications</Text>
+                <Text style={[styles.headerSubtitle, { color: colors.textLight }]}>
+                  Stay updated with your flock and account activity.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.closeButton, { backgroundColor: isDarkMode ? colors.divider : '#F1F1F1' }]}
+                onPress={handleClose}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
             </View>
-            <View style={styles.headerText}>
-              <Text style={[styles.headerTitle, { color: colors.text }]}>Notifications</Text>
-              <Text style={[styles.headerSubtitle, { color: colors.textLight }]}>
-                Stay updated with your flock and account activity.
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.closeButton, { backgroundColor: isDarkMode ? colors.divider : '#F1F1F1' }]}
-              onPress={handleClose}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={18} color={colors.text} />
-            </TouchableOpacity>
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />

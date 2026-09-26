@@ -3,7 +3,7 @@ import { NotificationItem, useNotifications } from '@/context/NotificationContex
 import { getHealthStatus } from '@/utils/birdStatus';
 import { loadChickensForCurrentUser } from '@/utils/chickenStorage';
 import { loadFarms } from '@/utils/farms';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
 import * as FileSystem from 'expo-file-system/legacy';
@@ -32,9 +32,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AboutUsModal from '../../components/ui/AboutUsModal';
+import FarmIcon from '../../components/ui/FarmIcon';
 import LogoutConfirmModal from '../../components/ui/LogoutConfirmModal';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
-import { apiGetFarms, apiGetProfile, apiUpdateProfile } from '../../lib/api';
+import { apiGetFarms, apiGetProfile, apiLogout, apiUpdateProfile, apiGetMyPlan } from '../../lib/api';
 
 const GENERIC_PROFILE_KEY = 'userProfile';
 const GENERIC_LAST_NOTIF_CHECK_KEY = 'lastNotifCheck';
@@ -81,12 +82,13 @@ const pluralize = (count: number, singular: string, plural: string = `${singular
   count === 1 ? singular : plural;
 
 export default function ProfileScreen() {
-  const { colors, isDarkMode, toggleDarkMode } = useDarkMode();
+  const { colors, isDarkMode, toggleDarkMode, loadDarkModePreference } = useDarkMode();
   const {
     notifications,
     unreadCount,
     notify,
     showDetail,
+    markAsRead,
     markAllAsRead,
     clearAllNotifications,
     deleteNotification,
@@ -98,6 +100,7 @@ export default function ProfileScreen() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
 
   const [profile, setProfile] = useState({
     fullName: 'User',
@@ -163,6 +166,25 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState({ totalFarms: 0, users: 1, alerts: 0 });
   const [farmsList, setFarmsList] = useState<any[]>([]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [showFarmPickerForCaretakers, setShowFarmPickerForCaretakers] = useState(false);
+
+  const handleConnectedUsersPress = () => {
+    if (profile.role === 'Caretaker') {
+      if (farmsList[0]?.id) {
+        router.push(`/farm/${farmsList[0].id}?tab=caretakers`);
+      }
+      return;
+    }
+
+    // Owner role
+    if (farmsList.length === 0) {
+      router.push('/farm');
+    } else if (farmsList.length === 1) {
+      router.push(`/farm/${farmsList[0].id}?tab=caretakers`);
+    } else {
+      setShowFarmPickerForCaretakers(true);
+    }
+  };
 
   // Farms count and connected users read through apiGetFarms(), and alerts read through
   // loadChickensForCurrentUser() — dynamic and accurate for both Owner and Caretaker roles.
@@ -303,6 +325,15 @@ export default function ProfileScreen() {
       setProfile(freshProfile);
       setEditedProfile(freshProfile);
       await loadStats(roleDisplay);
+
+      try {
+        const planRes = await apiGetMyPlan();
+        if (planRes && planRes.subscription) {
+          setSubscription(planRes.subscription);
+        }
+      } catch (err) {
+        console.warn('Could not load plan in profile:', err);
+      }
     } catch (error) {
       console.error('Error loading profile:', error);
     }
@@ -477,10 +508,8 @@ export default function ProfileScreen() {
 
   const handleLogoutConfirm = async () => {
     try {
-      await AsyncStorage.setItem('isLoggedIn', 'false');
-      await AsyncStorage.removeItem('userName');
-      await AsyncStorage.removeItem('userEmail');
-      await AsyncStorage.removeItem('userPhone');
+      await apiLogout();
+      await loadDarkModePreference();
       setShowLogoutModal(false);
       router.replace('/login');
     } catch (error) {
@@ -494,9 +523,9 @@ export default function ProfileScreen() {
     }
   };
 
-  const FieldIcon = ({ icon, tint }: { icon: any; tint?: string }) => (
+  const FieldIcon = ({ icon, tint, customIcon }: { icon?: any; tint?: string; customIcon?: React.ReactNode }) => (
     <View style={[styles.fieldIconChip, { backgroundColor: (tint || colors.primary) + '18' }]}>
-      <Ionicons name={icon} size={15} color={tint || colors.primary} />
+      {customIcon ? customIcon : <Ionicons name={icon} size={15} color={tint || colors.primary} />}
     </View>
   );
 
@@ -566,11 +595,47 @@ export default function ProfileScreen() {
           ) : (
             <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>{profile.fullName}</Text>
           )}
-          <View style={[styles.roleBadge, { backgroundColor: colors.primary + '18' }]}>
-            <View style={[styles.roleBadgeDot, { backgroundColor: colors.primary }]} />
-            <Text style={[styles.roleBadgeText, { color: colors.primary }]} numberOfLines={1}>
-              {profile.role}
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
+            <View style={[styles.roleBadge, { backgroundColor: colors.primary + '18' }]}>
+              <View style={[styles.roleBadgeDot, { backgroundColor: colors.primary }]} />
+              <Text style={[styles.roleBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                {profile.role}
+              </Text>
+            </View>
+
+            {subscription && (
+              <TouchableOpacity
+                style={[
+                  styles.roleBadge,
+                  {
+                    backgroundColor: subscription.plan === 'premium' ? '#FEF3C7' : subscription.plan === 'pro' ? '#E8F5E9' : subscription.is_in_grace_period ? '#FFF3E0' : '#EDE7F6',
+                    borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? '#2E7D32' : subscription.is_in_grace_period ? '#FF9800' : '#7C3AED',
+                    borderWidth: 1,
+                  }
+                ]}
+                onPress={() => router.push('/subscription')}
+                activeOpacity={0.8}
+              >
+                <FontAwesome5
+                  name={subscription.plan === 'premium' ? 'crown' : subscription.plan === 'pro' ? 'award' : 'seedling'}
+                  size={11}
+                  color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? '#2E7D32' : subscription.is_in_grace_period ? '#E65100' : '#7C3AED'}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.roleBadgeText,
+                    {
+                      color: subscription.plan === 'premium' ? '#B45309' : subscription.plan === 'pro' ? '#1B5E20' : subscription.is_in_grace_period ? '#C2410C' : '#6D28D9',
+                      fontWeight: '700'
+                    }
+                  ]}
+                  numberOfLines={1}
+                >
+                  {subscription.is_in_grace_period ? `Grace Period (${subscription.grace_days_remaining}d)` : subscription.plan_name}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {isEditing ? (
@@ -592,7 +657,7 @@ export default function ProfileScreen() {
           <View style={[styles.statsRow, { borderTopColor: colors.divider }]}>
             <View style={styles.statItem}>
               <View style={[styles.statIconCircle, { backgroundColor: colors.primary + '18' }]}>
-                <Ionicons name="home-outline" size={15} color={colors.primary} />
+                <FarmIcon size={16} color={colors.primary} />
               </View>
               <Text style={[styles.statValue, { color: colors.text }]}>{stats.totalFarms}</Text>
               <Text style={[styles.statLabel, { color: colors.textLight }]}>{pluralize(stats.totalFarms, 'Farm')} </Text>
@@ -688,6 +753,75 @@ export default function ProfileScreen() {
               </View>
             </View>
 
+            {/* Subscription & Quota Card */}
+            <TouchableOpacity
+              style={[styles.card, { backgroundColor: colors.card }]}
+              onPress={() => router.push('/subscription')}
+              activeOpacity={0.85}
+            >
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Subscription</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.primary }}>Manage</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                </View>
+              </View>
+
+              <View style={[styles.infoRow, { borderBottomColor: colors.divider }]}>
+                <View style={styles.infoLeft}>
+                  <FieldIcon icon="ribbon-outline" tint="#2E7D32" />
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>Current Plan</Text>
+                </View>
+                <Text style={[styles.infoValue, { color: colors.text, fontWeight: '700' }]}>
+                  {subscription?.plan_name || 'Free Trial'}
+                </Text>
+              </View>
+
+              <View style={[styles.infoRow, { borderBottomColor: colors.divider }]}>
+                <View style={styles.infoLeft}>
+                  <FieldIcon customIcon={<FarmIcon size={15} color="#2196F3" />} tint="#2196F3" />
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>Farms Quota</Text>
+                </View>
+                <Text style={[styles.infoValue, { color: colors.text }]}>
+                  {subscription?.usage?.farms_count || 0} / {subscription?.limits?.max_farms >= 999999 ? 'Unlimited' : subscription?.limits?.max_farms || 1}
+                </Text>
+              </View>
+
+              <View style={[styles.infoRow, { borderBottomColor: colors.divider }]}>
+                <View style={styles.infoLeft}>
+                  <FieldIcon icon="scan-outline" tint="#8B5CF6" />
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>Scan Quota</Text>
+                </View>
+                <Text style={[styles.infoValue, { color: colors.text }]}>
+                  {subscription?.limits?.max_captures >= 999999 ? 'Unlimited' : `${subscription?.usage?.captures_count || 0} / ${subscription?.limits?.max_captures || 30}`}
+                </Text>
+              </View>
+
+              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                <View style={styles.infoLeft}>
+                  <FieldIcon icon="time-outline" tint="#FF9800" />
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>Plan Status</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color: subscription?.is_in_grace_period ? '#E65100' : subscription?.is_expired ? '#C62828' : '#2E7D32',
+                      fontWeight: '700'
+                    }
+                  ]}
+                >
+                  {subscription?.is_in_grace_period
+                    ? `Grace Period (${subscription.grace_days_remaining}d left)`
+                    : subscription?.is_expired
+                    ? 'Expired'
+                    : subscription?.days_remaining !== undefined
+                    ? `Active (${subscription.days_remaining}d left)`
+                    : 'Active'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             <View style={[styles.card, { backgroundColor: colors.card }]}>
               <View style={styles.cardHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -735,17 +869,47 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     disabled={isEditing}
                     activeOpacity={0.7}
-                    onPress={() => router.push('/farm')}
+                    onPress={handleConnectedUsersPress}
                     style={[styles.infoRow, { borderBottomWidth: 0 }]}
                   >
                     <View style={styles.infoLeft}>
-                      <FieldIcon icon="people-outline" tint="#2196F3" />
+                      <View style={{ position: 'relative' }}>
+                        <FieldIcon icon="people-outline" tint="#2196F3" />
+                        {/* Green circle indicator if caretaker is online right now, grey if all offline */}
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: -2,
+                            right: -2,
+                            width: 10,
+                            height: 10,
+                            borderRadius: 5,
+                            backgroundColor: farmsList.some((f: any) => (Number(f.online_caretaker_count) || 0) > 0)
+                              ? '#4CAF50'
+                              : '#9E9E9E',
+                            borderWidth: 2,
+                            borderColor: colors.card,
+                          }}
+                        />
+                      </View>
                       <Text style={[styles.infoLabel, { color: colors.textLight }]} numberOfLines={1}>
                         Connected Users{' '}
                       </Text>
                     </View>
                     <View style={styles.infoValueRow}>
-                      <Text style={[styles.infoValue, { color: colors.text }]}>{stats.users}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: 3.5,
+                            backgroundColor: farmsList.some((f: any) => (Number(f.online_caretaker_count) || 0) > 0)
+                              ? '#4CAF50'
+                              : '#9E9E9E',
+                          }}
+                        />
+                        <Text style={[styles.infoValue, { color: colors.text }]}>{stats.users}</Text>
+                      </View>
                       <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
                     </View>
                   </TouchableOpacity>
@@ -764,7 +928,7 @@ export default function ProfileScreen() {
                     style={[styles.infoRow, { borderBottomColor: colors.divider }]}
                   >
                     <View style={styles.infoLeft}>
-                      <FieldIcon icon="business-outline" />
+                      <FieldIcon customIcon={<FarmIcon size={15} color={colors.primary} />} />
                       <Text style={[styles.infoLabel, { color: colors.textLight }]}>Farm Name </Text>
                     </View>
                     <View style={styles.infoValueRow}>
@@ -800,17 +964,13 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     disabled={isEditing || !farmsList[0]?.id}
                     activeOpacity={0.7}
-                    onPress={() => {
-                      if (farmsList[0]?.id) {
-                        router.push(`/farm/${farmsList[0].id}`);
-                      }
-                    }}
+                    onPress={handleConnectedUsersPress}
                     style={[styles.infoRow, { borderBottomWidth: 0 }]}
                   >
                     <View style={styles.infoLeft}>
                       <FieldIcon icon="people-outline" tint="#2196F3" />
                       <Text style={[styles.infoLabel, { color: colors.textLight }]} numberOfLines={1}>
-                        Team Members{' '}
+                        Connected Users{' '}
                       </Text>
                     </View>
                     <View style={styles.infoValueRow}>
@@ -911,11 +1071,34 @@ export default function ProfileScreen() {
         onClose={() => setShowNotifications(false)}
         onMarkAllAsRead={markAllAsRead}
         onClearAll={clearAllNotifications}
-        onDismissOne={deleteNotification}
         onPressNotification={(notification) => {
-          setShowNotifications(false);
-          handleNotificationPress(notification);
+          markAsRead(notification.id);
+          if (notification.chickenId) {
+            setShowNotifications(false);
+            router.push(`/chicken/${notification.chickenId}`);
+          } else if (
+            (notification.title || '').toLowerCase().includes('task') ||
+            (notification.message || '').toLowerCase().includes('task')
+          ) {
+            setShowNotifications(false);
+            router.push('/tasks');
+          } else if (
+            (notification.title || '').toLowerCase().includes('farm') ||
+            (notification.message || '').toLowerCase().includes('farm')
+          ) {
+            setShowNotifications(false);
+            router.push('/farm');
+          } else if (
+            (notification.title || '').toLowerCase().includes('profile') ||
+            (notification.message || '').toLowerCase().includes('profile')
+          ) {
+            setShowNotifications(false);
+          } else {
+            // No redirection needed (e.g. login "Welcome Back")
+            // Automatically marked as read/done. Do NOT show notification detail again!
+          }
         }}
+        onDismissOne={deleteNotification}
       />
 
       <Modal
@@ -980,6 +1163,73 @@ export default function ProfileScreen() {
         onClose={() => setShowAboutModal(false)}
         isDarkMode={isDarkMode}
       />
+
+      {/* Farm Picker Modal for Viewing Caretakers */}
+      <Modal
+        visible={showFarmPickerForCaretakers}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFarmPickerForCaretakers(false)}
+      >
+        <TouchableOpacity
+          style={styles.farmPickerBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowFarmPickerForCaretakers(false)}
+        >
+          <View
+            style={[
+              styles.farmPickerModal,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={[styles.farmPickerHeader, { borderBottomColor: colors.divider }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.farmPickerTitle, { color: colors.text }]}>Select Farm</Text>
+                <Text style={[styles.farmPickerSubtitle, { color: colors.textLight }]}>
+                  Choose a farm to view its caretakers
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowFarmPickerForCaretakers(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={22} color={colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {farmsList.map((f: any, index: number) => (
+                <TouchableOpacity
+                  key={f.id}
+                  style={[
+                    styles.farmPickerItem,
+                    { borderBottomColor: colors.divider },
+                    index === farmsList.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                  onPress={() => {
+                    setShowFarmPickerForCaretakers(false);
+                    router.push(`/farm/${f.id}?tab=caretakers`);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.farmPickerIcon, { backgroundColor: colors.primary + '18' }]}>
+                    <FarmIcon size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.farmPickerItemName, { color: colors.text }]} numberOfLines={1}>
+                      {f.farm_name}
+                    </Text>
+                    <Text style={[styles.farmPickerItemLocation, { color: colors.textLight }]} numberOfLines={1}>
+                      {f.farm_location || 'No location set'} · {f.caretaker_count || 0} caretakers
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -998,6 +1248,64 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'ios' ? 50 : 40,
     paddingBottom: 8,
+  },
+
+  farmPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  farmPickerModal: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  farmPickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    marginBottom: 8,
+  },
+  farmPickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  farmPickerSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  farmPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  farmPickerIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  farmPickerItemName: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  farmPickerItemLocation: {
+    fontSize: 12,
+    marginTop: 2,
   },
   topBarTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
   topBarBell: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', position: 'relative' },

@@ -15,6 +15,7 @@ export interface GoogleAuthResult {
   error?: string;
   isNotConfigured?: boolean;
   user?: any;
+  subscription?: any;
 }
 
 /**
@@ -73,6 +74,13 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
       };
     }
 
+    if (url.includes('error=access_denied') || url.includes('error=org_internal')) {
+      return {
+        success: false,
+        error: 'Google Sign-In was blocked. For deployment, make sure to change your Google Cloud Console OAuth consent screen status from "Testing" to "In production" (Publish App) so all users can sign in without needing to be added to test users.',
+      };
+    }
+
     let accessToken: string | null = null;
 
     if (url.includes('#')) {
@@ -126,6 +134,7 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
     return {
       success: true,
       user: backendResult.user,
+      subscription: backendResult.subscription,
     };
   } catch (err: any) {
     console.error('Google Sign-In Error:', err);

@@ -87,6 +87,21 @@ def signup():
                     INSERT INTO farm_members (farm_id, user_id, role)
                     VALUES (%s, %s, 'owner')
                 ''', (farm_id, user_id))
+
+                # Auto-provision 30-Day Free Trial
+                now = datetime.utcnow()
+                trial_end = now + timedelta(days=30)
+                trial_grace = trial_end + timedelta(days=7)
+                cur.execute('''
+                    INSERT INTO subscriptions
+                    (user_id, plan, status, price_paid, currency, payment_gateway,
+                     max_farms, max_chickens_per_farm, max_captures, captures_used,
+                     free_trial_used, start_date, end_date, grace_period_end)
+                    VALUES (%s, 'free_trial', 'active', 0.00, 'PHP', 'system',
+                            1, 20, 30, 0, TRUE, %s, %s, %s)
+                    ON CONFLICT (user_id) DO NOTHING
+                ''', (user_id, now, trial_end, trial_grace))
+
                 db.commit()
                 role = 'owner'
 
@@ -139,8 +154,10 @@ def record_login_notification(cur, db, user):
                     VALUES (%s, %s, %s, %s, 'info', NULL, NULL)
                 ''', (fid, user_id, title, msg))
         db.commit()
+        return {'title': title, 'message': msg, 'type': 'info'}
     except Exception as e:
         print(f"[AUTH] Login notification warning: {e}")
+        return None
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -160,7 +177,28 @@ def login():
             if not user:
                 return jsonify({'error': 'Invalid email or password'}), 401
 
-            record_login_notification(cur, db, user)
+            # Check if user account is deactivated
+            if user.get('is_active') is False:
+                return jsonify({'error': 'Your account has been deactivated. Please contact your farm owner.'}), 403
+
+            # For caretakers, verify active farm membership
+            if user.get('role') == 'caretaker':
+                cur.execute('''
+                    SELECT fm.id, fm.is_active as member_active
+                    FROM farm_members fm
+                    WHERE fm.user_id = %s
+                ''', (user['id'],))
+                memberships = cur.fetchall()
+                if not memberships:
+                    return jsonify({'error': 'You are no longer assigned to any farm. Please contact your farm owner.'}), 403
+                
+                has_active = any(m.get('member_active') is not False for m in memberships)
+                if not has_active:
+                    return jsonify({'error': 'Your caretaker account has been deactivated. Please contact your farm owner.'}), 403
+
+            notif = record_login_notification(cur, db, user)
+            from routes_subscriptions import get_effective_subscription
+            sub_info = get_effective_subscription(user['id'], cur, db)
 
         token = jwt.encode({
             'user_id': user['id'],
@@ -168,7 +206,13 @@ def login():
         }, SECRET_KEY, algorithm='HS256')
 
         user.pop('password_hash', None)
-        return jsonify({'success': True, 'token': token, 'user': user})
+        return jsonify({
+            'success': True,
+            'token': token,
+            'user': user,
+            'notification': notif,
+            'subscription': sub_info
+        })
     finally:
         db.close()
 
@@ -196,10 +240,14 @@ def google_auth():
 
             if user:
                 # Existing user logging in
+                if user.get('is_active') is False:
+                    return jsonify({'error': 'Your account has been deactivated. Please contact your farm owner.'}), 403
                 user_id = user['id']
                 role = user.get('role') or 'owner'
+                is_new_user = False
             else:
                 # New user registering via Google OAuth
+                is_new_user = True
                 random_pw = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
                 pw_hash = hashlib.sha256(random_pw.encode()).hexdigest()
 
@@ -230,14 +278,36 @@ def google_auth():
                     INSERT INTO farm_members (farm_id, user_id, role)
                     VALUES (%s, %s, 'owner')
                 ''', (farm_id, user_id))
+
+                # Auto-provision 30-day Free Trial for new Google users
+                now = datetime.utcnow()
+                trial_end = now + timedelta(days=30)
+                trial_grace = trial_end + timedelta(days=7)
+                cur.execute('''
+                    INSERT INTO subscriptions
+                    (user_id, plan, status, price_paid, currency, payment_gateway,
+                     max_farms, max_chickens_per_farm, max_captures, captures_used,
+                     free_trial_used, start_date, end_date, grace_period_end)
+                    VALUES (%s, 'free_trial', 'active', 0.00, 'PHP', 'google_oauth',
+                            1, 20, 30, 0, TRUE, %s, %s, %s)
+                    ON CONFLICT (user_id) DO NOTHING
+                ''', (user_id, now, trial_end, trial_grace))
+
+                if d.get('picture'):
+                    cur.execute('UPDATE users SET profile_image=%s WHERE id=%s', (d['picture'], user_id))
+
                 db.commit()
                 role = 'owner'
 
                 cur.execute('SELECT * FROM users WHERE id=%s', (user_id,))
                 user = cur.fetchone()
 
+            notif = None
             if user:
-                record_login_notification(cur, db, user)
+                notif = record_login_notification(cur, db, user)
+
+            from routes_subscriptions import get_effective_subscription
+            sub_info = get_effective_subscription(user_id, cur, db)
 
         token = jwt.encode({
             'user_id': user_id,
@@ -252,7 +322,10 @@ def google_auth():
             'token': token,
             'user_id': user_id,
             'role': role,
-            'user': user
+            'user': user,
+            'is_new_user': is_new_user,
+            'notification': notif,
+            'subscription': sub_info
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -331,10 +404,21 @@ def get_profile():
     db = get_db()
     try:
         with db.cursor() as cur:
-            cur.execute('SELECT id,first_name,last_name,email,phone_number,profile_image,farm_name,farm_location,role,created_at FROM users WHERE id=%s', (request.user_id,))
+            cur.execute('SELECT id,first_name,last_name,email,phone_number,profile_image,farm_name,farm_location,role,is_active,created_at FROM users WHERE id=%s', (request.user_id,))
             user = cur.fetchone()
             if not user:
                 return jsonify({'error': 'User not found'}), 404
+
+            if user.get('is_active') is False:
+                return jsonify({'error': 'Your account has been deactivated. Please contact your farm owner.'}), 403
+
+            if user.get('role') == 'caretaker':
+                cur.execute('SELECT fm.is_active FROM farm_members fm WHERE fm.user_id=%s', (request.user_id,))
+                memberships = cur.fetchall()
+                if not memberships:
+                    return jsonify({'error': 'You are no longer assigned to any farm. Please contact your farm owner.'}), 403
+                if not any(m.get('is_active') is not False for m in memberships):
+                    return jsonify({'error': 'Your caretaker account has been deactivated. Please contact your farm owner.'}), 403
 
             # If user has no explicit farm_name or farm_location, resolve dynamically from farms / farm_members
             if not user.get('farm_name'):

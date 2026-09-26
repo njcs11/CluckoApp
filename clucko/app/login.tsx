@@ -28,7 +28,7 @@ const { width } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { colors, isDarkMode } = useDarkMode();
+  const { colors, isDarkMode, loadDarkModePreference } = useDarkMode();
   const { notify } = useNotifications();
 
   const [email, setEmail] = useState('');
@@ -118,20 +118,31 @@ export default function LoginScreen() {
     setLoading(true);
     setLoginError('');
     try {
-      await apiLogin(cleanEmail, password);
+      const loginRes = await apiLogin(cleanEmail, password);
       // Remember email for subsequent logins
       await AsyncStorage.setItem('last_login_email', cleanEmail);
-      
+      if (loginRes?.user?.id) {
+        await loadDarkModePreference(String(loginRes.user.id));
+      }
+
+      const notif = loginRes?.notification;
+      const user = loginRes?.user;
+      const fullName = `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || user?.first_name || 'User';
+      const role = (user?.role || 'member').charAt(0).toUpperCase() + (user?.role || 'member').slice(1).toLowerCase();
+
       notify({
-        title: 'Welcome Back!',
-        message: 'Successfully logged in to your account.',
-        type: 'success',
+        title: notif?.title || `Welcome Back, ${fullName}!`,
+        message: notif?.message || `${fullName} (${role}) logged in.`,
+        type: 'info',
+        skipBackendSync: true,
       });
       router.replace('/(tabs)/home');
     } catch (err: any) {
       triggerShake();
       const rawMsg = err?.message || '';
-      if (rawMsg.toLowerCase().includes('invalid') || rawMsg.toLowerCase().includes('credentials') || rawMsg.toLowerCase().includes('password')) {
+      if (rawMsg.toLowerCase().includes('deactivat') || rawMsg.toLowerCase().includes('no longer assigned')) {
+        setLoginError(rawMsg);
+      } else if (rawMsg.toLowerCase().includes('invalid') || rawMsg.toLowerCase().includes('credentials') || rawMsg.toLowerCase().includes('password')) {
         setLoginError('Incorrect email or password. Please verify your credentials or reset your password.');
       } else if (rawMsg.toLowerCase().includes('network') || rawMsg.toLowerCase().includes('connection') || rawMsg.toLowerCase().includes('fetch')) {
         setLoginError('Unable to reach server. Please check your internet connection or server settings.');
@@ -148,10 +159,20 @@ export default function LoginScreen() {
     try {
       const res = await performGoogleSignIn();
       if (res.success) {
+        if (res?.user?.id) {
+          await loadDarkModePreference(String(res.user.id));
+        }
+
+        const notif = (res as any)?.notification;
+        const user = res?.user;
+        const fullName = `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || user?.first_name || 'Google User';
+        const role = (user?.role || 'owner').charAt(0).toUpperCase() + (user?.role || 'owner').slice(1).toLowerCase();
+
         notify({
-          title: 'Welcome!',
-          message: `Signed in successfully as ${res.user?.first_name || 'Google User'}.`,
-          type: 'success',
+          title: notif?.title || `Welcome Back, ${fullName}!`,
+          message: notif?.message || `${fullName} (${role}) logged in.`,
+          type: 'info',
+          skipBackendSync: true,
         });
         router.replace('/(tabs)/home');
       } else if (res.isNotConfigured) {

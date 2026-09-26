@@ -3,15 +3,19 @@ import { useNotifications } from '@/context/NotificationContext';
 import { deleteChickenForCurrentUser, loadChickensForCurrentUser, updateChickenForCurrentUser } from '@/utils/chickenStorage';
 import { Farm, getFarmName, loadFarms } from '@/utils/farms';
 import { persistChickenPhoto } from '@/utils/photoStorage';
+import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
 import { apiGetChickenHistory } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
+import { File as ExpoFile, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,17 +25,21 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ConfidenceBadge from '../../components/ui/ConfidenceBadge';
 import ChickenIcon from '../../components/ui/ChickenIcon';
+import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 
+const ExpoFileAny = ExpoFile as any;
 const { width } = Dimensions.get('window');
 
 
@@ -53,6 +61,99 @@ export default function ChickenDetailScreen() {
   const [menuStep, setMenuStep] = useState<'menu' | 'confirmDelete'>('menu');
   const [deleting, setDeleting] = useState(false);
 
+  // --- QR Tag Modal State & Handlers ---
+  const [showQrModal, setShowQrModal] = useState(false);
+  const qrRef = useRef<any>(null);
+
+  const captureQrToFile = async (): Promise<string | null> => {
+    if (!qrRef.current || !chicken) return null;
+
+    return new Promise((resolve) => {
+      qrRef.current.toDataURL(async (base64Data: string) => {
+        try {
+          const file = new ExpoFileAny(Paths.cache, `chicken-qr-${chicken.chickenId || chicken.id}.png`);
+          await file.write(base64Data, { encoding: 'base64' });
+          resolve(file.uri);
+        } catch (error) {
+          console.error('Error writing QR file:', error);
+          resolve(null);
+        }
+      });
+    });
+  };
+
+  const handleShareQR = async () => {
+    try {
+      const fileUri = await captureQrToFile();
+      if (!fileUri) {
+        notify({
+          title: 'Share Failed',
+          message: 'Could not prepare the QR code for sharing.',
+          type: 'alert',
+        });
+        return;
+      }
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'image/png',
+          dialogTitle: `Share ${chicken?.name}'s QR Code`,
+        });
+      } else {
+        await Share.share({
+          message: `Chicken QR Tag for ${chicken?.name}\nID: ${chicken?.chickenId || chicken?.id}\nFarm: ${getFarmName(farms, chicken?.farmId)}`,
+          title: 'Share Chicken QR Code',
+        });
+      }
+    } catch (error) {
+      console.error('Error sharing QR code:', error);
+      notify({
+        title: 'Share Failed',
+        message: 'Could not share QR code.',
+        type: 'alert',
+      });
+    }
+  };
+
+  const handleDownloadQR = async () => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        notify({
+          title: 'Permission Needed',
+          message: 'Please allow photo library access to save the QR code.',
+          type: 'warning',
+        });
+        return;
+      }
+
+      const fileUri = await captureQrToFile();
+      if (!fileUri) {
+        notify({
+          title: 'Download Failed',
+          message: 'Could not prepare the QR code to save.',
+          type: 'alert',
+        });
+        return;
+      }
+
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      notify({
+        title: 'QR Code Saved',
+        message: 'QR code image saved to your device gallery.',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving QR code:', error);
+      notify({
+        title: 'Save Failed',
+        message: 'Could not save QR code to your device.',
+        type: 'alert',
+      });
+    }
+  };
+
   // --- Edit chicken state ---
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<ChickenFormData>({ name: '', photo: null, farmId: null });
@@ -67,6 +168,21 @@ export default function ChickenDetailScreen() {
     setGuestModalVisible(true);
   };
 
+  // Safely parse timestamps from MySQL/Flask without GMT offset shift
+  const parseLocalDate = (raw: any): Date => {
+    if (!raw) return new Date();
+    if (typeof raw === 'string') {
+      // If backend sent a string ending with " GMT" or "Z" for a local timestamp,
+      // strip the suffix so JavaScript parses it in the device's local timezone
+      // instead of adding +8 hours and jumping into the next day.
+      const cleaned = raw.replace(/\s*GMT$/i, '').replace(/Z$/i, '');
+      const d = new Date(cleaned);
+      if (!isNaN(d.getTime())) return d;
+    }
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? new Date() : d;
+  };
+
   // Fetches this chicken's real scan/detection history from the backend
   // (health_history table). recorded_at is the actual scan timestamp —
   // used both for the Capture History tab and to compute "Last Check"
@@ -79,7 +195,7 @@ export default function ChickenDetailScreen() {
         const status = severity === 'critical' ? 'critical' : severity === 'none' ? 'healthy' : 'warning';
         return {
           id: String(h.id),
-          date: h.recorded_at ? new Date(h.recorded_at) : new Date(),
+          date: h.recorded_at ? parseLocalDate(h.recorded_at) : new Date(),
           disease: h.disease_name || null,
           confidence: h.confidence_score != null ? Math.round(h.confidence_score) : 0,
           status,
@@ -123,8 +239,37 @@ export default function ChickenDetailScreen() {
   const loadChickenDetails = async () => {
     setLoading(true);
     try {
-      const chickens = await loadChickensForCurrentUser();
-      const found = (chickens || []).find((c: any) => c.id === id || c.chickenId === id);
+      const isGuest = await checkIsGuestMode();
+      setIsGuestMode(isGuest);
+
+      const targetId = String(id || '').trim();
+      let found: any = null;
+
+      if (isGuest) {
+        found = (GUEST_SAMPLE_CHICKENS || []).find(
+          (c: any) =>
+            String(c.id) === targetId ||
+            String(c.chickenId).toLowerCase() === targetId.toLowerCase() ||
+            (c.qr_code && String(c.qr_code).toLowerCase() === targetId.toLowerCase())
+        );
+      } else {
+        const chickens = await loadChickensForCurrentUser();
+        found = (chickens || []).find(
+          (c: any) =>
+            String(c.id) === targetId ||
+            String(c.chickenId).toLowerCase() === targetId.toLowerCase() ||
+            (c.qr_code && String(c.qr_code).toLowerCase() === targetId.toLowerCase())
+        );
+        // Fallback to guest sample chickens if not found (e.g. sample data from demo)
+        if (!found) {
+          found = (GUEST_SAMPLE_CHICKENS || []).find(
+            (c: any) =>
+              String(c.id) === targetId ||
+              String(c.chickenId).toLowerCase() === targetId.toLowerCase() ||
+              (c.qr_code && String(c.qr_code).toLowerCase() === targetId.toLowerCase())
+          );
+        }
+      }
       setChicken(found || null);
     } catch (error) {
       console.error('Error loading chicken:', error);
@@ -475,16 +620,21 @@ export default function ChickenDetailScreen() {
                 <Text style={[styles.statusChipText, { color: statusColor }]}>{chicken.status || chicken.healthStatus?.toUpperCase() || 'HEALTHY'}</Text>
               </View>
             </View>
-            <View style={styles.idBadge}>
+            <TouchableOpacity
+              style={styles.idBadge}
+              onPress={() => setShowQrModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="qr-code-outline" size={12} color="#666" style={{ marginRight: 3 }} />
               <Text style={styles.idBadgeText}>{chicken.chickenId || `CK-00${chicken.id}`}</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </LinearGradient>
 
         {/* Quick Stats Row - Compact */}
         <View style={styles.statsContainer}>
           <View style={[styles.statItem, { backgroundColor: colors.card }]}>
-            <Ionicons name="home-outline" size={18} color={colors.primary} />
+            <FarmIcon size={18} color={colors.primary} />
             <Text style={[styles.statValue, { color: colors.text, fontSize: 12, textAlign: 'center' }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>
               {getFarmName(farms, chicken.farmId)}
             </Text>
@@ -528,32 +678,66 @@ export default function ChickenDetailScreen() {
           ))}
         </View>
 
-        {/* Info Tab Content - Compact Grid (now 3 cards: Farm/Added/Last Check) */}
+        {/* Info Tab Content - 2x2 Grid (Farm, Date Added, Last Check, Added By) + Digital Chicken QR Tag */}
         {activeTab === 'info' && (
-          <View style={styles.infoGrid}>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="home-outline" size={20} color={colors.primary} />
+          <View>
+            <View style={styles.infoGrid}>
+              <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
+                <View style={styles.infoCardIcon}>
+                  <FarmIcon size={20} color={colors.primary} />
+                </View>
+                <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Farm</Text>
+                <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={3}>
+                  {getFarmName(farms, chicken.farmId)}
+                </Text>
               </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Farm</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={3}>
-                {getFarmName(farms, chicken.farmId)}
-              </Text>
-            </View>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+              <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
+                <View style={styles.infoCardIcon}>
+                  <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                </View>
+                <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Date Added</Text>
+                <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{addedLabel}</Text>
               </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Added</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{addedLabel}</Text>
-            </View>
-            <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
-              <View style={styles.infoCardIcon}>
-                <Ionicons name="medkit-outline" size={20} color={colors.primary} />
+              <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
+                <View style={styles.infoCardIcon}>
+                  <Ionicons name="medkit-outline" size={20} color={colors.primary} />
+                </View>
+                <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Last Check</Text>
+                <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{lastCheckLabel}</Text>
               </View>
-              <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Last Check</Text>
-              <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={2}>{lastCheckLabel}</Text>
+              <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
+                <View style={styles.infoCardIcon}>
+                  <Ionicons name="person-outline" size={20} color={colors.primary} />
+                </View>
+                <Text style={[styles.infoCardLabel, { color: colors.textLight }]}>Added By</Text>
+                <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={1}>
+                  {chicken.addedByName || 'Farm Owner'}
+                </Text>
+                <Text style={{ fontSize: 10, color: colors.textLight, marginTop: -2 }} numberOfLines={1}>
+                  ({chicken.addedByRole || 'Owner'})
+                </Text>
+              </View>
             </View>
+
+            {/* Digital Chicken QR Tag Card */}
+            <TouchableOpacity
+              style={[styles.qrTagCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => setShowQrModal(true)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.qrTagLeft}>
+                <View style={[styles.qrTagIconWrap, { backgroundColor: colors.primary + '18' }]}>
+                  <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.qrTagTitle, { color: colors.text }]}>Digital Chicken QR Tag</Text>
+                  <Text style={[styles.qrTagSubtitle, { color: colors.textSecondary }]}>
+                    Tap to view, save, or share tag
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
+            </TouchableOpacity>
           </View>
         )}
 
@@ -884,6 +1068,73 @@ export default function ChickenDetailScreen() {
                 <Text style={styles.scanModalDoneBtnText}>Done</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Chicken QR Tag Modal */}
+      <Modal animationType="fade" transparent visible={showQrModal} onRequestClose={() => setShowQrModal(false)}>
+        <View style={styles.qrModalOverlay}>
+          <View style={[styles.qrModalCard, { backgroundColor: colors.card, shadowColor: isDarkMode ? '#000' : '#333' }]}>
+            <View style={[styles.qrModalHeader, { borderBottomColor: colors.divider }]}>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={[styles.qrModalTitle, { color: colors.text }]}>Chicken Digital QR Tag</Text>
+                <Text style={[styles.qrModalSubtitle, { color: colors.textLight }]}>Official flock identification tag</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowQrModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={22} color={colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            {chicken && (
+              <ScrollView showsVerticalScrollIndicator={false} style={styles.qrModalBody} contentContainerStyle={{ paddingBottom: 16 }}>
+                <View style={[styles.qrCardContainer, { borderColor: colors.divider, backgroundColor: colors.background }]}>
+                  <View style={[styles.qrCodeWrapper, { borderColor: colors.border, backgroundColor: '#fff' }]}>
+                    <QRCode
+                      value={JSON.stringify({
+                        chickenId: chicken.chickenId || `CK-00${chicken.id}`,
+                        name: chicken.name,
+                        farmId: chicken.farmId,
+                      })}
+                      size={140}
+                      getRef={(c: any) => (qrRef.current = c)}
+                    />
+                  </View>
+                  <View style={styles.qrCardDetails}>
+                    <Text style={[styles.qrCardTag, { color: colors.textLight }]}>CHICKEN ID</Text>
+                    <Text style={[styles.qrCardId, { color: colors.text }]}>{chicken.chickenId || `CK-00${chicken.id}`}</Text>
+                    <Text style={[styles.qrCardName, { color: colors.text }]} numberOfLines={1}>{chicken.name}</Text>
+                    <Text style={[styles.qrCardFarm, { color: colors.textSecondary }]} numberOfLines={1}>{getFarmName(farms, chicken.farmId)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.qrActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.qrActionButton, { backgroundColor: colors.primary + '18', borderColor: colors.primary }]}
+                    onPress={handleShareQR}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="share-social-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.qrActionText, { color: colors.primary }]}>Share Tag</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.qrActionButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                    onPress={handleDownloadQR}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="download-outline" size={18} color="#fff" />
+                    <Text style={[styles.qrActionText, { color: '#fff' }]}>Save to Gallery</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.qrInfoNotice, { backgroundColor: colors.background, borderColor: colors.divider }]}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.primary} style={{ marginTop: 1 }} />
+                  <Text style={[styles.qrInfoNoticeText, { color: colors.textSecondary }]}>
+                    This QR code can be printed and attached to the chicken coop or leg band. Caretakers and owners can scan this code using the in-app scanner to quickly identify and check this bird.
+                  </Text>
+                </View>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -1519,5 +1770,148 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+
+  // --- QR Tag Card & Modal Styles ---
+  qrTagCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  qrTagLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  qrTagIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrTagTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  qrTagSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  qrModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  qrModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  qrModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  qrModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  qrModalSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  qrModalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  qrCardContainer: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+  },
+  qrCodeWrapper: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  qrCardDetails: {
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  qrCardTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  qrCardId: {
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  qrCardName: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  qrCardFarm: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  qrActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  qrActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  qrActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  qrInfoNotice: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 14,
+  },
+  qrInfoNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

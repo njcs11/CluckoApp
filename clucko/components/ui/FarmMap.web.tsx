@@ -40,11 +40,7 @@ export default function FarmMap({
 }: FarmMapProps) {
   useLeafletCss();
   const [mods, setMods] = useState<any>(null);
-  // Holds a live reference to the Leaflet map instance once it mounts, so
-  // the "My Location" button (rendered outside react-leaflet's own tree)
-  // can call flyTo/setView on it directly.
   const [mapInstance, setMapInstance] = useState<any>(null);
-  const [locating, setLocating] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -57,19 +53,19 @@ export default function FarmMap({
     };
   }, []);
 
-  const handleMyLocation = () => {
-    if (!mapInstance || typeof navigator === 'undefined' || !navigator.geolocation) return;
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        mapInstance.flyTo([pos.coords.latitude, pos.coords.longitude], 15, { duration: 1 });
-      },
-      () => {
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+  const pinnedFarms = farms.filter((f: any) => f.latitude != null && f.longitude != null);
+
+  const handleFarmLocations = () => {
+    if (!mapInstance || !mods?.L) return;
+    const { L } = mods;
+    if (pinnedFarms.length === 1) {
+      mapInstance.flyTo([pinnedFarms[0].latitude, pinnedFarms[0].longitude], 15, { duration: 0.8 });
+    } else if (pinnedFarms.length >= 2) {
+      const bounds = L.latLngBounds(pinnedFarms.map((f: any) => [f.latitude, f.longitude]));
+      mapInstance.flyToBounds(bounds.pad(0.2), { duration: 0.8 });
+    } else {
+      mapInstance.flyTo(DAVAO_CITY_CENTER, 12, { duration: 0.8 });
+    }
   };
 
   if (!mods) {
@@ -81,7 +77,6 @@ export default function FarmMap({
   }
 
   const { L, MapContainer, Marker, Popup, TileLayer, useMap } = mods;
-  const pinnedFarms = farms.filter((f: any) => f.latitude != null && f.longitude != null);
   const targetCenter: [number, number] =
     initialCenter && initialCenter[0] != null && initialCenter[1] != null
       ? initialCenter
@@ -93,9 +88,10 @@ export default function FarmMap({
 
   const icon = L.divIcon({
     className: '',
-    html: `<div style="width:30px;height:30px;border-radius:50%;background:${primaryColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);"><div style="width:10px;height:10px;background:#fff;border-radius:2px;"></div></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    html: `<div style="width:34px;height:34px;border-radius:50%;background:#2E7D32;border:2.5px solid #ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 6px rgba(0,0,0,0.35);"><svg width="22" height="22" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 19 22 L 38 6 L 57 22" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M 23 25 L 38 13 L 53 25" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="24" y="24" width="28" height="21" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="33" y="28" width="10" height="10" stroke="#ffffff" stroke-width="2"/><line x1="38" y1="28" x2="38" y2="38" stroke="#ffffff" stroke-width="1.8"/><line x1="33" y1="33" x2="43" y2="33" stroke="#ffffff" stroke-width="1.8"/><rect x="27" y="45" width="4.5" height="10" stroke="#ffffff" stroke-width="2"/><rect x="44.5" y="45" width="4.5" height="10" stroke="#ffffff" stroke-width="2"/><line x1="7" y1="55" x2="24" y2="37" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><line x1="7" y1="52" x2="11.5" y2="56.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="11.5" y1="47.5" x2="16" y2="52" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="43" x2="20.5" y2="47.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="20.5" y1="38.5" x2="25" y2="43" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg></div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -17],
   });
 
   function ForceInitialView() {
@@ -103,15 +99,20 @@ export default function FarmMap({
     useEffect(() => {
       const timer = setTimeout(() => {
         map.invalidateSize();
-        map.setView(targetCenter, targetZoom);
+        if (pinnedFarms.length === 1) {
+          map.setView([pinnedFarms[0].latitude!, pinnedFarms[0].longitude!], 15);
+        } else if (pinnedFarms.length >= 2) {
+          const bounds = L.latLngBounds(pinnedFarms.map((f: any) => [f.latitude, f.longitude]));
+          map.fitBounds(bounds.pad(0.2));
+        } else {
+          map.setView(targetCenter, targetZoom);
+        }
       }, 100);
       return () => clearTimeout(timer);
     }, [map]);
     return null;
   }
 
-  // Grabs the Leaflet map instance the moment react-leaflet mounts it,
-  // purely so the external "My Location" button can drive it.
   function CaptureMapInstance() {
     const map = useMap();
     useEffect(() => {
@@ -125,10 +126,8 @@ export default function FarmMap({
       <MapContainer
         center={targetCenter}
         zoom={targetZoom}
-        minZoom={11}
+        minZoom={4}
         maxZoom={18}
-        maxBounds={DAVAO_BOUNDS}
-        maxBoundsViscosity={1.0}
         style={{ width: '100%', height: '100%' }}
       >
         <ForceInitialView />
@@ -150,13 +149,13 @@ export default function FarmMap({
       </MapContainer>
 
       <TouchableOpacity
-        style={styles.myLocationButton}
-        onPress={handleMyLocation}
+        style={styles.farmLocationsButton}
+        onPress={handleFarmLocations}
         activeOpacity={0.8}
       >
-        <Text style={[styles.myLocationDot, { color: primaryColor }]}>◎</Text>
-        <Text style={[styles.myLocationText, { color: primaryColor }]}>
-          {locating ? 'Locating…' : 'My Location'}
+        <View style={[styles.farmLocationsDot, { backgroundColor: primaryColor }]} />
+        <Text style={[styles.farmLocationsText, { color: primaryColor }]}>
+          Farm Locations
         </Text>
       </TouchableOpacity>
 
@@ -184,7 +183,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   emptyOverlayText: { color: '#fff', fontSize: 11 },
-  myLocationButton: {
+  farmLocationsButton: {
     position: 'absolute',
     top: 10,
     right: 10,
@@ -202,6 +201,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  myLocationDot: { fontSize: 13, fontWeight: '700' },
-  myLocationText: { fontSize: 12, fontWeight: '700' },
+  farmLocationsDot: { width: 7, height: 7, borderRadius: 3.5 },
+  farmLocationsText: { fontSize: 12, fontWeight: '700' },
 });

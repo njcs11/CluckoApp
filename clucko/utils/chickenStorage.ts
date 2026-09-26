@@ -7,12 +7,28 @@ import {
 
 // Safely parses whatever date format the backend returns (ISO string,
 // "Wed, 02 Sep 2026 06:35:00 GMT", MySQL timestamp, etc.) into a plain
-// YYYY-MM-DD string. Returns '' if the value is missing or unparseable,
-// so callers can fall back to "N/A" instead of showing "Invalid Date".
+// YYYY-MM-DD string without timezone day-shift artifacts.
 const parseDateSafe = (raw: any): string => {
   if (!raw) return "";
+  if (typeof raw === "string") {
+    // If it starts with YYYY-MM-DD, extract it directly to avoid any timezone shifting
+    const match = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+    const cleaned = raw.replace(/\s*GMT$/i, "").replace(/Z$/i, "");
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
   const d = new Date(raw);
-  return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
+  if (isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 // Converts a backend chicken row (chicken_name, qr_code, farm_id, photo_url,
@@ -48,6 +64,9 @@ const mapChickenFromApi = (c: any) => {
     // scanned, or scanned again well after creation.
     lastScan: dateStr,
     dateAdded: dateStr,
+    addedByName: c.added_by_name || c.addedByName || null,
+    addedByRole: c.added_by_role || c.addedByRole || null,
+    qrCode: c.qr_code,
   };
 };
 
@@ -66,8 +85,48 @@ export const loadChickensForCurrentUser = async (): Promise<any[] | null> => {
   }
 };
 
-// Generates a reasonably-unique QR/ID code client-side (timestamp + random
-// suffix) since the backend requires qr_code to be provided and unique.
+// Computes the next unique Chicken ID/QR code scoped strictly to the specified farm.
+// Looks through existing chickens on that farm for patterns like CK-001, CK-002, CH001, etc.
+// Finds the highest number and increments it, while guaranteeing no collision within that farm.
+export const generateNextChickenCode = (
+  existingChickens: any[] = [],
+  farmId?: string | number | null
+): string => {
+  const farmKey = farmId != null && farmId !== '' ? String(farmId) : null;
+
+  // Filter chickens belonging to the specified farm (or unassigned if null)
+  const farmChickens = (existingChickens || []).filter((c: any) => {
+    const cFarm = c.farm_id != null ? String(c.farm_id) : c.farmId != null ? String(c.farmId) : null;
+    return cFarm === farmKey;
+  });
+
+  const existingCodes = new Set<string>();
+  const numbers: number[] = [];
+
+  for (const c of farmChickens) {
+    const code = (c.qr_code || c.chickenId || '').trim();
+    if (!code) continue;
+    existingCodes.add(code.toUpperCase());
+
+    const match = code.match(/(?:CK|CH)[-_]?(\d+)/i);
+    if (match && match[1]) {
+      const n = parseInt(match[1], 10);
+      if (!isNaN(n)) numbers.push(n);
+    }
+  }
+
+  let nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+  let candidate = `CK-${String(nextNum).padStart(3, '0')}`;
+
+  while (existingCodes.has(candidate.toUpperCase())) {
+    nextNum++;
+    candidate = `CK-${String(nextNum).padStart(3, '0')}`;
+  }
+
+  return candidate;
+};
+
+// Generates a reasonably-unique fallback QR/ID code client-side
 const generateChickenCode = () => {
   const stamp = Date.now().toString(36).toUpperCase();
   const rand = Math.floor(Math.random() * 36 ** 2)
@@ -79,17 +138,19 @@ const generateChickenCode = () => {
 
 // Creates a chicken on the backend. `chicken` is expected to carry at
 // least { name, photo, farmId } — matching ChickenFormData from
-// AddChickenModal. Returns the newly-created record already mapped to
-// this app's Bird shape, and the caller should reload the list afterward
-// (loadChickensForCurrentUser) rather than trust any local array.
+// AddChickenModal. If chickenId / qr_code is provided, that exact code
+// is preserved so the generated/previewed QR code matches what is saved.
 export const addChickenForCurrentUser = async (chicken: {
   name: string;
   photo?: string | null;
   farmId?: string | null;
+  chickenId?: string | null;
+  qr_code?: string | null;
 }): Promise<any> => {
+  const qrCode = chicken.qr_code || chicken.chickenId || generateChickenCode();
   const created = await apiCreateChicken({
     chicken_name: chicken.name,
-    qr_code: generateChickenCode(),
+    qr_code: qrCode,
     farm_id: chicken.farmId ? Number(chicken.farmId) : undefined,
     photo_url: chicken.photo || "",
   });

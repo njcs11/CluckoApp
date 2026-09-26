@@ -5,13 +5,13 @@ from db import get_db, token_required
 
 
 def init_tasks_table():
-    """Ensure the tasks table exists in MySQL."""
+    """Ensure the tasks table exists."""
     db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS tasks (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     farm_id INT NOT NULL,
                     created_by_user_id INT NOT NULL,
                     assigned_to_user_id INT NULL,
@@ -25,10 +25,8 @@ def init_tasks_table():
                     completed_by_user_id INT NULL,
                     completed_at TIMESTAMP NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_farm_due (farm_id, due_date),
-                    INDEX idx_assigned (assigned_to_user_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             ''')
             db.commit()
     except Exception as e:

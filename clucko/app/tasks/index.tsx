@@ -34,8 +34,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
+import FarmIcon from '../../components/ui/FarmIcon';
+import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import { apiGetFarms, apiGetFarmMembers, getUserRole } from '../../lib/api';
 
 const MAX_CONTENT_WIDTH = 520;
@@ -350,7 +351,7 @@ export default function TasksScreen() {
                       onPress={() => setSelectedFarmFilter(isSel ? 'all' : String(f.id))}
                       activeOpacity={0.8}
                     >
-                      <Ionicons name="home-outline" size={13} color={isSel ? colors.primary : colors.textSecondary} />
+                      <FarmIcon size={13} color={isSel ? colors.primary : colors.textSecondary} />
                       <Text
                         style={[
                           styles.farmFilterChipText,
@@ -492,7 +493,7 @@ export default function TasksScreen() {
                       </Text>
                       {task.farm_name && (
                         <View style={[styles.taskFarmTag, { backgroundColor: colors.primary + '18' }]}>
-                          <Ionicons name="home-outline" size={10} color={colors.primary} />
+                          <FarmIcon size={11} color={colors.primary} />
                           <Text style={[styles.taskFarmTagText, { color: colors.primary }]} numberOfLines={1}>
                             {task.farm_name}
                           </Text>
@@ -585,7 +586,7 @@ export default function TasksScreen() {
                           onPress={() => handleFarmSelectInModal(f.id)}
                           activeOpacity={0.8}
                         >
-                          <Ionicons name="home-outline" size={13} color={isSel ? '#fff' : colors.textSecondary} />
+                          <FarmIcon size={13} color={isSel ? '#fff' : colors.textSecondary} />
                           <Text style={[styles.formPillOptionText, { color: isSel ? '#fff' : colors.text }]}>{f.farm_name}</Text>
                         </TouchableOpacity>
                       );

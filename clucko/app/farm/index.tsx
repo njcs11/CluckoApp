@@ -25,10 +25,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import FarmMap from '../../components/ui/FarmMap';
 import ChickenIcon from '../../components/ui/ChickenIcon';
+import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import LocationPickerModal from '../../components/ui/LocationPickerModal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
-import { apiCreateFarm, apiDeleteFarm, apiGetFarms, apiGetProfile, apiUpdateFarm } from '../../lib/api';
+import { apiCreateFarm, apiDeleteFarm, apiGetFarms, apiGetProfile, apiUpdateFarm, apiGetMyPlan } from '../../lib/api';
 
 interface Farm {
   id: number;
@@ -55,6 +56,8 @@ export default function FarmListScreen() {
 
   const [farms, setFarms] = useState<Farm[]>([]);
   const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
+  const [subscription, setSubscription] = useState<any>(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -106,13 +109,17 @@ export default function FarmListScreen() {
   const loadFarms = async () => {
     setLoading(true);
     try {
-      const [data, profileData] = await Promise.all([
+      const [data, profileData, subData] = await Promise.all([
         apiGetFarms(),
         apiGetProfile().catch(() => null),
+        apiGetMyPlan().catch(() => null),
       ]);
       setFarms(data || []);
       if (profileData?.role) {
         setUserRole(profileData.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
+      }
+      if (subData?.subscription) {
+        setSubscription(subData.subscription);
       }
     } catch (error: any) {
       console.error('Error loading farms:', error);
@@ -130,6 +137,13 @@ export default function FarmListScreen() {
     if (isGuestMode) {
       guestAlert('adding a farm');
       return;
+    }
+    // Check subscription farm limit
+    if (subscription && subscription.limits && subscription.limits.max_farms < 999999) {
+      if (farms.length >= subscription.limits.max_farms) {
+        setShowUpgradeModal(true);
+        return;
+      }
     }
     setEditingFarm(null);
     setFormData({ farm_name: '', farm_location: '', description: '', latitude: undefined, longitude: undefined });
@@ -190,11 +204,17 @@ export default function FarmListScreen() {
         type: 'success',
       });
     } catch (error: any) {
-      await notify({
-        title: 'Save Failed',
-        message: error.message || 'Failed to save farm. Please try again.',
-        type: 'alert',
-      });
+      const msg = error.message || '';
+      if (msg.includes('Farm limit reached') || msg.includes('PLAN_FARM_LIMIT_EXCEEDED')) {
+        setShowFormModal(false);
+        setShowUpgradeModal(true);
+      } else {
+        await notify({
+          title: 'Save Failed',
+          message: msg || 'Failed to save farm. Please try again.',
+          type: 'alert',
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -242,7 +262,7 @@ export default function FarmListScreen() {
     >
       <View style={styles.farmCardHeader}>
         <View style={[styles.farmIcon, { backgroundColor: colors.primary + '20' }]}>
-          <Ionicons name="home" size={22} color={colors.primary} />
+          <FarmIcon size={24} color={colors.primary} />
         </View>
         {userRole === 'owner' && (
           <View style={styles.farmCardActions}>
@@ -305,7 +325,7 @@ export default function FarmListScreen() {
 
       {farms.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="home-outline" size={56} color={colors.textLight} />
+          <FarmIcon size={56} color={colors.textLight} />
           <Text style={[styles.emptyStateTitle, { color: colors.text }]}>No farms yet</Text>
           <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>
             Add a farm to start organizing your flock by location.
@@ -330,7 +350,9 @@ export default function FarmListScreen() {
           ListHeaderComponent={
             <>
               <View style={styles.mapSection}>
-                <Text style={[styles.mapSectionTitle, { color: colors.text }]}>Farm Locations — Davao City</Text>
+                <Text style={[styles.mapSectionTitle, { color: colors.text }]}>
+                  Farm Locations{farms.length === 1 && farms[0].farm_location ? ` — ${farms[0].farm_location}` : farms.length > 1 ? ` (${farms.length} Farms)` : ' — Davao City'}
+                </Text>
                 <FarmMap
                   farms={farms.map((f) => ({
                     id: String(f.id),
@@ -473,6 +495,46 @@ export default function FarmListScreen() {
         onConfirm={confirmDeleteFarm}
         onCancel={() => setFarmToDelete(null)}
       />
+
+      {/* Farm Limit Upgrade Prompt Modal */}
+      <Modal visible={showUpgradeModal} transparent animationType="fade">
+        <View style={styles.upgradeModalOverlay}>
+          <View style={[styles.upgradeModalCard, { backgroundColor: colors.card }]}>
+            <View style={styles.upgradeModalIcon}>
+              <FontAwesome5 name="crown" size={28} color="#F59E0B" />
+            </View>
+            <Text style={[styles.upgradeModalTitle, { color: colors.text }]}>Farm Limit Reached</Text>
+            <Text style={[styles.upgradeModalDesc, { color: colors.textSecondary }]}>
+              Your current <Text style={{ fontWeight: '700' }}>{subscription?.plan_name || 'Free Plan'}</Text> allows up to{' '}
+              <Text style={{ fontWeight: '700' }}>{subscription?.limits?.max_farms || 1} farm(s)</Text>.
+              {'\n\n'}
+              {subscription?.plan === 'pro' ? (
+                <>Upgrade to <Text style={{ fontWeight: '700', color: '#D97706' }}>Premium (Unlimited Farms)</Text> to expand your operations beyond 2 farms.</>
+              ) : (
+                <>Upgrade to <Text style={{ fontWeight: '700', color: colors.primary }}>Pro (2 Farms)</Text> or <Text style={{ fontWeight: '700', color: '#D97706' }}>Premium (Unlimited Farms)</Text> to expand your farm operations.</>
+              )}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.upgradeModalBtn, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                setShowUpgradeModal(false);
+                router.push('/subscription');
+              }}
+            >
+              <Text style={styles.upgradeModalBtnText}>View Plans & Upgrade</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.upgradeModalCancelBtn}
+              onPress={() => setShowUpgradeModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.upgradeModalCancelText, { color: colors.textSecondary }]}>Maybe Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -562,4 +624,68 @@ const styles = StyleSheet.create({
   submitButton: { borderRadius: 30, overflow: 'hidden', marginTop: 8, marginBottom: 20 },
   submitGradient: { paddingVertical: 16, alignItems: 'center' },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-});
+  upgradeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  upgradeModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 22,
+    padding: 24,
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  upgradeModalIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFF8E1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  upgradeModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  upgradeModalDesc: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  upgradeModalBtn: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  upgradeModalBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  upgradeModalCancelBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  upgradeModalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+});

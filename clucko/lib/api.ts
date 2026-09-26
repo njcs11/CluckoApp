@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 
 // Default fallback — change this to your most common IP
-const DEFAULT_API_URL = "http://192.168.1.5:5000";
+const DEFAULT_API_URL = "http://127.0.0.1:5000";
 
 let cachedApiUrl: string | null = null;
 
@@ -169,7 +169,6 @@ export const apiLogin = async (email: string, password: string) => {
   await AsyncStorage.setItem("userData", JSON.stringify({ ...json.user, name: fullName, fullName }));
   await AsyncStorage.setItem("isLoggedIn", "true");
   await AsyncStorage.setItem("isGuestMode", "false");
-  await AsyncStorage.setItem("pending_welcome_login", "true");
   return json;
 };
 
@@ -197,7 +196,9 @@ export const apiGoogleAuth = async (googleProfile: {
   await AsyncStorage.setItem("userData", JSON.stringify({ ...user, name: fullName, fullName }));
   await AsyncStorage.setItem("isLoggedIn", "true");
   await AsyncStorage.setItem("isGuestMode", "false");
-  await AsyncStorage.setItem("pending_welcome_login", "true");
+  if (json.is_new_user) {
+    await AsyncStorage.setItem("pending_welcome_login", "true");
+  }
   return json;
 };
 
@@ -435,7 +436,7 @@ export const apiMarkNotificationRead = async (id: string | number) => {
       method: 'PUT',
       headers: await headers(),
     });
-  } catch {}
+  } catch { }
 };
 
 export const apiMarkAllNotificationsRead = async () => {
@@ -447,7 +448,7 @@ export const apiMarkAllNotificationsRead = async () => {
       method: 'PUT',
       headers: await headers(),
     });
-  } catch {}
+  } catch { }
 };
 
 export const apiDeleteNotification = async (id: string | number) => {
@@ -459,7 +460,7 @@ export const apiDeleteNotification = async (id: string | number) => {
       method: 'DELETE',
       headers: await headers(),
     });
-  } catch {}
+  } catch { }
 };
 
 export const apiClearNotifications = async () => {
@@ -471,7 +472,7 @@ export const apiClearNotifications = async () => {
       method: 'DELETE',
       headers: await headers(),
     });
-  } catch {}
+  } catch { }
 };
 
 // ─── RECENT ACTIVITIES ─────────────────────────────────────────
@@ -664,6 +665,25 @@ export const apiRemoveMember = async (farm_id: number, member_id: number) => {
   return json;
 };
 
+export const apiUpdateMemberStatus = async (
+  farm_id: number,
+  member_id: number,
+  is_active: boolean
+) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(
+    `${API_URL}/api/farms/${farm_id}/members/${member_id}/status`,
+    {
+      method: "PUT",
+      headers: await headers(),
+      body: JSON.stringify({ is_active }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error);
+  return json;
+};
+
 export const apiCreateCaretaker = async (data: {
   first_name: string;
   last_name: string;
@@ -762,3 +782,106 @@ export const apiDeleteTask = async (taskId: number | string) => {
   if (!res.ok) throw new Error(json.error || "Failed to delete task");
   return json;
 };
+
+// ─── RECENT QR SCANS ─────────────────────────────────────────
+export const apiRecordQrScan = async (chickenId: number | string) => {
+  try {
+    const API_URL = await getApiUrl();
+    const h = await headers();
+    const res = await fetch(`${API_URL}/api/scans/qr`, {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ chicken_id: chickenId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to record QR scan");
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn("apiRecordQrScan error:", e);
+    return null;
+  }
+};
+
+export const apiGetQrScans = async (farmId?: string | number) => {
+  try {
+    const API_URL = await getApiUrl();
+    const h = await headers();
+    let url = `${API_URL}/api/scans/qr`;
+    if (farmId && String(farmId) !== "all") {
+      url += `?farm_id=${encodeURIComponent(String(farmId))}`;
+    }
+    const res = await fetch(url, { headers: h });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (e) {
+    console.warn("apiGetQrScans error:", e);
+    return [];
+  }
+};
+
+// ─── SUBSCRIPTIONS & PLANS ────────────────────────────────────
+export const apiGetMyPlan = async () => {
+  const token = await getToken();
+  if (!token) return null;
+  const API_URL = await getApiUrl();
+  try {
+    const res = await fetch(`${API_URL}/api/subscriptions/my-plan`, {
+      headers: await headers(),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Failed to load subscription");
+    return json;
+  } catch (err: any) {
+    console.warn("apiGetMyPlan error:", err);
+    return null;
+  }
+};
+
+export const apiCreateCheckout = async (
+  plan: 'pro' | 'premium',
+  gateway: 'paymongo' | 'stripe' = 'paymongo',
+  test_mode: boolean = true
+) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/subscriptions/checkout`, {
+    method: "POST",
+    headers: await headers(),
+    body: JSON.stringify({ plan, gateway, test_mode }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Checkout failed");
+  return json;
+};
+
+export const apiVerifyPayment = async (
+  sessionId: string,
+  plan: string,
+  gateway: string = 'paymongo'
+) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/subscriptions/verify`, {
+    method: "POST",
+    headers: await headers(),
+    body: JSON.stringify({ session_id: sessionId, plan, gateway }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Verification failed");
+  return json;
+};
+
+export const apiDevToggleSubscription = async (
+  state: 'free_trial' | 'pro' | 'premium' | 'grace_period' | 'expired_free'
+) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/subscriptions/dev-toggle`, {
+    method: "POST",
+    headers: await headers(),
+    body: JSON.stringify({ state }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "State toggle failed");
+  return json;
+};
+

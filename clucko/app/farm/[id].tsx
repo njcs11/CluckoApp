@@ -7,7 +7,7 @@ import { useFocusEffect } from "expo-router/react-navigation";
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,23 +24,33 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FarmMap from '../../components/ui/FarmMap';
 import ChickenAvatar from '../../components/ui/ChickenAvatar';
 import ChickenIcon from '../../components/ui/ChickenIcon';
+import FarmIcon from '../../components/ui/FarmIcon';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import {
   apiGetFarm,
   apiGetProfile,
   apiRemoveMember,
+  apiUpdateMemberStatus,
   apiCreateCaretaker,
   apiDeleteFarm,
 } from '../../lib/api';
 
 export default function FarmDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const { colors, isDarkMode } = useDarkMode();
   const { notify } = useNotifications();
 
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [checkingGuest, setCheckingGuest] = useState(true);
-  const [activeTab, setActiveTab] = useState<'info' | 'chickens' | 'caretakers'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'chickens' | 'caretakers'>(
+    tab === 'caretakers' ? 'caretakers' : tab === 'chickens' ? 'chickens' : 'info'
+  );
+
+  useEffect(() => {
+    if (tab === 'caretakers' || tab === 'chickens' || tab === 'info') {
+      setActiveTab(tab);
+    }
+  }, [tab]);
 
   const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
   const [farm, setFarm] = useState<any>(null);
@@ -53,6 +63,8 @@ export default function FarmDetailScreen() {
   const [deletingFarm, setDeletingFarm] = useState(false);
   const [caretakerToRemove, setCaretakerToRemove] = useState<any>(null);
   const [removingCaretaker, setRemovingCaretaker] = useState(false);
+  const [caretakerToToggle, setCaretakerToToggle] = useState<{ member: any; nextStatus: boolean } | null>(null);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   // Add caretaker modal
   const [showAddModal, setShowAddModal] = useState(false);
@@ -182,7 +194,7 @@ export default function FarmDetailScreen() {
       await loadData();
       await notify({
         title: 'Member Removed',
-        message: `${caretakerToRemove.first_name} ${caretakerToRemove.last_name} has been removed from this farm.`,
+        message: `${caretakerToRemove.first_name} ${caretakerToRemove.last_name} has been removed from this farm and their account was deactivated.`,
         type: 'info',
       });
     } catch (e: any) {
@@ -194,6 +206,35 @@ export default function FarmDetailScreen() {
     } finally {
       setRemovingCaretaker(false);
       setCaretakerToRemove(null);
+    }
+  };
+
+  const handleToggleCaretakerStatus = (member: any) => {
+    const nextStatus = member.is_active === false;
+    setCaretakerToToggle({ member, nextStatus });
+  };
+
+  const confirmToggleStatus = async () => {
+    if (!caretakerToToggle) return;
+    setTogglingStatus(true);
+    try {
+      const { member, nextStatus } = caretakerToToggle;
+      await apiUpdateMemberStatus(Number(id), member.id, nextStatus);
+      await loadData();
+      await notify({
+        title: nextStatus ? 'Caretaker Activated' : 'Caretaker Deactivated',
+        message: `${member.first_name} ${member.last_name} has been ${nextStatus ? 'activated' : 'deactivated'}. ${nextStatus ? 'They can now log in and access this farm.' : 'They will no longer be able to log in.'}`,
+        type: 'info',
+      });
+    } catch (e: any) {
+      await notify({
+        title: 'Failed to Update',
+        message: e.message || 'Could not update caretaker status.',
+        type: 'alert',
+      });
+    } finally {
+      setTogglingStatus(false);
+      setCaretakerToToggle(null);
     }
   };
 
@@ -277,7 +318,7 @@ export default function FarmDetailScreen() {
           )}
         </View>
         <View style={styles.farmIconLarge}>
-          <Ionicons name="home" size={30} color="#fff" />
+          <FarmIcon size={32} color="#fff" />
         </View>
         <Text style={[styles.farmTitle, { fontSize: scaleFont(22) }]}>{farm.farm_name}</Text>
         {userRole === 'owner' && (
@@ -295,7 +336,7 @@ export default function FarmDetailScreen() {
         {([
           { key: 'info' as const, label: 'Info' },
           { key: 'chickens' as const, label: `Chickens (${chickens.length})` },
-          ...(userRole === 'owner' ? [{ key: 'caretakers' as const, label: `Caretakers (${caretakers.length})` }] : []),
+          { key: 'caretakers' as const, label: `Caretakers (${caretakers.length})` },
         ]).map(tab => (
           <TouchableOpacity
             key={tab.key}
@@ -340,18 +381,19 @@ export default function FarmDetailScreen() {
             <View style={[styles.card, { backgroundColor: colors.card }]}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Farm Details</Text>
               {(userRole === 'owner'
-                ? [
-                    { label: 'Farm', value: farm.farm_name },
-                    { label: 'Location', value: (farm.farm_location === 'Panaca' ? 'Panacan' : farm.farm_location) || 'Not set' },
-                    { label: 'Chickens', value: String(chickens.length) },
-                    { label: 'Caretakers', value: String(caretakers.length) },
-                  ]
-                : [
-                    { label: 'Farm', value: farm.farm_name },
-                    { label: 'Farm Owner', value: farm.owner_name || 'Farm Owner' },
-                    { label: 'Chickens', value: String(chickens.length) },
-                  ]
-              ).map(item => (
+                 ? [
+                     { label: 'Farm', value: farm.farm_name },
+                     { label: 'Location', value: (farm.farm_location === 'Panaca' ? 'Panacan' : farm.farm_location) || 'Not set' },
+                     { label: 'Chickens', value: String(chickens.length) },
+                     { label: 'Caretakers', value: String(caretakers.length) },
+                   ]
+                 : [
+                     { label: 'Farm', value: farm.farm_name },
+                     { label: 'Farm Owner', value: farm.owner_name || 'Farm Owner' },
+                     { label: 'Chickens', value: String(chickens.length) },
+                     { label: 'Caretakers', value: String(caretakers.length) },
+                   ]
+               ).map(item => (
                 <View key={item.label} style={[styles.infoRow, { borderBottomColor: colors.border }]}>
                   <Text style={[styles.infoLabel, { color: colors.textLight }]} numberOfLines={1}>{item.label}</Text>
                   <Text style={[styles.infoValue, { color: colors.text }]}>{item.value}</Text>
@@ -414,14 +456,16 @@ export default function FarmDetailScreen() {
         {/* ── CARETAKERS TAB ─────────────────────────────────────────────── */}
         {activeTab === 'caretakers' && (
           <>
-            {/* Add Caretaker Button */}
-            <TouchableOpacity
-              style={[styles.addCaretakerBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setShowAddModal(true)}
-            >
-              <Ionicons name="person-add-outline" size={20} color="#fff" />
-              <Text style={styles.addCaretakerBtnText}>Add Caretaker</Text>
-            </TouchableOpacity>
+            {/* Add Caretaker Button (Owner only) */}
+            {userRole === 'owner' && (
+              <TouchableOpacity
+                style={[styles.addCaretakerBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setShowAddModal(true)}
+              >
+                <Ionicons name="person-add-outline" size={20} color="#fff" />
+                <Text style={styles.addCaretakerBtnText}>Add Caretaker</Text>
+              </TouchableOpacity>
+            )}
 
             {caretakers.length === 0 ? (
               <View style={styles.emptyState}>
@@ -430,43 +474,169 @@ export default function FarmDetailScreen() {
                   No caretakers assigned yet.
                 </Text>
                 <Text style={[styles.emptySubText, { color: colors.textLight }]}>
-                  Tap "Add Caretaker" to create their login account.
+                  {userRole === 'owner'
+                    ? 'Tap "Add Caretaker" to create their login account.'
+                    : 'No other caretakers are assigned to this farm.'}
                 </Text>
               </View>
             ) : (
-              caretakers.map((member: any) => (
-                <View key={member.id} style={[styles.card, { backgroundColor: colors.card }]}>
-                  <View style={styles.memberRow}>
-                    <View style={[styles.memberAvatar, { backgroundColor: colors.primary + '20' }]}>
-                      <Text style={[styles.memberInitial, { color: colors.primary }]}>
-                        {member.first_name?.[0]?.toUpperCase() || '?'}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>
-                        {member.first_name} {member.last_name}
-                      </Text>
-                      <Text style={[styles.memberEmail, { color: colors.textLight }]}>
-                        {member.email}
-                      </Text>
-                      {member.phone_number ? (
-                        <Text style={[styles.memberEmail, { color: colors.textLight }]}>
-                          {member.phone_number}
+              caretakers.map((member: any) => {
+                const isActive = member.is_active !== false;
+                const isOnline = member.is_online === true;
+                const statusText = member.online_status_text || (isOnline ? 'Online' : 'Offline');
+                const presenceColor = isOnline ? '#4CAF50' : statusText === 'Active today' ? '#8BC34A' : '#9E9E9E';
+
+                return (
+                  <View
+                    key={member.id}
+                    style={[
+                      styles.card,
+                      {
+                        backgroundColor: colors.card,
+                        opacity: isActive ? 1 : 0.85,
+                      },
+                    ]}
+                  >
+                    <View style={styles.memberRow}>
+                      <View style={{ position: 'relative' }}>
+                        <View
+                          style={[
+                            styles.memberAvatar,
+                            {
+                              backgroundColor: isActive ? colors.primary + '20' : 'rgba(158, 158, 158, 0.18)',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.memberInitial,
+                              { color: isActive ? colors.primary : colors.textLight },
+                            ]}
+                          >
+                            {member.first_name?.[0]?.toUpperCase() || '?'}
+                          </Text>
+                        </View>
+                        {/* Profile circle indicator dot (Pic 3 reference) */}
+                        <View
+                          style={{
+                            position: 'absolute',
+                            bottom: -2,
+                            right: -2,
+                            width: 14,
+                            height: 14,
+                            borderRadius: 7,
+                            backgroundColor: presenceColor,
+                            borderWidth: 2.5,
+                            borderColor: colors.card,
+                          }}
+                        />
+                      </View>
+
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                          {member.first_name} {member.last_name}
                         </Text>
-                      ) : null}
-                      <Text style={[styles.memberJoined, { color: colors.textLight }]}>
-                        Joined {new Date(member.joined_at).toLocaleDateString()}
-                      </Text>
+                        <Text style={[styles.memberEmail, { color: colors.textLight, marginTop: 2 }]} numberOfLines={1}>
+                          {member.email}
+                        </Text>
+                        {member.phone_number ? (
+                          <Text style={[styles.memberEmail, { color: colors.textLight }]} numberOfLines={1}>
+                            {member.phone_number}
+                          </Text>
+                        ) : null}
+                        <Text style={[styles.memberJoined, { color: colors.textLight }]}>
+                          Joined {new Date(member.joined_at).toLocaleDateString()}
+                        </Text>
+                        {/* Status name at the bottom: online or offline */}
+                        <Text
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: '600',
+                            color: isOnline ? '#2E7D32' : colors.textLight,
+                            marginTop: 2,
+                          }}
+                        >
+                          {isOnline ? 'Online' : 'Offline'}
+                        </Text>
+                      </View>
+
+                      {/* Right column: Active badge at the top, simplified action buttons underneath */}
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'space-between', alignSelf: 'stretch' }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 8,
+                            backgroundColor: isActive ? 'rgba(76, 175, 80, 0.14)' : 'rgba(239, 83, 80, 0.14)',
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: 2.5,
+                              backgroundColor: isActive ? '#4CAF50' : '#EF5350',
+                            }}
+                          />
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: isActive ? '#2E7D32' : '#C62828',
+                              textTransform: 'uppercase',
+                              letterSpacing: 0.3,
+                            }}
+                          >
+                            {isActive ? 'Active' : 'Deactivated'}
+                          </Text>
+                        </View>
+
+                        {userRole === 'owner' && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                            <TouchableOpacity
+                              style={[
+                                styles.statusToggleBtn,
+                                {
+                                  backgroundColor: isActive ? 'rgba(255, 152, 0, 0.12)' : 'rgba(76, 175, 80, 0.12)',
+                                  borderColor: isActive ? 'rgba(255, 152, 0, 0.3)' : 'rgba(76, 175, 80, 0.3)',
+                                },
+                              ]}
+                              onPress={() => handleToggleCaretakerStatus(member)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons
+                                name={isActive ? 'pause-circle-outline' : 'play-circle-outline'}
+                                size={13}
+                                color={isActive ? '#E65100' : '#2E7D32'}
+                              />
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: '600',
+                                  color: isActive ? '#E65100' : '#2E7D32',
+                                }}
+                              >
+                                {isActive ? 'Deactivate' : 'Activate'}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.removeBtn}
+                              onPress={() => handleRemoveCaretaker(member)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="trash-outline" size={17} color="#f44336" />
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                    <TouchableOpacity
-                      style={styles.removeBtn}
-                      onPress={() => handleRemoveCaretaker(member)}
-                    >
-                      <Ionicons name="trash-outline" size={18} color="#f44336" />
-                    </TouchableOpacity>
                   </View>
-                </View>
-              ))
+                );
+              })
             )}
           </>
         )}
@@ -539,7 +709,7 @@ export default function FarmDetailScreen() {
 
               {/* Farm assignment display */}
               <View style={[styles.farmAssignBox, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '30' }]}>
-                <Ionicons name="home-outline" size={16} color={colors.primary} />
+                <FarmIcon size={16} color={colors.primary} />
                 <Text style={[styles.farmAssignText, { color: colors.primary }]}>
                   Will be assigned to: {farm?.farm_name}
                 </Text>
@@ -581,11 +751,30 @@ export default function FarmDetailScreen() {
         onCancel={() => setShowDeleteFarmConfirm(false)}
       />
 
+      {/* Toggle Caretaker Status Confirmation Modal */}
+      <ConfirmModal
+        visible={!!caretakerToToggle}
+        title={caretakerToToggle?.nextStatus ? 'Activate Caretaker' : 'Deactivate Caretaker'}
+        message={
+          caretakerToToggle?.nextStatus
+            ? `Activate ${caretakerToToggle?.member?.first_name} ${caretakerToToggle?.member?.last_name}? They will be able to log in and manage the farm again.`
+            : `Deactivate ${caretakerToToggle?.member?.first_name} ${caretakerToToggle?.member?.last_name}? They will no longer be able to log in or access this farm. You can reactivate them anytime.`
+        }
+        confirmText={caretakerToToggle?.nextStatus ? 'Activate' : 'Deactivate'}
+        cancelText="Cancel"
+        icon={caretakerToToggle?.nextStatus ? 'checkmark-circle-outline' : 'pause-circle-outline'}
+        iconColor={caretakerToToggle?.nextStatus ? '#2E7D32' : '#E65100'}
+        isDestructive={!caretakerToToggle?.nextStatus}
+        loading={togglingStatus}
+        onConfirm={confirmToggleStatus}
+        onCancel={() => setCaretakerToToggle(null)}
+      />
+
       {/* Remove Caretaker Confirmation Modal */}
       <ConfirmModal
         visible={!!caretakerToRemove}
         title="Remove Caretaker"
-        message={`Remove ${caretakerToRemove?.first_name} ${caretakerToRemove?.last_name} from ${farm?.farm_name}?`}
+        message={`Remove ${caretakerToRemove?.first_name} ${caretakerToRemove?.last_name} from ${farm?.farm_name}? Their account will be deactivated and they will not be able to log in.`}
         confirmText="Remove"
         cancelText="Cancel"
         icon="person-remove-outline"
@@ -651,6 +840,7 @@ const styles = StyleSheet.create({
   memberEmail:       { fontSize: 12, marginTop: 2 },
   memberJoined:      { fontSize: 11, marginTop: 3 },
   removeBtn:         { padding: 8 },
+  statusToggleBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
 
   // Empty state
   emptyState:        { alignItems: 'center', paddingVertical: 48, gap: 12 },

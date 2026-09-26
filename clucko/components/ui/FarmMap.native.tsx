@@ -1,5 +1,4 @@
-import * as Location from 'expo-location';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -26,7 +25,7 @@ function buildHtml(
 ) {
   const pinned = farms.filter((f) => f.latitude != null && f.longitude != null);
 
-  // Determine center & zoom
+  // Determine default center & zoom
   let centerLat = DAVAO_CITY_CENTER[0];
   let centerLng = DAVAO_CITY_CENTER[1];
   let zoomLevel = 12;
@@ -46,11 +45,12 @@ function buildHtml(
       (f) => {
         const farmName = f.name || f.farm_name || 'Farm';
         return `
-      L.marker([${f.latitude}, ${f.longitude}], { icon: pinIcon }).addTo(map)
+      var m = L.marker([${f.latitude}, ${f.longitude}], { icon: pinIcon })
         .bindPopup(${JSON.stringify(farmName)})
         .on('click', function() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'markerPress', farmId: ${JSON.stringify(f.id)} }));
         });
+      markersGroup.addLayer(m);
     `;
       }
     )
@@ -68,43 +68,48 @@ function buildHtml(
       <div id="map"></div>
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
       <script>
-        var davaoBounds = [[6.95, 125.2], [7.45, 125.7]];
         var map = L.map('map', {
           center: [${centerLat}, ${centerLng}],
           zoom: ${zoomLevel},
-          minZoom: 10,
-          maxBounds: davaoBounds,
-          maxBoundsViscosity: 1.0,
+          minZoom: 4,
+          maxZoom: 18,
         });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
+        // Green farm pin icon with white chicken pen / coop SVG matching Pic 5
         var pinIcon = L.divIcon({
           className: '',
-          html: '<div style="width:30px;height:30px;border-radius:50%;background:${primaryColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);"><div style="width:10px;height:10px;background:#fff;border-radius:2px;"></div></div>',
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
+          html: '<div style="width:34px;height:34px;border-radius:50%;background:#2E7D32;border:2.5px solid #ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 6px rgba(0,0,0,0.35);"><svg width="22" height="22" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 19 22 L 38 6 L 57 22" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M 23 25 L 38 13 L 53 25" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="24" y="24" width="28" height="21" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="33" y="28" width="10" height="10" stroke="#ffffff" stroke-width="2"/><line x1="38" y1="28" x2="38" y2="38" stroke="#ffffff" stroke-width="1.8"/><line x1="33" y1="33" x2="43" y2="33" stroke="#ffffff" stroke-width="1.8"/><rect x="27" y="45" width="4.5" height="10" stroke="#ffffff" stroke-width="2"/><rect x="44.5" y="45" width="4.5" height="10" stroke="#ffffff" stroke-width="2"/><line x1="7" y1="55" x2="24" y2="37" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><line x1="7" y1="52" x2="11.5" y2="56.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="11.5" y1="47.5" x2="16" y2="52" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="43" x2="20.5" y2="47.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><line x1="20.5" y1="38.5" x2="25" y2="43" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg></div>',
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -17]
         });
 
-        var meMarker = null;
-        var meIcon = L.divIcon({
-          className: '',
-          html: '<div style="width:18px;height:18px;border-radius:50%;background:#2196F3;border:3px solid #fff;box-shadow:0 0 0 2px rgba(33,150,243,0.4);"></div>',
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-        });
-
-        // Called from React Native via injectJavaScript once a device
-        // location has been resolved through expo-location.
-        window.flyToMyLocation = function(lat, lng) {
-          if (meMarker) { map.removeLayer(meMarker); }
-          meMarker = L.marker([lat, lng], { icon: meIcon }).addTo(map);
-          map.flyTo([lat, lng], 15, { duration: 1 });
-        };
-
+        var markersGroup = L.featureGroup().addTo(map);
         ${markersJs}
-        ${pinned.length === 1 ? `map.setView([${centerLat}, ${centerLng}], ${zoomLevel});` : ''}
+
+        // Auto zoom / navigate depending on farm count
+        var farmCount = markersGroup.getLayers().length;
+        if (farmCount === 1) {
+          var singleMarker = markersGroup.getLayers()[0];
+          map.setView(singleMarker.getLatLng(), 15);
+        } else if (farmCount >= 2) {
+          map.fitBounds(markersGroup.getBounds().pad(0.2));
+        }
+
+        window.fitAllFarms = function() {
+          var count = markersGroup.getLayers().length;
+          if (count === 1) {
+            var layer = markersGroup.getLayers()[0];
+            map.flyTo(layer.getLatLng(), 15, { duration: 0.8 });
+          } else if (count >= 2) {
+            map.flyToBounds(markersGroup.getBounds().pad(0.2), { duration: 0.8 });
+          } else {
+            map.flyTo([${DAVAO_CITY_CENTER[0]}, ${DAVAO_CITY_CENTER[1]}], 12, { duration: 0.8 });
+          }
+        };
       </script>
     </body>
     </html>
@@ -124,7 +129,6 @@ export default function FarmMap({
     [farms, primaryColor, initialCenter, initialZoom]
   );
   const webviewRef = useRef<WebView>(null);
-  const [locating, setLocating] = useState(false);
 
   const handleMessage = (event: any) => {
     try {
@@ -137,28 +141,8 @@ export default function FarmMap({
     }
   };
 
-  // Requests device location via expo-location, then hands the coordinates
-  // to the Leaflet map running inside the WebView so it can fly to them.
-  // Requires the "expo-location" package (and its location permission
-  // entries in app.json) to already be installed — this mirrors the same
-  // ImagePicker/MediaLibrary permission pattern used elsewhere in the app.
-  const handleMyLocation = async () => {
-    try {
-      setLocating(true);
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setLocating(false);
-        return;
-      }
-      const position = await Location.getCurrentPositionAsync({});
-      webviewRef.current?.injectJavaScript(
-        `window.flyToMyLocation(${position.coords.latitude}, ${position.coords.longitude}); true;`
-      );
-    } catch (error) {
-      console.error('Error getting current location:', error);
-    } finally {
-      setLocating(false);
-    }
+  const handleFarmLocations = () => {
+    webviewRef.current?.injectJavaScript('window.fitAllFarms(); true;');
   };
 
   return (
@@ -175,13 +159,13 @@ export default function FarmMap({
       />
 
       <TouchableOpacity
-        style={styles.myLocationButton}
-        onPress={handleMyLocation}
+        style={styles.farmLocationsButton}
+        onPress={handleFarmLocations}
         activeOpacity={0.8}
       >
-        <Text style={[styles.myLocationDot, { color: primaryColor }]}>◎</Text>
-        <Text style={[styles.myLocationText, { color: primaryColor }]}>
-          {locating ? 'Locating…' : 'My Location'}
+        <View style={[styles.farmLocationsDot, { backgroundColor: primaryColor }]} />
+        <Text style={[styles.farmLocationsText, { color: primaryColor }]}>
+          Farm Locations
         </Text>
       </TouchableOpacity>
     </View>
@@ -191,7 +175,7 @@ export default function FarmMap({
 const styles = StyleSheet.create({
   container: { width: '100%', borderRadius: 16, overflow: 'hidden', position: 'relative' },
   webview: { flex: 1, backgroundColor: 'transparent' },
-  myLocationButton: {
+  farmLocationsButton: {
     position: 'absolute',
     top: 10,
     right: 10,
@@ -209,6 +193,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  myLocationDot: { fontSize: 13, fontWeight: '700' },
-  myLocationText: { fontSize: 12, fontWeight: '700' },
+  farmLocationsDot: { width: 7, height: 7, borderRadius: 3.5 },
+  farmLocationsText: { fontSize: 12, fontWeight: '700' },
 });

@@ -13,6 +13,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -32,15 +33,30 @@ import ChickenAvatar from '../../components/ui/ChickenAvatar';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import DisclaimerModal from '../../components/ui/DisclaimerModal';
 import ExitGuestConfirmModal from '../../components/ui/ExitGuestConfirmModal';
+import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
 import WelcomeModal from '../../components/ui/WelcomeModal';
-import { apiGetProfile, apiGetActivities } from '../../lib/api';
+import { apiGetProfile, apiGetActivities, apiGetMyPlan } from '../../lib/api';
 import { getRelativeDateLabel, getUpcomingTasks, loadTasks, Task, toggleTaskComplete } from '../../utils/tasks';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FEATURED_CARD_WIDTH = Math.min(screenWidth - 32, 340);
+
+// 5 curated stock photography images for the Scan & Detect background slideshow:
+// 1. Aerial drone view of hundreds of aligned gamefowl pens and cordons across green pastures
+// 2. Athletic gamefowl roosters sparring in action on a lush farm
+// 3. Breathtaking scenic sunrise over a rural poultry farm with rolling green hills
+// 4. Majestic Philippine gamefowl rooster perched proudly on a wooden post
+// 5. Clean cordoned teepees and feeding stations across a manicured farm lawn
+const SLIDESHOW_IMAGES = [
+  require('../../assets/images/slide_aerial_pens.jpg'),
+  require('../../assets/images/slide_sparring.jpg'),
+  require('../../assets/images/slide_farm_golden_hour.jpg'),
+  require('../../assets/images/slide_rooster_post.jpg'),
+  require('../../assets/images/slide_cordon_pens.jpg'),
+];
 
 // NOTE: the bundled CK-00X sample images and the imageKey->birdImages map
 // have been removed. A chicken's card image now comes exclusively from
@@ -117,6 +133,7 @@ export default function HomeScreen() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
+  const [subscription, setSubscription] = useState<any>(null);
 
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [acceptedDisclaimer, setAcceptedDisclaimer] = useState(false);
@@ -139,10 +156,69 @@ export default function HomeScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
 
   const featuredListRef = useRef<FlatList>(null);
+  const [slideA, setSlideA] = useState(SLIDESHOW_IMAGES[0]);
+  const [slideB, setSlideB] = useState(SLIDESHOW_IMAGES[1]);
+  const slideIndexRef = useRef(0);
+  const activeBufferRef = useRef<'A' | 'B'>('A');
+  const fadeAnim = useRef(new Animated.Value(0)).current; // 0 = A is 100%, 1 = B is 100%
+  const [isUserDraggingFeatured, setIsUserDraggingFeatured] = useState(false);
+
+  // Seamless ping-pong buffer cross-fade transition every 4.5 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const nextIndex = (slideIndexRef.current + 1) % SLIDESHOW_IMAGES.length;
+      slideIndexRef.current = nextIndex;
+
+      if (activeBufferRef.current === 'A') {
+        // Transition from A to B (fadeAnim 0 -> 1)
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) {
+            activeBufferRef.current = 'B';
+            // While B is fully visible and A is completely invisible (opacity 0),
+            // prepare A with the picture that will follow after B!
+            const afterNext = (nextIndex + 1) % SLIDESHOW_IMAGES.length;
+            setSlideA(SLIDESHOW_IMAGES[afterNext]);
+          }
+        });
+      } else {
+        // Transition from B to A (fadeAnim 1 -> 0)
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) {
+            activeBufferRef.current = 'A';
+            // While A is fully visible and B is completely invisible (opacity 0),
+            // prepare B with the picture that will follow after A!
+            const afterNext = (nextIndex + 1) % SLIDESHOW_IMAGES.length;
+            setSlideB(SLIDESHOW_IMAGES[afterNext]);
+          }
+        });
+      }
+    }, 4500);
+
+    return () => clearInterval(timer);
+  }, []);
 
   const guestAlert = (featureLabel: string = 'this feature') => {
     setGuestFeature(featureLabel);
     setGuestModalVisible(true);
+  };
+
+  const loadSubscription = async () => {
+    try {
+      const res = await apiGetMyPlan();
+      if (res && res.subscription) {
+        setSubscription(res.subscription);
+      }
+    } catch (err) {
+      console.warn('Could not load plan on home:', err);
+    }
   };
 
   useEffect(() => {
@@ -151,6 +227,7 @@ export default function HomeScreen() {
     loadChickens();
     loadFarms().then(setFarms);
     loadUpcomingTasks();
+    loadSubscription();
     checkDisclaimerStatus();
     checkLoginWelcome();
   }, []);
@@ -162,6 +239,7 @@ export default function HomeScreen() {
       loadFarms().then(setFarms);
       loadUpcomingTasks();
       loadRecentActivities();
+      loadSubscription();
       checkLoginWelcome();
     }, [])
   );
@@ -232,8 +310,7 @@ export default function HomeScreen() {
     }
   };
 
-  // Shows Welcome Modal whenever the user logs in (set via pending_welcome_login
-  // flag on login/signup/guest-mode entry).
+  // Shows Welcome Modal only when a new account logs in for the first time.
   const checkLoginWelcome = async () => {
     try {
       const pending = await AsyncStorage.getItem('pending_welcome_login');
@@ -243,7 +320,15 @@ export default function HomeScreen() {
         const guest = await checkIsGuestMode();
         if (guest) {
           setWelcomeName('Guest');
+          setShowWelcomeModal(true);
         } else {
+          const userId = await AsyncStorage.getItem('user_id');
+          if (userId) {
+            const hasSeen = await AsyncStorage.getItem(`has_seen_welcome_${userId}`);
+            if (hasSeen === 'true') {
+              return; // Already seen welcome modal, do not show again
+            }
+          }
           let displayName = '';
           const storedName = await AsyncStorage.getItem('userName');
           if (storedName && storedName.trim() && storedName.toLowerCase() !== 'user') {
@@ -256,8 +341,8 @@ export default function HomeScreen() {
             }
           }
           setWelcomeName(displayName || 'there');
+          setShowWelcomeModal(true);
         }
-        setShowWelcomeModal(true);
       }
     } catch (error) {
       console.error('Error checking login welcome:', error);
@@ -266,6 +351,15 @@ export default function HomeScreen() {
 
   const handleCloseWelcomeModal = async () => {
     setShowWelcomeModal(false);
+
+    try {
+      const userId = await AsyncStorage.getItem('user_id');
+      if (userId) {
+        await AsyncStorage.setItem(`has_seen_welcome_${userId}`, 'true');
+      }
+    } catch (error) {
+      console.error('Error saving has_seen_welcome:', error);
+    }
 
     // After Welcome Modal is dismissed via "Get Started", check if the user
     // has ever seen/accepted the Medical Disclaimer. If not, show it now!
@@ -387,7 +481,7 @@ export default function HomeScreen() {
   };
 
   const handleBirdPress = (bird: any) => {
-    router.push(`/chicken/${bird.id}`);
+    router.push(`/chicken/${bird.id || bird.chickenId}`);
   };
 
   const handleHealthTrack = () => {
@@ -460,6 +554,28 @@ export default function HomeScreen() {
   const filterOptions = ['All', 'Healthy', 'Warning', 'Critical'];
   const filteredBirds = getFilteredBirds();
   const featuredBirds = filteredBirds.slice(0, 8);
+
+  // Auto-scroll animation for horizontally scrollable featured chickens
+  useEffect(() => {
+    if (featuredBirds.length <= 1 || isUserDraggingFeatured) return;
+
+    const interval = setInterval(() => {
+      setFeaturedIndex((prevIndex) => {
+        const nextIndex = (prevIndex + 1) % featuredBirds.length;
+        try {
+          featuredListRef.current?.scrollToIndex({
+            index: nextIndex,
+            animated: true,
+          });
+        } catch {
+          // Handled by onScrollToIndexFailed
+        }
+        return nextIndex;
+      });
+    }, 3800);
+
+    return () => clearInterval(interval);
+  }, [featuredBirds.length, isUserDraggingFeatured]);
 
   const healthyCount = allChickens.filter((c) => getHealthStatus(c) === 'Healthy').length;
   const warningCount = allChickens.filter((c) => getHealthStatus(c) === 'Warning').length;
@@ -560,7 +676,7 @@ export default function HomeScreen() {
 
             <View style={styles.featuredMetaRow}>
               <View style={styles.featuredMetaItem}>
-                <Ionicons name="home-outline" size={13} color={colors.textLight} />
+                <FarmIcon size={14} color={colors.textLight} />
                 <View>
                   <Text style={[styles.featuredMetaLabel, { color: colors.textLight }]}>Farm</Text>
                   <Text style={[styles.featuredMetaValue, { color: colors.text }]} numberOfLines={1}>
@@ -605,7 +721,7 @@ export default function HomeScreen() {
           <Text style={[styles.taskTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
           {item.farm_name && (
             <View style={[styles.taskHomeFarmBadge, { backgroundColor: colors.primary + '18' }]}>
-              <Ionicons name="home-outline" size={10} color={colors.primary} />
+              <FarmIcon size={11} color={colors.primary} />
               <Text style={[styles.taskHomeFarmText, { color: colors.primary }]}>{item.farm_name}</Text>
             </View>
           )}
@@ -643,26 +759,76 @@ export default function HomeScreen() {
               {isGuestMode ? 'User' : userName}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TouchableOpacity
-              style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
-              onPress={() => setShowNotifications(true)}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="notifications-outline" size={20} color={colors.text} />
-              {unreadCount > 0 && (
-                <View style={styles.headerBellBadge}>
-                  <Text style={styles.headerBellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.avatarButton, { backgroundColor: colors.card, borderColor: colors.divider }]} onPress={handleAvatarPress}>
-              <Image source={require('../../assets/images/logo.png')} style={styles.avatarImage} />
-              <View style={[styles.avatarStatusDot, { backgroundColor: '#4CAF50', borderColor: colors.card }]} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
+            onPress={() => setShowNotifications(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            {unreadCount > 0 && (
+              <View style={styles.headerBellBadge}>
+                <Text style={styles.headerBellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
+
+        {/* ===================== Subscription Banner / Status Pill ===================== */}
+        {subscription?.is_in_grace_period ? (
+          <TouchableOpacity
+            style={styles.homeGraceBanner}
+            onPress={() => router.push('/subscription')}
+            activeOpacity={0.85}
+          >
+            <LinearGradient colors={['#FF9800', '#F57C00']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.homeGraceGradient}>
+              <Ionicons name="warning" size={22} color="#fff" />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.homeGraceTitle}>7-Day Grace Period Active!</Text>
+                <Text style={styles.homeGraceSub}>
+                  {subscription.grace_days_remaining} day(s) left. Tap to renew now and avoid downgrade.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : subscription?.is_expired ? (
+          <TouchableOpacity
+            style={[styles.homePlanPill, { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' }]}
+            onPress={() => router.push('/subscription')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="alert-circle" size={16} color="#D32F2F" />
+            <Text style={[styles.homePlanPillText, { color: '#C62828' }]}>
+              Account on Free Tier • Tap to upgrade capacity
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color="#D32F2F" />
+          </TouchableOpacity>
+        ) : subscription ? (
+          <TouchableOpacity
+            style={[
+              styles.homePlanPill,
+              {
+                backgroundColor: subscription.plan === 'premium' ? '#FEF3C7' : subscription.plan === 'pro' ? '#E8F5E9' : colors.card,
+                borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? '#A5D6A7' : colors.divider,
+              },
+            ]}
+            onPress={() => router.push('/subscription')}
+            activeOpacity={0.8}
+          >
+            <FontAwesome5
+              name={subscription.plan === 'premium' ? 'crown' : subscription.plan === 'pro' ? 'award' : 'seedling'}
+              size={13}
+              color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? '#2E7D32' : '#7C3AED'}
+            />
+            <Text style={[styles.homePlanPillText, { color: colors.text }]}>
+              <Text style={{ fontWeight: '700' }}>{subscription.plan_name}</Text>
+              {subscription.plan === 'free_trial' && ` • ${subscription.days_remaining}d left (${subscription.usage?.captures_count || 0}/30 scans)`}
+              {subscription.plan === 'pro' && ` • 2 Farms • Unlimited Scans`}
+              {subscription.plan === 'premium' && ` • Unlimited All`}
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
+          </TouchableOpacity>
+        ) : null}
 
         {/* ===================== Search ===================== */}
         <View style={styles.searchWrap}>
@@ -769,39 +935,72 @@ export default function HomeScreen() {
 
         {/* ===================== Promo banner — Scan & Detect ===================== */}
         <TouchableOpacity style={styles.promoWrap} activeOpacity={0.9} onPress={handleScanNow}>
-          <LinearGradient colors={['#1B5E20', '#2E7D32', '#388E3C']} style={styles.promoCard}>
-            <View pointerEvents="none" style={styles.promoDecoRing} />
-            <View pointerEvents="none" style={styles.promoDecoRingSmall} />
-
-            <View style={styles.promoTextBlock}>
-              <Text style={styles.promoTitle}>Scan & Detect</Text>
-              <Text style={styles.promoSubtitle}>
-                Instant AI based health check{'\n'}right from your camera.
-              </Text>
-              <View style={styles.promoActionRow}>
-                <View style={styles.promoButton}>
-                  <Ionicons name="scan-outline" size={16} color="#1B5E20" />
-                  <Text style={styles.promoButtonText}>Scan Now</Text>
+          <View style={styles.promoCardContainer}>
+            {/* Seamless Buffer A Layer */}
+            <Animated.Image
+              source={slideA}
+              style={[
+                StyleSheet.absoluteFill,
+                styles.promoBgImage,
+                {
+                  opacity: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 0],
+                  }),
+                },
+              ]}
+              resizeMode="cover"
+            />
+            {/* Seamless Buffer B Layer */}
+            <Animated.Image
+              source={slideB}
+              style={[
+                StyleSheet.absoluteFill,
+                styles.promoBgImage,
+                {
+                  opacity: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 1],
+                  }),
+                },
+              ]}
+              resizeMode="cover"
+            />
+            {/* Subtle natural dark gradient for contrast without green cast or circles */}
+            <LinearGradient
+              colors={['rgba(0, 0, 0, 0.12)', 'rgba(0, 0, 0, 0.38)', 'rgba(0, 0, 0, 0.68)']}
+              style={styles.promoCard}
+            >
+              <View style={styles.promoTextBlock}>
+                <Text style={styles.promoTitle}>Scan & Detect</Text>
+                <Text style={styles.promoSubtitle}>
+                  Instant AI based health check{'\n'}right from your camera.
+                </Text>
+                <View style={styles.promoActionRow}>
+                  <View style={styles.promoButton}>
+                    <Ionicons name="scan-outline" size={16} color="#1B5E20" />
+                    <Text style={styles.promoButtonText}>Scan Now</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.promoGuideChip}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowQualityGuide(true);
+                    }}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="help-circle-outline" size={15} color="#C8E6C9" />
+                    <Text style={styles.promoGuideChipText}>Guide</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={styles.promoGuideChip}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setShowQualityGuide(true);
-                  }}
-                  activeOpacity={0.75}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="help-circle-outline" size={15} color="#C8E6C9" />
-                  <Text style={styles.promoGuideChipText}>Guide</Text>
-                </TouchableOpacity>
               </View>
-            </View>
 
-            <View style={styles.promoIconCircle}>
-              <Ionicons name="camera-outline" size={38} color="rgba(255,255,255,0.92)" />
-            </View>
-          </LinearGradient>
+              <View style={styles.promoIconCircle}>
+                <Ionicons name="camera-outline" size={38} color="rgba(255,255,255,0.92)" />
+              </View>
+            </LinearGradient>
+          </View>
         </TouchableOpacity>
 
         {/* ===================== "What Clucko Detects" info banner ===================== */}
@@ -856,16 +1055,27 @@ export default function HomeScreen() {
                 ref={featuredListRef}
                 data={featuredBirds}
                 renderItem={renderFeaturedCard}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item) => String(item.id || item.chickenId)}
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={FEATURED_CARD_WIDTH + 14}
                 decelerationRate="fast"
                 contentContainerStyle={styles.featuredList}
+                onScrollBeginDrag={() => setIsUserDraggingFeatured(true)}
+                onScrollEndDrag={() => setTimeout(() => setIsUserDraggingFeatured(false), 2000)}
                 onMomentumScrollEnd={(e) => {
+                  setIsUserDraggingFeatured(false);
                   const index = Math.round(e.nativeEvent.contentOffset.x / (FEATURED_CARD_WIDTH + 14));
                   setFeaturedIndex(Math.min(index, featuredBirds.length - 1));
+                }}
+                onScrollToIndexFailed={(info) => {
+                  setTimeout(() => {
+                    featuredListRef.current?.scrollToIndex({
+                      index: info.index,
+                      animated: true,
+                    });
+                  }, 150);
                 }}
               />
               {featuredBirds.length > 1 && (
@@ -1093,8 +1303,32 @@ export default function HomeScreen() {
         onClearAll={clearAllNotifications}
         onDismissOne={deleteNotification}
         onPressNotification={(item) => {
-          setShowNotifications(false);
-          showDetail(item);
+          markAsRead(item.id);
+          if (item.chickenId) {
+            setShowNotifications(false);
+            router.push(`/chicken/${item.chickenId}`);
+          } else if (
+            (item.title || '').toLowerCase().includes('profile') ||
+            (item.message || '').toLowerCase().includes('profile')
+          ) {
+            setShowNotifications(false);
+            router.push('/(tabs)/profile');
+          } else if (
+            (item.title || '').toLowerCase().includes('task') ||
+            (item.message || '').toLowerCase().includes('task')
+          ) {
+            setShowNotifications(false);
+            router.push('/tasks');
+          } else if (
+            (item.title || '').toLowerCase().includes('farm') ||
+            (item.message || '').toLowerCase().includes('farm')
+          ) {
+            setShowNotifications(false);
+            router.push('/farm');
+          } else {
+            // No redirection needed (e.g. login "Welcome Back")
+            // Automatically marked as read/done. Do NOT show notification detail again!
+          }
         }}
       />
     </SafeAreaView>
@@ -1266,6 +1500,16 @@ const styles = StyleSheet.create({
 
   // --- Promo banner (Scan & Detect) ---
   promoWrap: { marginBottom: 18 },
+  promoCardContainer: {
+    borderRadius: 26,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#0a1f0d',
+  },
+  promoBgImage: {
+    width: '100%',
+    height: '100%',
+  },
   promoCard: {
     borderRadius: 26,
     padding: 22,
@@ -1274,29 +1518,25 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
-  promoDecoRing: {
-    position: 'absolute',
-    top: -50,
-    right: -40,
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    borderWidth: 26,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  promoDecoRingSmall: {
-    position: 'absolute',
-    bottom: -30,
-    right: 60,
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 14,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
   promoTextBlock: { flex: 1, paddingRight: 10 },
-  promoTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 8 },
-  promoSubtitle: { color: '#C8E6C9', fontSize: 13, lineHeight: 18, marginBottom: 16 },
+  promoTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1.5 },
+    textShadowRadius: 4,
+  },
+  promoSubtitle: {
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   promoActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1627,4 +1867,46 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontWeight: '500',
   },
-});
+  homeGraceBanner: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 10,
+    marginBottom: 6,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  homeGraceGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  homeGraceTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  homeGraceSub: {
+    color: '#FFF8E1',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  homePlanPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginTop: 10,
+    marginBottom: 4,
+    gap: 8,
+  },
+  homePlanPillText: {
+    fontSize: 12,
+    flex: 1,
+  },
+});

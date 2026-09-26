@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import ChickenIcon from './ChickenIcon';
+import FarmIcon from './FarmIcon';
 import {
   ActivityIndicator,
   Image,
@@ -172,7 +173,7 @@ export default function AddChickenModal({
               onPress={() => setShowFarmPicker((v) => !v)}
               activeOpacity={0.8}
             >
-              <Ionicons name="home-outline" size={18} color={colors.textLight} style={styles.inputIcon} />
+              <FarmIcon size={18} color={colors.textLight} style={styles.inputIcon} />
               <Text style={[styles.input, { color: selectedFarm ? colors.text : colors.textLight }]} numberOfLines={1}>
                 {selectedFarm ? selectedFarm.farm_name : 'Select a farm'}
               </Text>
@@ -201,7 +202,7 @@ export default function AddChickenModal({
                         onPress={() => handleSelectFarm(farm.id)}
                         activeOpacity={0.75}
                       >
-                        <Ionicons name="home" size={15} color={colors.primary} />
+                        <FarmIcon size={16} color={colors.primary} />
                         <View style={{ flex: 1 }}>
                           <Text style={[styles.dropdownRowName, { color: colors.text }]}>{farm.farm_name}</Text>
                           {!!farm.farm_location && (

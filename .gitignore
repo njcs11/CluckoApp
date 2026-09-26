@@ -8,7 +8,16 @@ __pycache__/
 *$py.class
 *.pyc
 
+# Secrets & Environment Variables
+.env
+.env.*
+*.env
+backend/.env
+!.env.example
+!backend/.env.example
+
 # Node & Package Managers
+frontend/node_modules/
 frontend/node_modules/.cache/
 clucko/node_modules/
 .npm/

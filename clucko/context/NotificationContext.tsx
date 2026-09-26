@@ -57,6 +57,7 @@ interface NotifyInput {
   type: 'success' | 'warning' | 'info' | 'alert';
   chickenId?: string;
   chickenName?: string;
+  skipBackendSync?: boolean;
 }
 
 interface NotificationContextValue {
@@ -196,7 +197,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       // 2. Broadcast to backend so other farm members receive it
       const token = await getToken();
-      if (token) {
+      if (token && !data.skipBackendSync) {
         apiCreateNotification({
           farm_id: data.farm_id,
           title: data.title,
@@ -278,6 +279,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         notification={displayed}
         onClose={closeToast}
         onViewChicken={handleViewChicken}
+        onViewProfile={() => {
+          closeToast();
+          router.push('/(tabs)/profile');
+        }}
+        onViewFarm={() => {
+          closeToast();
+          router.push('/farm');
+        }}
+        onViewTasks={() => {
+          closeToast();
+          router.push('/tasks');
+        }}
       />
     </NotificationContext.Provider>
   );

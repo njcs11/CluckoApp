@@ -41,6 +41,30 @@ def save_scan():
                     'detection_id': dup_scan['id']
                 }), 200
 
+            # Check subscription capture quota
+            farm_id = chicken_row.get('farm_id')
+            owner_id = request.user_id
+            if farm_id:
+                cur.execute('SELECT owner_id FROM farms WHERE id = %s', (farm_id,))
+                f_owner = cur.fetchone()
+                if f_owner and f_owner.get('owner_id'):
+                    owner_id = f_owner['owner_id']
+
+            from routes_subscriptions import get_effective_subscription
+            sub = get_effective_subscription(owner_id, cur, db)
+            if sub:
+                max_captures = sub['limits']['max_captures']
+                current_captures = sub['usage']['captures_count']
+                if current_captures >= max_captures:
+                    return jsonify({
+                        'error': f"Capture limit reached ({current_captures}/{max_captures}). Please upgrade to Pro or Premium for unlimited disease scans.",
+                        'code': 'PLAN_CAPTURE_LIMIT_EXCEEDED',
+                        'max_captures': max_captures,
+                        'current_captures': current_captures,
+                        'plan': sub['plan'],
+                        'plan_name': sub['plan_name']
+                    }), 403
+
             image_url = d.get('image_url') or d.get('photo_url')
             cur.execute('INSERT INTO image_captures (chicken_id,user_id,image_type,image_url) VALUES (%s,%s,%s,%s)',
                         (d['chicken_id'],request.user_id,d['image_type'],image_url))
@@ -197,3 +221,115 @@ def get_reports():
         return jsonify({'scans':scans,'breakdown':breakdown})
     finally:
         db.close()
+
+@app.route('/api/scans/qr', methods=['POST'])
+@token_required
+def record_qr_scan():
+    d = request.json or {}
+    chicken_id = d.get('chicken_id')
+    if not chicken_id:
+        return jsonify({'error': 'chicken_id required'}), 400
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('''
+                SELECT c.id, c.chicken_name, c.farm_id, c.status, c.status_color, c.photo_url FROM chickens c
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                LEFT JOIN farms f ON f.id = c.farm_id
+                WHERE (c.id = %s OR c.qr_code = %s) AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+            ''', (request.user_id, chicken_id, str(chicken_id), request.user_id, request.user_id, request.user_id))
+            chicken = cur.fetchone()
+            if not chicken:
+                return jsonify({'error': 'Chicken not found or access denied'}), 404
+
+            farm_id = chicken.get('farm_id')
+            cur.execute('''
+                INSERT INTO qr_scans (chicken_id, user_id, farm_id, scanned_at)
+                VALUES (%s, %s, %s, NOW())
+            ''', (chicken['id'], request.user_id, farm_id))
+            scan_id = cur.lastrowid
+            db.commit()
+
+            cur.execute('SELECT first_name, last_name, role FROM users WHERE id=%s', (request.user_id,))
+            user_row = cur.fetchone()
+            scanner_name = f"{user_row['first_name'] or ''} {user_row['last_name'] or ''}".strip() or 'User' if user_row else 'User'
+            scanner_role = (user_row['role'] or 'member').capitalize() if user_row else 'Member'
+
+            return jsonify({
+                'success': True,
+                'scan_id': scan_id,
+                'chicken_id': chicken['id'],
+                'chicken_name': chicken['chicken_name'],
+                'scanner_name': scanner_name,
+                'scanner_role': scanner_role,
+                'scanner_label': f"{scanner_name} ({scanner_role})"
+            })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/scans/qr', methods=['GET'])
+@token_required
+def get_qr_scans():
+    farm_id = request.args.get('farm_id')
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            query = '''
+                SELECT 
+                    qs.id,
+                    qs.chicken_id,
+                    qs.farm_id,
+                    qs.user_id,
+                    qs.scanned_at,
+                    c.chicken_name,
+                    c.qr_code,
+                    c.status as chicken_status,
+                    c.status_color as chicken_status_color,
+                    c.photo_url as chicken_photo,
+                    f.farm_name,
+                    u.first_name as scanner_first_name,
+                    u.last_name as scanner_last_name,
+                    u.role as scanner_role
+                FROM qr_scans qs
+                JOIN chickens c ON qs.chicken_id = c.id
+                LEFT JOIN farms f ON qs.farm_id = f.id
+                JOIN users u ON qs.user_id = u.id
+                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
+                WHERE (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
+            '''
+            params = [request.user_id, request.user_id, request.user_id, request.user_id]
+            if farm_id and str(farm_id).lower() != 'all':
+                query += ' AND qs.farm_id = %s'
+                params.append(farm_id)
+
+            query += ' ORDER BY qs.scanned_at DESC LIMIT 60'
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+
+            results = []
+            for r in rows:
+                s_name = f"{r.get('scanner_first_name') or ''} {r.get('scanner_last_name') or ''}".strip() or 'User'
+                s_role = (r.get('scanner_role') or 'member').capitalize()
+                dt = r.get('scanned_at')
+                results.append({
+                    'id': str(r['id']),
+                    'chicken_id': str(r['chicken_id']),
+                    'chicken_name': r.get('chicken_name') or 'Chicken',
+                    'qr_code': r.get('qr_code') or '',
+                    'status': r.get('chicken_status') or 'HEALTHY',
+                    'status_color': r.get('chicken_status_color') or '#4CAF50',
+                    'photo_url': r.get('chicken_photo'),
+                    'farm_id': r.get('farm_id'),
+                    'farm_name': r.get('farm_name') or 'Unassigned',
+                    'scanned_at': dt.isoformat() if hasattr(dt, 'isoformat') else str(dt),
+                    'scanner_name': s_name,
+                    'scanner_role': s_role,
+                    'scanner_label': f"{s_name} ({s_role})",
+                })
+            return jsonify(results)
+    finally:
+        db.close()

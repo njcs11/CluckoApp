@@ -1,24 +1,49 @@
 /**
  * Google OAuth Configuration for Clucko
  * 
- * INSTRUCTIONS TO CONNECT REAL GOOGLE ACCOUNTS:
- * 1. Go to Google Cloud Console: https://console.cloud.google.com/
- * 2. Create a project named "Clucko" (or select your existing project).
- * 3. Go to "APIs & Services" > "OAuth consent screen". Select "External" and fill in App Name ("Clucko") and user support email.
- * 4. Go to "Credentials" > "+ CREATE CREDENTIALS" > "OAuth client ID".
- *    - For Expo Go & Web testing: Select Application type "Web application".
- *      Add Authorized redirect URI:
- *      - https://auth.expo.io/@anonymous/Clucko (or your Expo username slug)
- *    - Copy the generated "Client ID" and paste it into `webClientId` below.
- * 5. (Optional for Android Standalone APK build):
- *    - Create an "Android" OAuth client ID with package name `com.anonymous.Clucko` and your SHA-1 fingerprint.
+ * ═════════════════════════════════════════════════════════════════════════════
+ * 🚀 HOW TO REMOVE THE "TEST USERS" LIMITATION FOR PRODUCTION DEPLOYMENT
+ * ═════════════════════════════════════════════════════════════════════════════
+ * 
+ * PROBLEM:
+ * When testing, Google shows "Access blocked: Clucko has not completed the Google
+ * verification process" unless an email is manually added to the Test Users list.
+ * 
+ * SOLUTION FOR DEPLOYMENT (NO GOOGLE VERIFICATION REQUIRED):
+ * 1. Open Google Cloud Console: https://console.cloud.google.com/
+ * 2. Select your project ("Clucko").
+ * 3. Go to "APIs & Services" > "OAuth consent screen".
+ * 4. Look at "Publishing status" (it is currently set to "Testing").
+ * 5. Click the "PUBLISH APP" button!
+ * 6. In the confirmation dialog, click "Confirm" / "Push to production".
+ * 
+ * WHY THIS WORKS INSTANTLY:
+ * Clucko ONLY requests 3 standard non-sensitive scopes:
+ *   - .../auth/userinfo.email
+ *   - .../auth/userinfo.profile
+ *   - openid
+ * Google DOES NOT require manual verification, legal audits, or screen recordings
+ * for non-sensitive scopes. Once you click "Publish App", it immediately becomes
+ * "In production", and ANY user with ANY Google account can sign in without being
+ * added to the test user list!
+ * 
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AUTHORIZED REDIRECT URIs TO CONFIGURE IN GOOGLE CLOUD CONSOLE:
+ * In Credentials > OAuth 2.0 Client IDs > Web Client:
+ * 1. For Expo Go testing:
+ *    - https://auth.expo.io/@anonymous/Clucko
+ * 2. For Web deployment:
+ *    - http://localhost:8081
+ *    - http://127.0.0.1:8081
+ *    - https://your-production-domain.com
+ * ═════════════════════════════════════════════════════════════════════════════
  */
 
 export const GOOGLE_AUTH_CONFIG = {
-  // Web Client ID (Recommended: Works across Expo Go, Web, and Android via AuthSession)
+  // Web Client ID (Works across Expo Go, Web, and Android via AuthSession)
   webClientId: "968620025166-0dfmp6qlrf4oh2f6ssh2s79s0lia6v0a.apps.googleusercontent.com",
 
-  // Android Client ID (Used when building standalone Android APKs)
+  // Android Client ID (Used when building standalone Android APKs via EAS Build)
   androidClientId: "",
 
   // iOS Client ID (Optional)

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import ChickenIcon from './ChickenIcon';
+import FarmIcon from './FarmIcon';
 
 const { height } = Dimensions.get('window');
 
@@ -107,7 +108,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
 
                   <View style={styles.featureItem}>
                     <View style={styles.featureIconWrap}>
-                      <Ionicons name="home-outline" size={16} color="#2E7D32" />
+                      <FarmIcon size={16} color="#2E7D32" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.featureHeading, { color: textPrimary }]}>Multi-Farm & Caretakers</Text>

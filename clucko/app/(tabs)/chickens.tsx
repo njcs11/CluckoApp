@@ -1,8 +1,8 @@
 import { useDarkMode } from '@/context/DarkModeContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { getHealthStatus, getStatusColor } from '@/utils/birdStatus';
-import { addChickenForCurrentUser, loadChickensForCurrentUser } from '@/utils/chickenStorage';
-import { getUserRole, apiGetFarms } from '../../lib/api';
+import { addChickenForCurrentUser, generateNextChickenCode, loadChickensForCurrentUser } from '@/utils/chickenStorage';
+import { getUserRole, apiGetFarms, apiGetQrScans } from '../../lib/api';
 import { apiGetReports } from '../../lib/api';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
 import { persistChickenPhoto } from '@/utils/photoStorage';
@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -36,6 +37,7 @@ import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenAvatar from '../../components/ui/ChickenAvatar';
 import ChickenIcon from '../../components/ui/ChickenIcon';
+import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 
 // Accent color used only for the active "Overview" toggle tab and the
@@ -104,6 +106,22 @@ type ScanHistoryItem = {
   date: string;
   time: string;
   condition: string;
+};
+
+type RecentScanItem = {
+  id: string;
+  chicken_id: string;
+  chicken_name: string;
+  qr_code: string;
+  status: string;
+  status_color: string;
+  photo_url?: string | null;
+  farm_id?: number | null;
+  farm_name: string;
+  scanned_at: string;
+  scanner_name: string;
+  scanner_role: string;
+  scanner_label: string;
 };
 
 // Options for the "Sort by" control on the All Birds list. Purely a
@@ -218,6 +236,23 @@ export default function ChickensScreen() {
   };
 
 const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
+const [recentScans, setRecentScans] = useState<RecentScanItem[]>([]);
+const [loadingRecentScans, setLoadingRecentScans] = useState(false);
+
+const loadRecentScans = async () => {
+  try {
+    setLoadingRecentScans(true);
+    const farmParam = selectedFarmFilter !== 'all' ? selectedFarmFilter : undefined;
+    const data = await apiGetQrScans(farmParam);
+    if (Array.isArray(data)) {
+      setRecentScans(data);
+    }
+  } catch (error) {
+    console.error('Error loading recent scans:', error);
+  } finally {
+    setLoadingRecentScans(false);
+  }
+};
 
 const loadScanHistory = async () => {
   try {
@@ -255,6 +290,7 @@ const loadScanHistory = async () => {
     checkGuestMode();
     refreshFarms();
     loadScanHistory();
+    loadRecentScans();
   }, [])
 );
 
@@ -264,7 +300,12 @@ useEffect(() => {
   checkGuestMode();
   refreshFarms();
   loadScanHistory();
+  loadRecentScans();
 }, []);
+
+useEffect(() => {
+  loadRecentScans();
+}, [selectedFarmFilter]);
 
   const refreshFarms = async () => {
   try {
@@ -386,18 +427,14 @@ useEffect(() => {
   // shared 'chickens' key. This is what previously let a new signup (or
   // another account) wipe out or collide with this account's flock.
   const saveChickenToStorage = async (chickenData: Bird) => {
-  try {
     await addChickenForCurrentUser({
       name: chickenData.name,
       photo: chickenData.photo,
       farmId: chickenData.farmId,
+      chickenId: chickenData.chickenId,
     });
     return true;
-  } catch (error) {
-    console.error('Error saving chicken:', error);
-    return false;
-  }
-};
+  };
 
   const handleGenerateQR = () => {
     if (isGuestMode) {
@@ -413,8 +450,8 @@ useEffect(() => {
       return;
     }
 
+    const chickenId = generateNextChickenCode(allBirds, newChicken.farmId);
     const newId = (allBirds.length + 1).toString();
-    const chickenId = `CK-${String(newId).padStart(3, '0')}`;
 
     // Set BOTH `status` and `healthStatus` together on creation — the two
     // fields have historically drifted out of sync (one screen writing
@@ -449,20 +486,34 @@ useEffect(() => {
     if (isSavingChicken || !generatedQR) return;
     setIsSavingChicken(true);
     try {
-      const saved = await saveChickenToStorage(generatedQR);
-      if (saved) {
+      await saveChickenToStorage(generatedQR);
+      setShowQRModal(false);
+      setActiveTab('all');
+      await loadChickens();
+      await notify({
+        title: 'Chicken Added',
+        message: `${generatedQR.name} has been added to your flock.`,
+        type: 'success',
+        chickenId: String(generatedQR.id || generatedQR.chickenId),
+        chickenName: generatedQR.name,
+      });
+      setNewChicken({ name: '', photo: null, farmId: null });
+    } catch (err: any) {
+      const msg = err.message || '';
+      if (msg.includes('Chicken limit reached') || msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED')) {
         setShowQRModal(false);
-        await loadChickens();
-        await notify({
-          title: 'Chicken Added',
-          message: `${generatedQR.name} has been added to your flock.`,
-          type: 'success',
-        });
-        setNewChicken({ name: '', photo: null, farmId: null });
+        Alert.alert(
+          'Flock Limit Reached',
+          'This farm has reached its chicken quota for your current plan. Upgrade to Pro (70 chickens) or Premium (unlimited chickens) to add more.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'View Plans & Upgrade', onPress: () => router.push('/subscription') }
+          ]
+        );
       } else {
         notify({
           title: 'Save Failed',
-          message: 'Failed to save chicken.',
+          message: msg || 'Failed to save chicken.',
           type: 'alert',
         });
       }
@@ -597,16 +648,32 @@ useEffect(() => {
     return filtered;
   };
 
+  // Farm-scoped chicken list:
+  // If a specific farm is selected, stats, counts, and alerts reflect ONLY that farm's chickens.
+  // If 'all' farms are selected, they reflect the overall flock.
+  const farmBirds = useMemo(() => {
+    if (selectedFarmFilter === 'all') return allBirds;
+    return allBirds.filter((bird) => String(bird.farmId) === String(selectedFarmFilter));
+  }, [allBirds, selectedFarmFilter]);
+
+  // Health alerts scoped to the active farm filter:
+  const farmHealthAlerts = useMemo(() => {
+    if (selectedFarmFilter === 'all') return healthAlerts;
+    return healthAlerts.filter((alert) => {
+      const match = allBirds.find((b) => b.id === alert.id);
+      return match && String(match.farmId) === String(selectedFarmFilter);
+    });
+  }, [healthAlerts, allBirds, selectedFarmFilter]);
+
   // Counts now go through the same getHealthStatus() helper used by Home
-  // and Reports, so all three screens always agree on Total/Healthy/
-  // Warning/Critical for the exact same saved flock.
+  // and Reports, and respect the active farm filter.
   const getStats = () => {
-    const healthy = allBirds.filter((b) => getHealthStatus(b) === 'Healthy').length;
-    const warning = allBirds.filter((b) => getHealthStatus(b) === 'Warning').length;
-    const critical = allBirds.filter((b) => getHealthStatus(b) === 'Critical').length;
+    const healthy = farmBirds.filter((b) => getHealthStatus(b) === 'Healthy').length;
+    const warning = farmBirds.filter((b) => getHealthStatus(b) === 'Warning').length;
+    const critical = farmBirds.filter((b) => getHealthStatus(b) === 'Critical').length;
 
     return [
-      { label: 'All Birds', count: allBirds.length.toString(), color: '#4CAF50', icon: 'kiwi-bird', filter: 'all' },
+      { label: 'All Chickens', count: farmBirds.length.toString(), color: '#4CAF50', icon: 'kiwi-bird', filter: 'all' },
       { label: 'Healthy', count: healthy.toString(), color: '#4CAF50', icon: 'heart-pulse', filter: 'healthy' },
       { label: 'Warning', count: warning.toString(), color: '#FF9800', icon: 'alert-circle-outline', filter: 'warning' },
       { label: 'Critical', count: critical.toString(), color: '#f44336', icon: 'warning-outline', filter: 'critical' },
@@ -657,25 +724,31 @@ useEffect(() => {
           <ChickenAvatar photo={item.photo} size={54} />
 
           <View style={styles.birdCardIdentity}>
-            <Text style={[styles.birdName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+            <View style={styles.birdNameRow}>
+              <Text style={[styles.birdName, { color: colors.text }]} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
+                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+                <Text style={[styles.statusText, { color: statusColor }]}>
+                  {getHealthStatus(item).toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.birdMetaRow}>
-              <Text style={[styles.birdIdTag, { color: colors.textLight }]}>{item.chickenId || `CK-00${item.id}`}</Text>
+              <Text style={[styles.birdIdTag, { color: colors.textLight }]}>
+                {item.chickenId || `CK-00${item.id}`}
+              </Text>
               {(item.farmName || item.farmId) && (
                 <View style={[styles.farmBadgePill, { backgroundColor: colors.primary + '15' }]}>
-                  <Ionicons name="home-outline" size={10} color={colors.primary} />
+                  <FarmIcon size={11} color={colors.primary} />
                   <Text style={[styles.farmBadgePillText, { color: colors.primary }]} numberOfLines={1}>
                     {item.farmName || getFarmName(farms, item.farmId)}
                   </Text>
                 </View>
               )}
             </View>
-          </View>
-
-          <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            <Text style={[styles.statusText, { color: statusColor }]}>
-              {getHealthStatus(item).toUpperCase()}
-            </Text>
           </View>
         </View>
 
@@ -705,7 +778,11 @@ useEffect(() => {
   };
 
   const renderAlertItem = ({ item }: any) => (
-    <TouchableOpacity style={[styles.alertItemCard, { backgroundColor: colors.card }]} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={[styles.alertItemCard, { backgroundColor: colors.card }]}
+      activeOpacity={0.85}
+      onPress={() => router.push(`/chicken/${item.chickenId || item.id}`)}
+    >
       <View style={[styles.alertAccent, { backgroundColor: item.statusColor }]} />
       <View style={styles.alertItemBody}>
         <View style={styles.alertItemHeader}>
@@ -727,6 +804,61 @@ useEffect(() => {
       </View>
     </TouchableOpacity>
   );
+
+  const renderRecentScanItem = ({ item }: { item: RecentScanItem }) => {
+    const dt = item.scanned_at ? new Date(item.scanned_at) : null;
+    const dateStr = dt && !isNaN(dt.getTime())
+      ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      : '';
+    const timeStr = dt && !isNaN(dt.getTime())
+      ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const timeDisplay = dateStr && timeStr ? `${dateStr} · ${timeStr}` : item.scanned_at || 'Recently';
+    const birdPhoto = item.photo_url || getBirdImageForChickenId(item.qr_code);
+
+    return (
+      <TouchableOpacity
+        style={[styles.scanHistoryCard, { backgroundColor: colors.card, borderColor: colors.divider }]}
+        activeOpacity={0.85}
+        onPress={() => router.push(`/chicken/${item.chicken_id}`)}
+      >
+        <ChickenAvatar photo={birdPhoto} size={54} />
+        <View style={styles.scanHistoryInfo}>
+          <View style={styles.scanHistoryTopRow}>
+            <Text style={[styles.scanHistoryName, { color: colors.text }]} numberOfLines={1}>
+              {item.qr_code ? `${item.qr_code} · ${item.chicken_name}` : item.chicken_name}
+            </Text>
+            <View style={[styles.scanHistoryBadge, { backgroundColor: (item.status_color || '#4CAF50') + '20' }]}>
+              <Text style={[styles.scanHistoryStatus, { color: item.status_color || '#4CAF50' }]}>
+                {item.status || 'HEALTHY'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.recentScanFarmRow}>
+            <FarmIcon size={13} color={colors.textLight} />
+            <Text style={[styles.recentScanFarmText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {item.farm_name || 'Unassigned'}
+            </Text>
+          </View>
+
+          <View style={styles.scanHistoryFooter}>
+            <View style={styles.recentScanScannerRow}>
+              <Ionicons name="person-circle-outline" size={14} color={colors.primary} />
+              <Text style={[styles.recentScanScannerText, { color: colors.text }]} numberOfLines={1}>
+                {item.scanner_label || `${item.scanner_name} (${item.scanner_role})`}
+              </Text>
+            </View>
+            <View style={styles.scanHistoryMeta}>
+              <Ionicons name="time-outline" size={11} color={colors.textLight} />
+              <Text style={[styles.scanHistoryDate, { color: colors.textLight }]}>{timeDisplay}</Text>
+            </View>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
+      </TouchableOpacity>
+    );
+  };
 
   const renderScanHistoryItem = ({ item }: any) => (
     <TouchableOpacity
@@ -767,6 +899,11 @@ useEffect(() => {
       guestAlert('adding a chicken');
       return;
     }
+    setNewChicken({
+      name: '',
+      photo: null,
+      farmId: selectedFarmFilter !== 'all' ? selectedFarmFilter : null,
+    });
     setShowAddForm(true);
   };
 
@@ -783,40 +920,47 @@ useEffect(() => {
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={[styles.pageColumn, { width: contentWidth, alignSelf: 'center' }]}>
-          <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.header}>
-            <View pointerEvents="none" style={styles.headerDecoRing} />
-            <View pointerEvents="none" style={styles.headerDecoRingSmall} />
-
-            <View style={styles.headerTopRow}>
-              <View style={styles.headerIconBadge}>
-                <ChickenIcon size={18} color="#fff" />
+          <View style={styles.headerContainer}>
+            <Image
+              source={require('../../assets/images/slide_aerial_pens.jpg')}
+              style={[StyleSheet.absoluteFill, styles.headerBgImage]}
+              resizeMode="cover"
+            />
+            <LinearGradient
+              colors={['rgba(0, 0, 0, 0.20)', 'rgba(0, 0, 0, 0.50)', 'rgba(0, 0, 0, 0.72)']}
+              style={styles.header}
+            >
+              <View style={styles.headerTopRow}>
+                <View style={styles.headerIconBadge}>
+                  <ChickenIcon size={18} color="#fff" />
+                </View>
+                <View style={styles.headerTitleBlock}>
+                  <Text style={styles.headerTitle}>Flock Management</Text>
+                  <Text style={styles.headerSubtitle}>{farmBirds.length} chickens  ·  {farmHealthAlerts.length} active alerts</Text>
+                </View>
               </View>
-              <View style={styles.headerTitleBlock}>
-                <Text style={styles.headerTitle}>Flock Management</Text>
-                <Text style={styles.headerSubtitle}>{allBirds.length} birds  ·  {healthAlerts.length} active alerts</Text>
-              </View>
-            </View>
 
-            {userRole === 'owner' ? (
-              <TouchableOpacity style={styles.farmsLinkButton} onPress={openManageFarms} activeOpacity={0.75}>
-                <Ionicons name="home-outline" size={14} color="#fff" />
-                <Text style={styles.farmsLinkText}>Manage Farms</Text>
-                <Ionicons name="chevron-forward" size={12} color="#fff" />
-              </TouchableOpacity>
-            ) : farms.length > 0 ? (
-              <TouchableOpacity
-                style={styles.farmsLinkButton}
-                onPress={() => setShowFarmLocation((v) => !v)}
-                activeOpacity={0.75}
-              >
-                <Ionicons name="home-outline" size={14} color="#fff" />
-                <Text style={styles.farmsLinkText} numberOfLines={1}>
-                  {showFarmLocation && farms[0].farm_location ? farms[0].farm_location : farms[0].farm_name}
-                </Text>
-                <Ionicons name={showFarmLocation ? 'chevron-up' : 'chevron-down'} size={12} color="#fff" />
-              </TouchableOpacity>
-            ) : null}
-          </LinearGradient>
+              {userRole === 'owner' ? (
+                <TouchableOpacity style={styles.farmsLinkButton} onPress={openManageFarms} activeOpacity={0.75}>
+                  <FarmIcon size={14} color="#fff" />
+                  <Text style={styles.farmsLinkText}>Manage Farms</Text>
+                  <Ionicons name="chevron-forward" size={12} color="#fff" />
+                </TouchableOpacity>
+              ) : farms.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.farmsLinkButton}
+                  onPress={() => setShowFarmLocation((v) => !v)}
+                  activeOpacity={0.75}
+                >
+                  <FarmIcon size={14} color="#fff" />
+                  <Text style={styles.farmsLinkText} numberOfLines={1}>
+                    {showFarmLocation && farms[0].farm_location ? farms[0].farm_location : farms[0].farm_name}
+                  </Text>
+                  <Ionicons name={showFarmLocation ? 'chevron-up' : 'chevron-down'} size={12} color="#fff" />
+                </TouchableOpacity>
+              ) : null}
+            </LinearGradient>
+          </View>
 
           <View style={[styles.floatingPanel, { backgroundColor: colors.surface, shadowColor: isDarkMode ? '#000' : '#1B5E20' }]}>
             <View style={[styles.toggleTabs, { backgroundColor: colors.background }]}>
@@ -829,12 +973,12 @@ useEffect(() => {
                 <Text style={[styles.toggleTabText, { color: activeTab === 'all' ? ACCENT_ICON : colors.textSecondary }]}>Overview</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.toggleTab, activeTab === 'history' && { backgroundColor: ACCENT }]}
-                onPress={() => setActiveTab('history')}
+                style={[styles.toggleTab, (activeTab === 'scans' || activeTab === 'history') && { backgroundColor: ACCENT }]}
+                onPress={() => setActiveTab('scans')}
                 activeOpacity={0.8}
               >
-                <Ionicons name="time-outline" size={15} color={activeTab === 'history' ? ACCENT_ICON : colors.textSecondary} />
-                <Text style={[styles.toggleTabText, { color: activeTab === 'history' ? ACCENT_ICON : colors.textSecondary }]}>Capture History</Text>
+                <Ionicons name="qr-code-outline" size={15} color={(activeTab === 'scans' || activeTab === 'history') ? ACCENT_ICON : colors.textSecondary} />
+                <Text style={[styles.toggleTabText, { color: (activeTab === 'scans' || activeTab === 'history') ? ACCENT_ICON : colors.textSecondary }]}>Recent Scans</Text>
               </TouchableOpacity>
             </View>
 
@@ -911,8 +1055,7 @@ useEffect(() => {
                             onPress={() => setSelectedFarmFilter(isSel ? 'all' : String(f.id))}
                             activeOpacity={0.8}
                           >
-                            <Ionicons
-                              name="home-outline"
+                            <FarmIcon
                               size={13}
                               color={isSel ? colors.primary : colors.textSecondary}
                             />
@@ -978,20 +1121,20 @@ useEffect(() => {
                 </View>
               )}
 
-              {healthAlerts.length > 0 && (
+              {farmHealthAlerts.length > 0 && (
                 <View style={styles.alertsContainer}>
                   <View style={styles.sectionTitleRow}>
                     <Ionicons name="alert-circle" size={16} color="#FF9800" />
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Active Health Alerts ({healthAlerts.length})</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Active Health Alerts ({farmHealthAlerts.length})</Text>
                   </View>
-                  <FlatList data={healthAlerts} renderItem={renderAlertItem} keyExtractor={(item) => item.id} scrollEnabled={false} />
+                  <FlatList data={farmHealthAlerts} renderItem={renderAlertItem} keyExtractor={(item) => item.id} scrollEnabled={false} />
                 </View>
               )}
 
               <View style={styles.allBirdsContainer}>
                 <View style={styles.allBirdsHeaderRow}>
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                    All Birds · {sortedBirds.length} result{sortedBirds.length === 1 ? '' : 's'}
+                    All Chickens · {sortedBirds.length} result{sortedBirds.length === 1 ? '' : 's'}
                   </Text>
 
                   <TouchableOpacity
@@ -1008,7 +1151,7 @@ useEffect(() => {
                 {sortedBirds.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Ionicons name="search-outline" size={44} color={colors.textLight} />
-                    <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No birds match your search</Text>
+                    <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No chickens match your search</Text>
                     <TouchableOpacity style={[styles.resetButton, { backgroundColor: colors.primary + '15' }]} onPress={() => { handleStatusFilter('all'); setSearchQuery(''); }}>
                       <Text style={[styles.resetButtonText, { color: colors.primary }]}>Clear Filters</Text>
                     </TouchableOpacity>
@@ -1021,17 +1164,100 @@ useEffect(() => {
           ) : (
             <View style={styles.scanHistoryTab}>
               <View style={styles.scanHistorySectionHeader}>
-                <Text style={[styles.scanHistoryTitle, { color: colors.text }]}>Recent Captures</Text>
-                <Text style={[styles.scanHistorySubtitle, { color: colors.textLight }]}>Last {scanHistory.length} capture records</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.scanHistoryTitle, { color: colors.text }]}>Recent Scans</Text>
+                  <Text style={[styles.scanHistorySubtitle, { color: colors.textLight }]}>
+                    {recentScans.length} scan records
+                    {selectedFarmFilter !== 'all' ? ` in ${getFarmName(farms, selectedFarmFilter)}` : ''}
+                  </Text>
+                </View>
+                {loadingRecentScans && <ActivityIndicator size="small" color={colors.primary} />}
               </View>
 
-              <FlatList
-                data={scanHistory}
-                renderItem={renderScanHistoryItem}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-                contentContainerStyle={styles.scanHistoryList}
-              />
+              {/* Farm Filter Pills in Recent Scans as well */}
+              {farms.length > 0 && (
+                <View style={[styles.farmFilterSection, { marginTop: 0, marginBottom: 14 }]}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.farmFilterScroll}>
+                    <TouchableOpacity
+                      style={[
+                        styles.farmFilterPill,
+                        { backgroundColor: colors.card, borderColor: selectedFarmFilter === 'all' ? colors.primary : colors.divider },
+                        selectedFarmFilter === 'all' && { backgroundColor: colors.primary + '18', borderWidth: 1.5, borderColor: colors.primary },
+                      ]}
+                      onPress={() => setSelectedFarmFilter('all')}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="layers-outline"
+                        size={13}
+                        color={selectedFarmFilter === 'all' ? colors.primary : colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.farmFilterPillText,
+                          { color: selectedFarmFilter === 'all' ? colors.primary : colors.textSecondary },
+                          selectedFarmFilter === 'all' && { fontWeight: '700' },
+                        ]}
+                      >
+                        All Farms ({recentScans.length})
+                      </Text>
+                    </TouchableOpacity>
+
+                    {farms.map((f) => {
+                      const isSel = String(selectedFarmFilter) === String(f.id);
+                      const count = recentScans.filter((s) => String(s.farm_id) === String(f.id)).length;
+                      return (
+                        <TouchableOpacity
+                          key={f.id}
+                          style={[
+                            styles.farmFilterPill,
+                            { backgroundColor: colors.card, borderColor: isSel ? colors.primary : colors.divider },
+                            isSel && { backgroundColor: colors.primary + '18', borderWidth: 1.5, borderColor: colors.primary },
+                          ]}
+                          onPress={() => setSelectedFarmFilter(isSel ? 'all' : String(f.id))}
+                          activeOpacity={0.8}
+                        >
+                          <FarmIcon
+                            size={13}
+                            color={isSel ? colors.primary : colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.farmFilterPillText,
+                              { color: isSel ? colors.primary : colors.textSecondary },
+                              isSel && { fontWeight: '700' },
+                            ]}
+                          >
+                            {f.farm_name} ({count})
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {recentScans.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="qr-code-outline" size={48} color={colors.textLight} />
+                  <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+                    {selectedFarmFilter !== 'all'
+                      ? `No recent scans recorded for ${getFarmName(farms, selectedFarmFilter)}.`
+                      : 'No recent QR scans recorded yet.'}
+                  </Text>
+                  <Text style={[styles.emptyStateSubtext, { color: colors.textLight, textAlign: 'center', marginTop: 4 }]}>
+                    Scan a chicken's QR code using the camera scanner to record check-in activity here.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={recentScans}
+                  renderItem={renderRecentScanItem}
+                  keyExtractor={(item) => item.id}
+                  scrollEnabled={false}
+                  contentContainerStyle={styles.scanHistoryList}
+                />
+              )}
             </View>
           )}
 
@@ -1128,6 +1354,7 @@ useEffect(() => {
                       value={JSON.stringify({
                         chickenId: generatedQR.chickenId,
                         name: generatedQR.name,
+                        farmId: generatedQR.farmId,
                       })}
                       size={64}
                       getRef={(c: any) => (qrRef.current = c)}
@@ -1258,22 +1485,22 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   pageColumn: { flex: 1 },
 
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 44,
+  headerContainer: {
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: '#1B5E20',
   },
-  headerDecoRing: {
-    position: 'absolute', top: -50, right: -50, width: 150, height: 150, borderRadius: 75,
-    borderWidth: 26, borderColor: 'rgba(255,255,255,0.06)',
+  headerBgImage: {
+    width: '100%',
+    height: '100%',
   },
-  headerDecoRingSmall: {
-    position: 'absolute', bottom: -20, left: -30, width: 90, height: 90, borderRadius: 45,
-    borderWidth: 16, borderColor: 'rgba(255,255,255,0.05)',
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 44,
+    position: 'relative',
   },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   headerIconBadge: {
@@ -1357,11 +1584,12 @@ const styles = StyleSheet.create({
     borderRadius: 18, marginBottom: 14, padding: 14, borderWidth: 1,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
   },
-  birdCardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  birdCardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   birdCardImage: { width: '100%', height: '100%', borderRadius: 25, backgroundColor: '#f0f0f0' },
   birdCardIdentity: { flex: 1, minWidth: 0 },
-  birdName: { fontSize: 17, fontWeight: 'bold' },
-  birdMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  birdNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  birdName: { fontSize: 17, fontWeight: 'bold', flex: 1 },
+  birdMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' },
   birdIdTag: { fontSize: 12, fontWeight: '600' },
   farmBadgePill: {
     flexDirection: 'row',
@@ -1370,7 +1598,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 8,
-    maxWidth: 150,
+    maxWidth: '100%',
+    flexShrink: 1,
   },
   farmBadgePillText: { fontSize: 10, fontWeight: '700' },
   farmFilterSection: { marginBottom: 14 },
@@ -1385,7 +1614,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   farmFilterPillText: { fontSize: 12, fontWeight: '600' },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 12 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, flexShrink: 0 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 10, fontWeight: '700' },
   birdMetricsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1 },
@@ -1405,7 +1634,7 @@ const styles = StyleSheet.create({
   bottomPadding: { height: 40 },
 
   scanHistoryTab: { paddingHorizontal: 20, paddingTop: 16 },
-  scanHistorySectionHeader: { marginBottom: 16 },
+  scanHistorySectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   scanHistoryTitle: { fontSize: 20, fontWeight: 'bold' },
   scanHistorySubtitle: { fontSize: 13, marginTop: 4 },
   scanHistoryList: { paddingBottom: 20 },
@@ -1417,10 +1646,15 @@ const styles = StyleSheet.create({
   scanHistoryBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
   scanHistoryStatus: { fontSize: 10, fontWeight: 'bold' },
   scanHistoryType: { fontSize: 12, marginBottom: 6 },
-  scanHistoryFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  recentScanFarmRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1, marginBottom: 6 },
+  recentScanFarmText: { fontSize: 12, fontWeight: '500' },
+  scanHistoryFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  recentScanScannerRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 },
+  recentScanScannerText: { fontSize: 12, fontWeight: '600' },
   scanHistoryMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   scanHistoryDate: { fontSize: 11 },
   scanHistoryConfidence: { fontSize: 11, fontWeight: '700' },
+  emptyStateSubtext: { fontSize: 13, lineHeight: 18, paddingHorizontal: 24 },
 
   fab: {
     position: 'absolute', bottom: 30, borderRadius: 30, overflow: 'hidden',

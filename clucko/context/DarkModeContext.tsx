@@ -74,6 +74,7 @@ const darkColors: ThemeColors = {
 interface DarkModeContextType {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
+  loadDarkModePreference: (overrideUserId?: string) => Promise<void>;
   colors: ThemeColors;
 }
 
@@ -87,21 +88,42 @@ export const useDarkMode = () => {
   return context;
 };
 
+const getDarkModeStorageKey = async (overrideUserId?: string): Promise<string> => {
+  try {
+    if (overrideUserId) {
+      return `darkMode_${overrideUserId}`;
+    }
+    const isGuest = await AsyncStorage.getItem('isGuestMode');
+    if (isGuest === 'true') {
+      return 'darkMode_guest';
+    }
+    const userId = await AsyncStorage.getItem('user_id');
+    if (userId) {
+      return `darkMode_${userId}`;
+    }
+    const lastEmail = await AsyncStorage.getItem('last_login_email');
+    if (lastEmail) {
+      return `darkMode_${lastEmail.trim().toLowerCase()}`;
+    }
+  } catch (e) {
+    console.error('Error resolving dark mode key:', e);
+  }
+  return 'darkMode_default';
+};
+
 export const DarkModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const systemColorScheme = useColorScheme();
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  useEffect(() => {
-    loadDarkModePreference();
-  }, []);
-
-  const loadDarkModePreference = async () => {
+  const loadDarkModePreference = async (overrideUserId?: string) => {
     try {
-      const saved = await AsyncStorage.getItem('darkMode');
+      const key = await getDarkModeStorageKey(overrideUserId);
+      const saved = await AsyncStorage.getItem(key);
       if (saved !== null) {
         setIsDarkMode(saved === 'true');
       } else {
-        setIsDarkMode(systemColorScheme === 'dark');
+        // Default to false (Light Mode) so unconfigured or new accounts
+        // always start in Light Mode and never inherit another account's dark mode
+        setIsDarkMode(false);
       }
     } catch (error) {
       console.error('Error loading dark mode:', error);
@@ -112,16 +134,37 @@ export const DarkModeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const newValue = !isDarkMode;
     setIsDarkMode(newValue);
     try {
-      await AsyncStorage.setItem('darkMode', newValue.toString());
+      const key = await getDarkModeStorageKey();
+      await AsyncStorage.setItem(key, newValue.toString());
     } catch (error) {
       console.error('Error saving dark mode:', error);
     }
   };
 
+  useEffect(() => {
+    loadDarkModePreference();
+
+    // Periodically detect account / user_id changes in AsyncStorage
+    let currentAccountKey: string | null = null;
+    const interval = setInterval(async () => {
+      try {
+        const isGuest = await AsyncStorage.getItem('isGuestMode');
+        const userId = await AsyncStorage.getItem('user_id');
+        const accountKey = isGuest === 'true' ? 'guest' : (userId || 'none');
+        if (currentAccountKey !== null && currentAccountKey !== accountKey) {
+          loadDarkModePreference();
+        }
+        currentAccountKey = accountKey;
+      } catch {}
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const colors = isDarkMode ? darkColors : lightColors;
 
   return (
-    <DarkModeContext.Provider value={{ isDarkMode, toggleDarkMode, colors }}>
+    <DarkModeContext.Provider value={{ isDarkMode, toggleDarkMode, loadDarkModePreference, colors }}>
       {children}
     </DarkModeContext.Provider>
   );

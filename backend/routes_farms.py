@@ -29,10 +29,12 @@ def get_farms():
                       CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as owner_name,
                       u.email as owner_email,
                       COUNT(DISTINCT fm.user_id) as caretaker_count,
+                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm.user_id END) as online_caretaker_count,
                       COUNT(DISTINCT c.id) as chicken_count
                     FROM farms f
                     LEFT JOIN users u ON u.id = f.owner_id
                     LEFT JOIN farm_members fm ON fm.farm_id = f.id AND fm.role = 'caretaker'
+                    LEFT JOIN users u_cm ON u_cm.id = fm.user_id
                     LEFT JOIN chickens c ON c.farm_id = f.id
                     WHERE f.owner_id = %s
                     GROUP BY f.id, u.id
@@ -44,11 +46,13 @@ def get_farms():
                       CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as owner_name,
                       u.email as owner_email,
                       COUNT(DISTINCT fm2.user_id) as caretaker_count,
+                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm2.user_id END) as online_caretaker_count,
                       COUNT(DISTINCT c.id) as chicken_count
                     FROM farms f
                     LEFT JOIN users u ON u.id = f.owner_id
                     JOIN farm_members fm ON fm.farm_id = f.id AND fm.user_id = %s
                     LEFT JOIN farm_members fm2 ON fm2.farm_id = f.id AND fm2.role = 'caretaker'
+                    LEFT JOIN users u_cm ON u_cm.id = fm2.user_id
                     LEFT JOIN chickens c ON c.farm_id = f.id
                     GROUP BY f.id, u.id
                     ORDER BY f.created_at DESC
@@ -74,6 +78,23 @@ def create_farm():
             d = request.json
             if not d.get('farm_name'):
                 return jsonify({'error': 'Farm name required'}), 400
+
+            # Check subscription farm quota
+            from routes_subscriptions import get_effective_subscription
+            sub = get_effective_subscription(request.user_id, cur, db)
+            if sub:
+                cur.execute('SELECT COUNT(*) as cnt FROM farms WHERE owner_id=%s', (request.user_id,))
+                current_farms = cur.fetchone()['cnt']
+                max_farms = sub['limits']['max_farms']
+                if current_farms >= max_farms:
+                    return jsonify({
+                        'error': f"Farm limit reached ({current_farms}/{max_farms}). Please upgrade your plan to add another farm.",
+                        'code': 'PLAN_FARM_LIMIT_EXCEEDED',
+                        'max_farms': max_farms,
+                        'current_farms': current_farms,
+                        'plan': sub['plan'],
+                        'plan_name': sub['plan_name']
+                    }), 403
 
             while True:
                 code = generate_farm_code()
@@ -154,7 +175,8 @@ def get_farm(farm_id):
 
             cur.execute('''
                 SELECT u.id, u.first_name, u.last_name, u.email,
-                       u.phone_number, fm.role, fm.joined_at
+                       u.phone_number, fm.role, fm.joined_at,
+                       (COALESCE(fm.is_active, TRUE) AND COALESCE(u.is_active, TRUE)) as is_active
                 FROM farm_members fm
                 JOIN users u ON fm.user_id = u.id
                 WHERE fm.farm_id = %s
@@ -245,7 +267,19 @@ def get_farm_members(farm_id):
         with db.cursor() as cur:
             cur.execute('''
                 SELECT u.id, u.first_name, u.last_name,
-                       u.email, fm.role, fm.joined_at
+                       u.email, u.phone_number, fm.role, fm.joined_at,
+                       COALESCE(fm.is_active, u.is_active, TRUE) as is_active,
+                       u.last_active_at,
+                       CASE
+                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
+                           ELSE FALSE
+                       END as is_online,
+                       CASE
+                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
+                           WHEN u.last_active_at::date = CURRENT_DATE THEN 'Active today'
+                           WHEN u.last_active_at IS NOT NULL THEN TO_CHAR(u.last_active_at, 'Mon DD')
+                           ELSE 'Offline'
+                       END as online_status_text
                 FROM farm_members fm
                 JOIN users u ON fm.user_id = u.id
                 WHERE fm.farm_id = %s
@@ -253,6 +287,50 @@ def get_farm_members(farm_id):
             ''', (farm_id,))
             members = cur.fetchall()
         return jsonify(members)
+    finally:
+        db.close()
+
+
+# ─── UPDATE caretaker status (active / deactivated) ───────────────────────────
+@app.route('/api/farms/<int:farm_id>/members/<int:member_id>/status', methods=['PUT'])
+@token_required
+def update_member_status(farm_id, member_id):
+    """Owner toggles a caretaker active / deactivated status"""
+    d = request.json or {}
+    is_active = d.get('is_active')
+    if is_active is None:
+        return jsonify({'error': 'is_active boolean is required'}), 400
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT owner_id, farm_name FROM farms WHERE id=%s', (farm_id,))
+            farm = cur.fetchone()
+            if not farm or farm['owner_id'] != request.user_id:
+                return jsonify({'error': 'Only farm owner can modify caretaker status'}), 403
+
+            # Update farm_members
+            cur.execute('''
+                UPDATE farm_members
+                SET is_active = %s
+                WHERE farm_id=%s AND user_id=%s AND role='caretaker'
+            ''', (is_active, farm_id, member_id))
+
+            # Also update users table for this caretaker
+            cur.execute('''
+                UPDATE users
+                SET is_active = %s
+                WHERE id=%s AND role='caretaker'
+            ''', (is_active, member_id))
+
+            db.commit()
+
+            status_text = 'activated' if is_active else 'deactivated'
+            return jsonify({
+                'success': True,
+                'is_active': is_active,
+                'message': f'Caretaker has been {status_text} successfully.'
+            })
     finally:
         db.close()
 
@@ -273,6 +351,14 @@ def remove_member(farm_id, member_id):
                 DELETE FROM farm_members
                 WHERE farm_id=%s AND user_id=%s AND role='caretaker'
             ''', (farm_id, member_id))
+
+            # Deactivate caretaker user account so they cannot log in
+            cur.execute('''
+                UPDATE users
+                SET is_active = FALSE
+                WHERE id=%s AND role='caretaker'
+            ''', (member_id,))
+
             db.commit()
         return jsonify({'success': True})
     finally:
