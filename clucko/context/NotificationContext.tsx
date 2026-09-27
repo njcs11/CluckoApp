@@ -1,3 +1,4 @@
+import ErrorModal from '@/components/ui/ErrorModal';
 import NotificationDetailModal from '@/components/ui/NotificationDetailModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -66,6 +67,8 @@ interface NotificationContextValue {
   /** Fires the moment an action happens — pops the banner immediately,
    *  no need to visit Profile first. Auto-dismisses after a few seconds. */
   notify: (data: NotifyInput) => Promise<void>;
+  /** Presents a clean error pop up modal with a red indicator. Does NOT save to notifications. */
+  showError: (title: string, message: string) => void;
   /** Opens the same banner design for a notification tapped from the
    *  Profile list — stays open until dismissed, no auto-timer. */
   showDetail: (notification: NotificationItem) => void;
@@ -84,6 +87,7 @@ const POLL_INTERVAL_MS = 15000; // Poll backend notifications every 15 seconds
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [displayed, setDisplayed] = useState<NotificationItem | null>(null);
+  const [errorModal, setErrorModal] = useState<{ visible: boolean; title: string; message: string } | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -168,8 +172,28 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     [persistLocal]
   );
 
+  const showError = useCallback((title: string, message: string) => {
+    setErrorModal({ visible: true, title, message });
+  }, []);
+
   const notify = useCallback(
     async (data: NotifyInput) => {
+      const isDiseaseHealthWarning = Boolean(
+        data.chickenId && (
+          data.title.toLowerCase().includes('health') ||
+          data.title.toLowerCase().includes('concern') ||
+          data.title.toLowerCase().includes('disease') ||
+          data.title.toLowerCase().includes('warning')
+        )
+      );
+
+      // Errors must NOT be saved to notifications or broadcast to backend!
+      // Present dedicated clean ErrorModal with red indicator instead.
+      if (data.type === 'alert' && !isDiseaseHealthWarning) {
+        showError(data.title, data.message);
+        return;
+      }
+
       const newNotification: NotificationItem = {
         id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
         farm_id: data.farm_id,
@@ -208,7 +232,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         }).catch((err) => console.warn('Could not sync notification to backend:', err));
       }
     },
-    [persistLocal]
+    [persistLocal, showError]
   );
 
   const showDetail = useCallback(
@@ -265,6 +289,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         notifications,
         unreadCount,
         notify,
+        showError,
         showDetail,
         markAsRead,
         markAllAsRead,
@@ -291,6 +316,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           closeToast();
           router.push('/tasks');
         }}
+      />
+      <ErrorModal
+        visible={!!errorModal?.visible}
+        title={errorModal?.title || ''}
+        message={errorModal?.message || ''}
+        onClose={() => setErrorModal(null)}
       />
     </NotificationContext.Provider>
   );

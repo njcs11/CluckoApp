@@ -69,7 +69,7 @@ export function evaluatePasswordStrength(password: string): PasswordStrength {
   return {
     score: 3,
     label: 'Strong',
-    color: '#2E7D32',
+    color: '#2D5541',
     passedCount: count,
     totalCount: PASSWORD_RULES.length,
     passedIds,

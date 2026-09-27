@@ -97,6 +97,33 @@ def save_diseases(data):
     with open(DISEASES_CONFIG, 'w') as f:
         json.dump(data, f, indent=2)
 
+def sync_labels_with_diseases():
+    """Keeps labels_eye.json and labels_wing.json in sync with active diseases in diseases.json."""
+    try:
+        diseases_data = load_diseases()
+        for module in ('eye', 'wing'):
+            lp = os.path.join(MODELS_DIR, f'labels_{module}.json')
+            mod_diseases = [d['id'] for d in diseases_data.get('diseases', []) if d.get('module') == module]
+            existing = {}
+            if os.path.exists(lp):
+                try:
+                    with open(lp, 'r') as f:
+                        existing = json.load(f)
+                except Exception:
+                    existing = {}
+            existing_classes = list(existing.values())
+            # Keep only existing classes that are still present in mod_diseases
+            updated_classes = [c for c in existing_classes if c in mod_diseases]
+            # Add any newly added diseases not yet in labels
+            for d_id in mod_diseases:
+                if d_id not in updated_classes:
+                    updated_classes.append(d_id)
+            new_map = {str(i): c for i, c in enumerate(updated_classes)}
+            with open(lp, 'w') as f:
+                json.dump(new_map, f, indent=2)
+    except Exception as e:
+        print(f"Error syncing labels with diseases: {e}")
+
 @app.route('/api/diseases', methods=['GET'])
 def get_diseases():
     return jsonify(load_diseases())
@@ -144,6 +171,7 @@ def add_disease():
 
     diseases['diseases'].append(new_disease)
     save_diseases(diseases)
+    sync_labels_with_diseases()
 
     # Ensure dataset directory exists under the proper module folder
     target_dir = os.path.join(DATASETS_DIR, module, disease_id)
@@ -156,6 +184,7 @@ def delete_disease(disease_id):
     diseases = load_diseases()
     diseases['diseases'] = [d for d in diseases['diseases'] if d['id'] != disease_id]
     save_diseases(diseases)
+    sync_labels_with_diseases()
     return jsonify({"success": True})
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic', '.heif')
@@ -514,6 +543,7 @@ def reset_train_status():
 # ─── Model status (both modules) ───────────────────────────────────────────────
 @app.route('/api/model/status', methods=['GET'])
 def model_status():
+    sync_labels_with_diseases()
     result = {}
     for module in ('eye', 'wing'):
         mp = os.path.join(MODELS_DIR, f'gamefowl_model_{module}.h5')

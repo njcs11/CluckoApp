@@ -13,7 +13,7 @@ interface FarmIconProps {
  * Gable roof with overhang, coop body, 4-pane window, elevated stilts,
  * and an angled entrance ladder on the left.
  */
-export default function FarmIcon({ size = 20, color = '#2E7D32', style }: FarmIconProps) {
+export default function FarmIcon({ size = 20, color = '#2D5541', style }: FarmIconProps) {
   return (
     <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]}>
       <Svg width={size} height={size} viewBox="0 0 64 64" fill="none">

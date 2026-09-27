@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import { useDarkMode } from '../context/DarkModeContext';
 import {
   getApiUrl,
   setApiUrl,
@@ -19,6 +20,7 @@ import {
 } from '../lib/api';
 
 export default function ServerSettingsScreen() {
+  const { colors, isDarkMode } = useDarkMode();
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('5000');
   const [currentUrl, setCurrentUrl] = useState('');
@@ -120,75 +122,75 @@ export default function ServerSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#2E7D32" />
+          <Ionicons name="arrow-back" size={24} color={colors.primary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Network & Server Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Network & Server Settings</Text>
         <View style={{ width: 24 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         {/* Active URL Status Card */}
-        <View style={styles.activeCard}>
-          <Text style={styles.activeLabel}>CURRENT ACTIVE BACKEND</Text>
-          <Text style={styles.activeUrl}>{currentUrl || 'Not configured'}</Text>
-          <View style={styles.modeBadge}>
+        <View style={[styles.activeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.activeLabel, { color: colors.textSecondary }]}>CURRENT ACTIVE BACKEND</Text>
+          <Text style={[styles.activeUrl, { color: colors.text }]}>{currentUrl || 'Not configured'}</Text>
+          <View style={[styles.modeBadge, { backgroundColor: colors.badgeBackground }]}>
             <Ionicons
               name={mode === 'auto' ? 'flash-outline' : 'settings-outline'}
               size={13}
-              color={mode === 'auto' ? '#2E7D32' : '#E65100'}
+              color={mode === 'auto' ? colors.primary : '#E65100'}
             />
-            <Text style={[styles.modeText, { color: mode === 'auto' ? '#2E7D32' : '#E65100' }]}>
+            <Text style={[styles.modeText, { color: mode === 'auto' ? colors.primary : '#E65100' }]}>
               {mode === 'auto' ? 'Auto-Detect Mode (WiFi Adaptive)' : 'Manual Override Mode'}
             </Text>
           </View>
         </View>
 
         {/* Auto Detect Card */}
-        <View style={styles.sectionCard}>
+        <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeaderRow}>
-            <Ionicons name="wifi-outline" size={20} color="#2E7D32" />
-            <Text style={styles.sectionTitle}>Auto-Detect WiFi IP</Text>
+            <Ionicons name="wifi-outline" size={20} color={colors.primary} />
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Auto-Detect WiFi IP</Text>
           </View>
-          <Text style={styles.sectionSubtitle}>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
             Clucko automatically detects your PC's IP via Expo connection. If you switch WiFis, it automatically points to your new network IP!
           </Text>
 
           {autoDetected ? (
-            <View style={styles.detectedBox}>
-              <Text style={styles.detectedLabel}>Detected from Expo Host:</Text>
-              <Text style={styles.detectedValue}>{autoDetected}</Text>
+            <View style={[styles.detectedBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.detectedLabel, { color: colors.textSecondary }]}>Detected from Expo Host:</Text>
+              <Text style={[styles.detectedValue, { color: colors.primary }]}>{autoDetected}</Text>
             </View>
           ) : (
-            <Text style={styles.noDetectText}>Expo host not detected yet (using fallback IP).</Text>
+            <Text style={[styles.noDetectText, { color: colors.textLight }]}>Expo host not detected yet (using fallback IP).</Text>
           )}
 
-          <TouchableOpacity style={styles.autoBtn} onPress={handleUseAuto} disabled={testing}>
-            <Ionicons name="sync" size={16} color="#fff" />
-            <Text style={styles.autoBtnText}>Use Auto-Detected WiFi IP</Text>
+          <TouchableOpacity style={[styles.autoBtn, { backgroundColor: colors.primary }]} onPress={handleUseAuto} disabled={testing}>
+            <Ionicons name="sync" size={16} color={isDarkMode ? '#0E1210' : '#fff'} />
+            <Text style={[styles.autoBtnText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Use Auto-Detected WiFi IP</Text>
           </TouchableOpacity>
         </View>
 
         {/* Manual Configuration */}
-        <View style={styles.sectionCard}>
+        <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeaderRow}>
-            <Ionicons name="create-outline" size={20} color="#333" />
-            <Text style={styles.sectionTitle}>Manual IP Override</Text>
+            <Ionicons name="create-outline" size={20} color={colors.primary} />
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Manual IP Override</Text>
           </View>
-          <Text style={styles.sectionSubtitle}>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
             Specify a custom static IP if you are using an emulator, tunnel (ngrok), or static IP.
           </Text>
 
           <View style={styles.row}>
             <View style={{ flex: 2 }}>
-              <Text style={styles.fieldLabel}>IP Address</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>IP Address</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                 placeholder="192.168.1.5"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textLight}
                 value={ip}
                 onChangeText={setIp}
                 keyboardType="numbers-and-punctuation"
@@ -196,11 +198,11 @@ export default function ServerSettingsScreen() {
               />
             </View>
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={styles.fieldLabel}>Port</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Port</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                 placeholder="5000"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textLight}
                 value={port}
                 onChangeText={setPort}
                 keyboardType="numeric"
@@ -209,9 +211,9 @@ export default function ServerSettingsScreen() {
           </View>
 
           {status === 'ok' && (
-            <View style={[styles.statusBox, { backgroundColor: '#E8F5E9' }]}>
-              <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
-              <Text style={[styles.statusText, { color: '#4CAF50' }]}>Connected successfully to {ip}:{port}!</Text>
+            <View style={[styles.statusBox, { backgroundColor: isDarkMode ? 'rgba(143, 224, 176, 0.15)' : '#E8F5E9' }]}>
+              <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+              <Text style={[styles.statusText, { color: colors.primary }]}>Connected successfully to {ip}:{port}!</Text>
             </View>
           )}
           {status === 'fail' && (
@@ -221,11 +223,15 @@ export default function ServerSettingsScreen() {
             </View>
           )}
 
-          <TouchableOpacity style={styles.testBtn} onPress={handleTest} disabled={testing}>
+          <TouchableOpacity
+            style={[styles.testBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            onPress={handleTest}
+            disabled={testing}
+          >
             {testing ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={colors.primary} />
             ) : (
-              <Text style={styles.testBtnText}>Test &amp; Set Manual IP</Text>
+              <Text style={[styles.testBtnText, { color: colors.text }]}>Test &amp; Set Manual IP</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -331,7 +337,7 @@ const styles = StyleSheet.create({
   detectedValue: { fontSize: 15, color: '#14532D', fontWeight: '700', marginTop: 2 },
   noDetectText: { fontSize: 12, color: '#94A3B8', fontStyle: 'italic', marginBottom: 12 },
   autoBtn: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

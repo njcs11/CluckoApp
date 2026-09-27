@@ -1,12 +1,13 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -64,7 +65,62 @@ export default function SignupScreen() {
   // Suggestions & Error states
   const [suggestedEmail, setSuggestedEmail] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
+  const [errorField, setErrorField] = useState<string | null>(null);
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Floating Error Toast state
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const errorFadeAnim = useRef(new Animated.Value(0)).current;
+  const errorSlideAnim = useRef(new Animated.Value(25)).current;
+  const errorToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height || 0;
+      setKeyboardHeight(h);
+    };
+    const onHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSub1 = Keyboard.addListener('keyboardWillShow', onShow);
+    const showSub2 = Keyboard.addListener('keyboardDidShow', onShow);
+    const hideSub1 = Keyboard.addListener('keyboardWillHide', onHide);
+    const hideSub2 = Keyboard.addListener('keyboardDidHide', onHide);
+
+    return () => {
+      showSub1.remove();
+      showSub2.remove();
+      hideSub1.remove();
+      hideSub2.remove();
+    };
+  }, []);
+
+  const displayErrorToast = (rawMsg: string) => {
+    setErrorMessage(rawMsg);
+    setShowErrorToast(true);
+
+    if (errorToastTimerRef.current) {
+      clearTimeout(errorToastTimerRef.current);
+    }
+
+    errorFadeAnim.setValue(0);
+    errorSlideAnim.setValue(25);
+
+    Animated.parallel([
+      Animated.timing(errorFadeAnim, { toValue: 1, duration: 320, useNativeDriver: true }),
+      Animated.spring(errorSlideAnim, { toValue: 0, friction: 7, tension: 70, useNativeDriver: true }),
+    ]).start();
+
+    errorToastTimerRef.current = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(errorFadeAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
+        Animated.timing(errorSlideAnim, { toValue: 20, duration: 350, useNativeDriver: true }),
+      ]).start(() => setShowErrorToast(false));
+    }, 4000);
+  };
 
   const firstNameRef = useRef<TextInput>(null);
   const lastNameRef = useRef<TextInput>(null);
@@ -86,6 +142,8 @@ export default function SignupScreen() {
   const setField = (key: string, val: string) => {
     setForm((f) => ({ ...f, [key]: val }));
     setFormError('');
+    if (errorField === key) setErrorField(null);
+    if (showErrorToast) setShowErrorToast(false);
   };
 
   const handleEmailChange = (val: string) => {
@@ -128,40 +186,53 @@ export default function SignupScreen() {
     confirmTouched && form.confirmPassword.length > 0 && form.password !== form.confirmPassword;
 
   const handleSignup = async () => {
+    setErrorField(null);
     // 1. Validation checks
     if (!form.first_name.trim()) {
+      setErrorField('first_name');
       setFormError('Please enter your first name.');
+      displayErrorToast('Please enter your first name.');
       triggerShake();
       firstNameRef.current?.focus();
       return;
     }
     if (!form.last_name.trim()) {
+      setErrorField('last_name');
       setFormError('Please enter your last name.');
+      displayErrorToast('Please enter your last name.');
       triggerShake();
       lastNameRef.current?.focus();
       return;
     }
     const cleanEmail = form.email.trim().toLowerCase();
     if (!cleanEmail || !isValidEmail(cleanEmail)) {
+      setErrorField('email');
       setFormError('Please enter a valid email address.');
+      displayErrorToast('Please enter a valid email address.');
       triggerShake();
       emailRef.current?.focus();
       return;
     }
     if (!form.password) {
+      setErrorField('password');
       setFormError('Please create a secure password.');
+      displayErrorToast('Please create a secure password.');
       triggerShake();
       passwordRef.current?.focus();
       return;
     }
     if (pwStrength.passedCount < 3) {
+      setErrorField('password');
       setFormError('Password is too weak. Please meet at least 3 of the security criteria below.');
+      displayErrorToast('Password is too weak. Please meet security criteria.');
       triggerShake();
       passwordRef.current?.focus();
       return;
     }
     if (form.password !== form.confirmPassword) {
+      setErrorField('confirmPassword');
       setFormError('Passwords do not match. Please verify and re-type.');
+      displayErrorToast('Passwords do not match. Please verify and re-type.');
       triggerShake();
       confirmRef.current?.focus();
       return;
@@ -176,7 +247,6 @@ export default function SignupScreen() {
         email: cleanEmail,
         password: form.password,
         phone_number: form.phone_number.trim(),
-        farm_name: form.farm_name.trim() || `${form.first_name.trim()}'s Farm`,
       });
       await loadDarkModePreference();
 
@@ -190,15 +260,26 @@ export default function SignupScreen() {
     } catch (err: any) {
       triggerShake();
       const rawMsg = err?.message || '';
+      const lower = rawMsg.toLowerCase();
       if (
-        rawMsg.toLowerCase().includes('already registered') ||
-        rawMsg.toLowerCase().includes('already exists') ||
-        rawMsg.toLowerCase().includes('taken')
+        lower.includes('already registered') ||
+        lower.includes('already exists') ||
+        lower.includes('taken')
       ) {
-        // Smart Account Conflict Handling
+        setErrorField('email');
         setConflictModalVisible(true);
       } else {
+        if (lower.includes('email')) {
+          setErrorField('email');
+        } else if (lower.includes('password')) {
+          setErrorField('password');
+        } else if (lower.includes('phone')) {
+          setErrorField('phone_number');
+        } else if (lower.includes('name')) {
+          setErrorField('first_name');
+        }
         setFormError(rawMsg || 'Signup failed. Please try again.');
+        displayErrorToast(rawMsg || 'Signup failed. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -207,6 +288,7 @@ export default function SignupScreen() {
 
   const handleGoogleAuth = async () => {
     setGoogleLoading(true);
+    setFormError('');
     try {
       const res = await performGoogleSignIn();
       if (res.success) {
@@ -221,24 +303,20 @@ export default function SignupScreen() {
         });
         router.replace('/(tabs)/home');
       } else if (res.isNotConfigured) {
-        notify({
-          title: 'Google Client ID Required',
-          message: res.error || 'Please configure your Google Web Client ID in config/googleAuth.ts to connect real Google accounts.',
-          type: 'warning',
-        });
+        triggerShake();
+        const msg = res.error || 'Please configure your Google Web Client ID.';
+        setFormError(msg);
+        displayErrorToast(msg);
       } else if (res.error && res.error !== 'Sign in was cancelled.') {
-        notify({
-          title: 'Google Sign-Up Failed',
-          message: res.error,
-          type: 'alert',
-        });
+        triggerShake();
+        setFormError(res.error);
+        displayErrorToast(res.error);
       }
     } catch (err: any) {
-      notify({
-        title: 'Sign-Up Error',
-        message: err.message || 'Could not complete Google Sign-Up.',
-        type: 'alert',
-      });
+      triggerShake();
+      const msg = err.message || 'Could not complete Google Sign-Up.';
+      setFormError(msg);
+      displayErrorToast(msg);
     } finally {
       setGoogleLoading(false);
     }
@@ -264,15 +342,11 @@ export default function SignupScreen() {
               <Ionicons name="arrow-back" size={22} color={colors.primary} />
               <Text style={[styles.backText, { color: colors.primary }]}>Back to Login</Text>
             </TouchableOpacity>
-            <View style={[styles.badgePill, { backgroundColor: isDarkMode ? '#1E3821' : '#E8F5E9' }]}>
-              <Ionicons name="flash-outline" size={13} color="#2E7D32" />
-              <Text style={styles.badgePillText}>30s Fast Setup</Text>
-            </View>
           </View>
 
           {/* Header Title */}
           <View style={styles.header}>
-            <Text style={[styles.title, { color: isDarkMode ? '#FFFFFF' : '#1B5E20' }]}>Create Your Account</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Create Your Account</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Join Clucko to protect your flock with AI disease detection
             </Text>
@@ -283,18 +357,18 @@ export default function SignupScreen() {
             <TouchableOpacity
               style={[
                 styles.socialButton,
-                { backgroundColor: isDarkMode ? '#242424' : '#FFFFFF', borderColor: isDarkMode ? '#404040' : '#E0E0E0' },
+                { backgroundColor: colors.card, borderColor: colors.border },
               ]}
               onPress={handleGoogleAuth}
               activeOpacity={0.8}
               disabled={loading || googleLoading}
             >
               {googleLoading ? (
-                <ActivityIndicator size="small" color="#2E7D32" />
+                <ActivityIndicator size="small" color={colors.primary} />
               ) : (
                 <>
                   <Ionicons name="logo-google" size={18} color="#EA4335" style={styles.socialIcon} />
-                  <Text style={[styles.socialButtonText, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                  <Text style={[styles.socialButtonText, { color: colors.text }]}>
                     Sign up with Google
                   </Text>
                 </>
@@ -333,7 +407,11 @@ export default function SignupScreen() {
                 <View
                   style={[
                     styles.inputWrapper,
-                    { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
+                    {
+                      backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                      borderColor: errorField === 'first_name' ? '#EF4444' : isDarkMode ? '#333' : '#E0E0E0',
+                      borderWidth: errorField === 'first_name' ? 1.5 : 1,
+                    },
                   ]}
                 >
                   <TextInput
@@ -356,7 +434,11 @@ export default function SignupScreen() {
                 <View
                   style={[
                     styles.inputWrapper,
-                    { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
+                    {
+                      backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                      borderColor: errorField === 'last_name' ? '#EF4444' : isDarkMode ? '#333' : '#E0E0E0',
+                      borderWidth: errorField === 'last_name' ? 1.5 : 1,
+                    },
                   ]}
                 >
                   <TextInput
@@ -381,29 +463,30 @@ export default function SignupScreen() {
                 style={[
                   styles.inputWrapper,
                   {
-                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                    backgroundColor: colors.surface,
                     borderColor:
-                      emailTouched && !isEmailValid && form.email.length > 0
-                        ? '#E53935'
+                      errorField === 'email'
+                        ? '#EF4444'
+                        : emailTouched && !isEmailValid && form.email.length > 0
+                        ? '#EF4444'
                         : isEmailValid
-                        ? '#2E7D32'
-                        : isDarkMode
-                        ? '#333'
-                        : '#E0E0E0',
+                        ? colors.primary
+                        : colors.border,
+                    borderWidth: (errorField === 'email' || (emailTouched && !isEmailValid && form.email.length > 0)) ? 1.5 : 1,
                   },
                 ]}
               >
                 <Ionicons
                   name="mail-outline"
                   size={20}
-                  color={isEmailValid ? '#2E7D32' : '#9CA3AF'}
+                  color={isEmailValid ? colors.primary : colors.textLight}
                   style={styles.inputLeadingIcon}
                 />
                 <TextInput
                   ref={emailRef}
                   style={[styles.input, { color: colors.text }]}
                   placeholder="juan@example.com"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textLight}
                   value={form.email}
                   onChangeText={handleEmailChange}
                   onBlur={() => setEmailTouched(true)}
@@ -414,15 +497,15 @@ export default function SignupScreen() {
                   textContentType="emailAddress"
                 />
                 {isEmailValid ? (
-                  <Ionicons name="checkmark-circle" size={20} color="#2E7D32" style={styles.inputTrailingIcon} />
+                  <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={styles.inputTrailingIcon} />
                 ) : null}
               </View>
 
               {/* Typo Suggestion */}
               {suggestedEmail ? (
-                <TouchableOpacity style={styles.suggestionChip} onPress={applyEmailSuggestion} activeOpacity={0.7}>
-                  <Feather name="help-circle" size={14} color="#2E7D32" />
-                  <Text style={styles.suggestionText}>
+                <TouchableOpacity style={[styles.suggestionChip, { backgroundColor: colors.badgeBackground }]} onPress={applyEmailSuggestion} activeOpacity={0.7}>
+                  <Feather name="help-circle" size={14} color={colors.primary} />
+                  <Text style={[styles.suggestionText, { color: colors.primary }]}>
                     Did you mean <Text style={styles.suggestionBold}>{suggestedEmail}</Text>? Tap to fix
                   </Text>
                 </TouchableOpacity>
@@ -441,7 +524,11 @@ export default function SignupScreen() {
               <View
                 style={[
                   styles.inputWrapper,
-                  { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
+                  {
+                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                    borderColor: errorField === 'phone_number' ? '#EF4444' : isDarkMode ? '#333' : '#E0E0E0',
+                    borderWidth: errorField === 'phone_number' ? 1.5 : 1,
+                  },
                 ]}
               >
                 <Ionicons name="call-outline" size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
@@ -456,62 +543,34 @@ export default function SignupScreen() {
               </View>
             </View>
 
-            {/* Farm Name */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
-                Farm Name <Text style={styles.optionalText}>(Optional)</Text>
-              </Text>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
-                ]}
-              >
-                <FarmIcon size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
-                <TextInput
-                  style={[styles.input, { color: colors.text }]}
-                  placeholder={
-                    form.first_name.trim()
-                      ? `${form.first_name.trim()}'s Gamefowl Farm`
-                      : 'e.g. Davao Champion Farm'
-                  }
-                  placeholderTextColor="#9CA3AF"
-                  value={form.farm_name}
-                  onChangeText={(v) => setField('farm_name', v)}
-                />
-              </View>
-              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                Leave blank to automatically name it &quot;{form.first_name.trim() ? `${form.first_name.trim()}'s Farm` : "User's Farm"}&quot;
-              </Text>
-            </View>
-
             {/* Password Field */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Password <Text style={styles.requiredStar}>*</Text>
               </Text>
               <View
                 style={[
                   styles.inputWrapper,
                   {
-                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                    backgroundColor: colors.surface,
                     borderColor:
-                      passwordTouched && pwStrength.score === 1
-                        ? '#E53935'
+                      errorField === 'password'
+                        ? '#EF4444'
+                        : passwordTouched && pwStrength.score === 1
+                        ? '#EF4444'
                         : pwStrength.score === 3
-                        ? '#2E7D32'
-                        : isDarkMode
-                        ? '#333'
-                        : '#E0E0E0',
+                        ? colors.primary
+                        : colors.border,
+                    borderWidth: (errorField === 'password' || (passwordTouched && pwStrength.score === 1)) ? 1.5 : 1,
                   },
                 ]}
               >
-                <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputLeadingIcon} />
+                <Ionicons name="lock-closed-outline" size={20} color={colors.textLight} style={styles.inputLeadingIcon} />
                 <TextInput
                   ref={passwordRef}
                   style={[styles.input, { color: colors.text }]}
                   placeholder="Create a strong password"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textLight}
                   value={form.password}
                   onChangeText={(v) => setField('password', v)}
                   onBlur={() => setPasswordTouched(true)}
@@ -526,26 +585,26 @@ export default function SignupScreen() {
                   style={styles.eyeButton}
                   accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                 >
-                  <Ionicons name={showPw ? 'eye-outline' : 'eye-off-outline'} size={20} color="#6B7280" />
+                  <Ionicons name={showPw ? 'eye-outline' : 'eye-off-outline'} size={20} color={colors.textLight} />
                 </TouchableOpacity>
               </View>
 
               {/* Caps Lock Warning */}
               {capsLockOn ? (
-                <View style={styles.capsLockBadge}>
-                  <Ionicons name="warning-outline" size={14} color="#D97706" />
-                  <Text style={styles.capsLockText}>Caps Lock is ON</Text>
+                <View style={[styles.capsLockBadge, { backgroundColor: isDarkMode ? '#2D2415' : '#FEF3C7' }]}>
+                  <Ionicons name="warning-outline" size={14} color="#FBBF24" />
+                  <Text style={[styles.capsLockText, { color: isDarkMode ? '#FBBF24' : '#92400E' }]}>Caps Lock is ON</Text>
                 </View>
               ) : null}
 
               {/* Dynamic Password Strength Bar */}
               {form.password.length > 0 ? (
-                <View style={styles.strengthContainer}>
+                <View style={[styles.strengthContainer, { borderColor: colors.border, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)' }]}>
                   <View style={styles.strengthHeader}>
                     <Text style={[styles.strengthLabel, { color: colors.textSecondary }]}>Password Strength:</Text>
                     <Text style={[styles.strengthValue, { color: pwStrength.color }]}>{pwStrength.label}</Text>
                   </View>
-                  <View style={styles.strengthBarBackground}>
+                  <View style={[styles.strengthBarBackground, { backgroundColor: colors.border }]}>
                     <View
                       style={[
                         styles.strengthBarFill,
@@ -566,13 +625,13 @@ export default function SignupScreen() {
                           <Ionicons
                             name={isPassed ? 'checkmark-circle' : 'ellipse-outline'}
                             size={16}
-                            color={isPassed ? '#2E7D32' : '#9CA3AF'}
+                            color={isPassed ? colors.primary : colors.textLight}
                           />
                           <Text
                             style={[
                               styles.ruleText,
                               {
-                                color: isPassed ? (isDarkMode ? '#A5D6A7' : '#1B5E20') : colors.textSecondary,
+                                color: isPassed ? (isDarkMode ? '#8FE0B0' : '#2D5541') : colors.textSecondary,
                                 fontWeight: isPassed ? '600' : '400',
                               },
                             ]}
@@ -589,30 +648,30 @@ export default function SignupScreen() {
 
             {/* Confirm Password Field */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Confirm Password <Text style={styles.requiredStar}>*</Text>
               </Text>
               <View
                 style={[
                   styles.inputWrapper,
                   {
-                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-                    borderColor: isPasswordMismatch
-                      ? '#E53935'
-                      : isPasswordMatch
-                      ? '#2E7D32'
-                      : isDarkMode
-                      ? '#333'
-                      : '#E0E0E0',
+                    backgroundColor: colors.surface,
+                    borderColor:
+                      errorField === 'confirmPassword' || isPasswordMismatch
+                        ? '#EF4444'
+                        : isPasswordMatch
+                        ? colors.primary
+                        : colors.border,
+                    borderWidth: (errorField === 'confirmPassword' || isPasswordMismatch) ? 1.5 : 1,
                   },
                 ]}
               >
-                <Ionicons name="shield-checkmark-outline" size={20} color="#9CA3AF" style={styles.inputLeadingIcon} />
+                <Ionicons name="shield-checkmark-outline" size={20} color={colors.textLight} style={styles.inputLeadingIcon} />
                 <TextInput
                   ref={confirmRef}
                   style={[styles.input, { color: colors.text }]}
                   placeholder="Re-enter your password"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textLight}
                   value={form.confirmPassword}
                   onChangeText={(v) => setField('confirmPassword', v)}
                   onBlur={() => setConfirmTouched(true)}
@@ -622,14 +681,14 @@ export default function SignupScreen() {
                   textContentType="newPassword"
                 />
                 {isPasswordMatch ? (
-                  <Ionicons name="checkmark-circle" size={20} color="#2E7D32" style={styles.inputTrailingIcon} />
+                  <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={styles.inputTrailingIcon} />
                 ) : (
                   <TouchableOpacity
                     onPress={() => setShowConfirmPw(!showConfirmPw)}
                     style={styles.eyeButton}
                     accessibilityLabel={showConfirmPw ? 'Hide password' : 'Show password'}
                   >
-                    <Ionicons name={showConfirmPw ? 'eye-outline' : 'eye-off-outline'} size={20} color="#6B7280" />
+                    <Ionicons name={showConfirmPw ? 'eye-outline' : 'eye-off-outline'} size={20} color={colors.textLight} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -659,18 +718,25 @@ export default function SignupScreen() {
 
             {/* Primary Submit CTA */}
             <TouchableOpacity
-              style={[styles.primaryButton, { opacity: loading ? 0.8 : 1 }]}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                  opacity: loading ? 0.8 : 1,
+                },
+              ]}
               onPress={handleSignup}
               disabled={loading}
               activeOpacity={0.85}
             >
               {loading ? (
                 <View style={styles.buttonLoadingRow}>
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                  <Text style={styles.primaryButtonText}>Creating Account...</Text>
+                  <ActivityIndicator color={isDarkMode ? '#0E1210' : '#FFFFFF'} size="small" />
+                  <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Creating Account...</Text>
                 </View>
               ) : (
-                <Text style={styles.primaryButtonText}>Create Account</Text>
+                <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Create Account</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -679,7 +745,7 @@ export default function SignupScreen() {
           <View style={styles.footerRow}>
             <Text style={[styles.footerText, { color: colors.textSecondary }]}>Already have an account? </Text>
             <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.loginLinkText}>Sign In</Text>
+              <Text style={[styles.loginLinkText, { color: colors.primary }]}>Sign In</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -691,14 +757,14 @@ export default function SignupScreen() {
           <View
             style={[
               styles.modalCard,
-              { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#E0E0E0' },
+              { backgroundColor: colors.card, borderColor: colors.border },
             ]}
           >
-            <View style={styles.modalIconCircle}>
-              <Ionicons name="person-circle-outline" size={38} color="#2E7D32" />
+            <View style={[styles.modalIconCircle, { backgroundColor: colors.badgeBackground }]}>
+              <Ionicons name="person-circle-outline" size={38} color={colors.primary} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: isDarkMode ? '#FFFFFF' : '#1B5E20' }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
               Account Already Exists
             </Text>
             <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>
@@ -708,19 +774,19 @@ export default function SignupScreen() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.modalPrimaryBtn}
+                style={[styles.modalPrimaryBtn, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   setConflictModalVisible(false);
                   router.push('/login');
                 }}
               >
-                <Text style={styles.modalPrimaryBtnText}>Sign In to Account</Text>
+                <Text style={[styles.modalPrimaryBtnText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Sign In to Account</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
                   styles.modalSecondaryBtn,
-                  { borderColor: isDarkMode ? '#444' : '#E0E0E0' },
+                  { borderColor: colors.border },
                 ]}
                 onPress={() => {
                   setConflictModalVisible(false);
@@ -882,6 +948,38 @@ export default function SignupScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Floating Bottom Error Toast */}
+      {showErrorToast && (
+        <Animated.View
+          style={[
+            styles.bottomToastContainer,
+            {
+              bottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(insets.bottom, 16) + 12,
+              opacity: errorFadeAnim,
+              transform: [{ translateY: errorSlideAnim }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.bottomToastCard,
+              {
+                backgroundColor: isDarkMode ? '#2A1515' : '#FFFFFF',
+                borderColor: '#EF535040',
+              },
+            ]}
+          >
+            <View style={[styles.bottomToastIconCircle, { backgroundColor: '#EF535018' }]}>
+              <Ionicons name="alert-circle" size={16} color="#EF5350" />
+            </View>
+            <Text style={[styles.bottomToastText, { color: isDarkMode ? '#FFCDD2' : '#B71C1C' }]}>
+              {errorMessage}
+            </Text>
+          </View>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
@@ -922,7 +1020,7 @@ const styles = StyleSheet.create({
   badgePillText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: '#8FE0B0',
   },
   header: {
     marginBottom: 20,
@@ -1052,7 +1150,7 @@ const styles = StyleSheet.create({
   },
   suggestionText: {
     fontSize: 12,
-    color: '#2E7D32',
+    color: '#8FE0B0',
   },
   suggestionBold: {
     fontWeight: '700',
@@ -1129,13 +1227,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   primaryButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 3,
-    shadowColor: '#2E7D32',
+    shadowColor: '#8FE0B0',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
@@ -1146,7 +1244,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: '#0E1210',
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -1163,7 +1261,7 @@ const styles = StyleSheet.create({
   loginLinkText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: '#8FE0B0',
   },
   modalOverlay: {
     flex: 1,
@@ -1185,7 +1283,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: 'rgba(143, 224, 176, 0.14)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -1207,13 +1305,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   modalPrimaryBtn: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: 'center',
   },
   modalPrimaryBtnText: {
-    color: '#FFFFFF',
+    color: '#0E1210',
     fontSize: 15,
     fontWeight: '700',
   },
@@ -1292,5 +1390,38 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  bottomToastContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  bottomToastCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    gap: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+  },
+  bottomToastIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomToastText: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

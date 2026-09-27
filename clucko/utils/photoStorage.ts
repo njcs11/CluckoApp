@@ -117,7 +117,7 @@ export const persistChickenPhoto = async (tempUri: string): Promise<string> => {
   }
 };
 
-const captureFromCamera = async (): Promise<string | null> => {
+export const captureFromCamera = async (): Promise<string | null> => {
   const { status } = await ImagePicker.requestCameraPermissionsAsync();
   if (status !== "granted") {
     Alert.alert(
@@ -135,7 +135,7 @@ const captureFromCamera = async (): Promise<string | null> => {
   return persistChickenPhoto(result.assets[0].uri);
 };
 
-const pickFromLibrary = async (): Promise<string | null> => {
+export const pickFromLibrary = async (): Promise<string | null> => {
   if (Platform.OS !== "web") {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {

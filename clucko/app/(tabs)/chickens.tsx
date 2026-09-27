@@ -5,7 +5,6 @@ import { addChickenForCurrentUser, generateNextChickenCode, loadChickensForCurre
 import { getUserRole, apiGetFarms, apiGetQrScans } from '../../lib/api';
 import { apiGetReports } from '../../lib/api';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
-import { persistChickenPhoto } from '@/utils/photoStorage';
 import { Feather, FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from "expo-router/react-navigation";
 import { File as ExpoFile, Paths } from 'expo-file-system';
@@ -19,10 +18,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   Share,
   StyleSheet,
@@ -32,7 +33,10 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AnimatedSegmentedTabs from '../../components/ui/AnimatedSegmentedTabs';
+import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
+import { captureFromCamera, pickFromLibrary, persistChickenPhoto } from '@/utils/photoStorage';
 import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenAvatar from '../../components/ui/ChickenAvatar';
@@ -187,6 +191,7 @@ const getFarmName = (farms: Farm[], farmId?: number | string | null): string => 
 
 export default function ChickensScreen() {
   const { colors, isDarkMode } = useDarkMode();
+  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const contentWidth = Math.min(screenWidth, MAX_CONTENT_WIDTH);
 
@@ -226,6 +231,17 @@ export default function ChickensScreen() {
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const qrRef = useRef<any>(null);
+  const tabFadeAnim = useRef(new Animated.Value(1)).current;
+  const [showPhotoPicker, setShowPhotoPicker] = useState(false);
+
+  const handleTabSwitch = (newTab: string) => {
+    if (activeTab === newTab) return;
+    Animated.sequence([
+      Animated.timing(tabFadeAnim, { toValue: 0.25, duration: 80, useNativeDriver: true }),
+      Animated.timing(tabFadeAnim, { toValue: 1, duration: 160, useNativeDriver: true }),
+    ]).start();
+    setActiveTab(newTab);
+  };
 
   const [guestModalVisible, setGuestModalVisible] = useState(false);
   const [guestFeature, setGuestFeature] = useState('this feature');
@@ -326,6 +342,24 @@ useEffect(() => {
     setIsGuestMode(guest);
   };
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([
+        loadChickens(),
+        refreshFarms(),
+        loadRecentScans(),
+        checkGuestMode(),
+      ]);
+    } catch (e) {
+      console.warn('Pull-to-refresh error in chickens:', e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedFarmFilter]);
+
   const requestPermissions = async () => {
     if (Platform.OS !== 'web') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -344,17 +378,23 @@ useEffect(() => {
   // the resulting stable uri into form state. Without this, the raw
   // picker uri can go stale by the time the app reloads it from
   // AsyncStorage, leaving the chicken's photo blank everywhere it's used.
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+  const pickImage = () => {
+    setShowPhotoPicker(true);
+  };
 
-    if (!result.canceled) {
-      const permanentUri = await persistChickenPhoto(result.assets[0].uri);
-      setNewChicken({ ...newChicken, photo: permanentUri });
+  const handleChickenPhotoFromCamera = async () => {
+    setShowPhotoPicker(false);
+    const uri = await captureFromCamera();
+    if (uri) {
+      setNewChicken((prev) => ({ ...prev, photo: uri }));
+    }
+  };
+
+  const handleChickenPhotoFromLibrary = async () => {
+    setShowPhotoPicker(false);
+    const uri = await pickFromLibrary();
+    if (uri) {
+      setNewChicken((prev) => ({ ...prev, photo: uri }));
     }
   };
 
@@ -918,7 +958,17 @@ useEffect(() => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+      >
         <View style={[styles.pageColumn, { width: contentWidth, alignSelf: 'center' }]}>
           <View style={styles.headerContainer}>
             <Image
@@ -962,31 +1012,23 @@ useEffect(() => {
             </LinearGradient>
           </View>
 
-          <View style={[styles.floatingPanel, { backgroundColor: colors.surface, shadowColor: isDarkMode ? '#000' : '#1B5E20' }]}>
-            <View style={[styles.toggleTabs, { backgroundColor: colors.background }]}>
-              <TouchableOpacity
-                style={[styles.toggleTab, activeTab === 'all' && { backgroundColor: ACCENT }]}
-                onPress={() => setActiveTab('all')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="grid-outline" size={15} color={activeTab === 'all' ? ACCENT_ICON : colors.textSecondary} />
-                <Text style={[styles.toggleTabText, { color: activeTab === 'all' ? ACCENT_ICON : colors.textSecondary }]}>Overview</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toggleTab, (activeTab === 'scans' || activeTab === 'history') && { backgroundColor: ACCENT }]}
-                onPress={() => setActiveTab('scans')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="qr-code-outline" size={15} color={(activeTab === 'scans' || activeTab === 'history') ? ACCENT_ICON : colors.textSecondary} />
-                <Text style={[styles.toggleTabText, { color: (activeTab === 'scans' || activeTab === 'history') ? ACCENT_ICON : colors.textSecondary }]}>Recent Scans</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.floatingPanel, { backgroundColor: colors.card }]}>
+            <AnimatedSegmentedTabs
+              tabs={[
+                { key: 'all', label: 'Overview', icon: 'grid-outline' },
+                { key: 'scans', label: 'Recent Scans', icon: 'qr-code-outline' },
+              ]}
+              activeTab={activeTab === 'all' ? 'all' : 'scans'}
+              onChangeTab={handleTabSwitch}
+              activeColor={colors.primary}
+              containerStyle={{ marginBottom: 14 }}
+            />
 
             {activeTab === 'all' && (
               <>
                 <View style={styles.searchRow}>
-                  <View style={[styles.searchContainer, { backgroundColor: colors.background }]}>
-                    <Feather name="search" size={18} color={colors.textLight} />
+                  <View style={[styles.searchContainer, { backgroundColor: isDarkMode ? colors.surface : '#F5F8F6', borderColor: colors.border }]}>
+                    <Ionicons name="search-outline" size={18} color={colors.textLight} />
                     <TextInput
                       style={[styles.searchInput, { color: colors.text }]}
                       placeholder="Search by ID, name, or farm…"
@@ -1004,12 +1046,20 @@ useEffect(() => {
                   <TouchableOpacity
                     style={[
                       styles.filterIconButton,
-                      { backgroundColor: colors.background, borderColor: selectedStatusFilter !== 'all' ? colors.primary : 'transparent' },
+                      {
+                        backgroundColor: selectedStatusFilter !== 'all' ? colors.primary : (isDarkMode ? '#202823' : '#EFF5F1'),
+                        borderColor: selectedStatusFilter !== 'all' ? colors.primary : colors.border,
+                      },
                     ]}
                     onPress={() => setShowFilterMenu(true)}
                     activeOpacity={0.8}
                   >
-                    <Feather name="filter" size={17} color={selectedStatusFilter !== 'all' ? colors.primary : colors.textSecondary} />
+                    <Feather
+                      name="filter"
+                      size={18}
+                      color={selectedStatusFilter !== 'all' ? (isDarkMode ? '#0E1210' : '#FFFFFF') : colors.primary}
+                    />
+                    {selectedStatusFilter !== 'all' && <View style={styles.searchFilterDot} />}
                   </TouchableOpacity>
                 </View>
 
@@ -1083,7 +1133,10 @@ useEffect(() => {
                         key={index}
                         style={[
                           styles.statCard,
-                          { backgroundColor: colors.card, borderColor: active ? stat.color : colors.divider },
+                          {
+                            backgroundColor: isDarkMode ? colors.surface : '#F8FAF9',
+                            borderColor: active ? stat.color : colors.divider,
+                          },
                           active && { borderWidth: 1.5 },
                         ]}
                         onPress={() => handleStatusFilter(stat.filter)}
@@ -1108,7 +1161,8 @@ useEffect(() => {
             )}
           </View>
 
-          {activeTab === 'all' ? (
+          <Animated.View style={{ opacity: tabFadeAnim }}>
+            {activeTab === 'all' ? (
             <>
               {(selectedStatusFilter !== 'all' || searchQuery.length > 0) && (
                 <View style={styles.filterInfo}>
@@ -1260,14 +1314,18 @@ useEffect(() => {
               )}
             </View>
           )}
+          </Animated.View>
 
           <View style={styles.bottomPadding} />
         </View>
       </ScrollView>
 
       <TouchableOpacity style={[styles.fab, { right: Math.max((screenWidth - contentWidth) / 2, 0) + 20 }]} onPress={openAddForm} activeOpacity={0.85}>
-        <LinearGradient colors={['#FFCA28', '#FFA000']} style={styles.fabGradient}>
-          <Ionicons name="add" size={32} color={ACCENT_ICON} />
+        <LinearGradient
+          colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+          style={styles.fabGradient}
+        >
+          <Ionicons name="add" size={32} color={isDarkMode ? '#0E1210' : '#FFFFFF'} />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -1282,6 +1340,13 @@ useEffect(() => {
         submitLabel="Save & Generate QR"
         maxWidth={MAX_CONTENT_WIDTH}
         isSubmitting={isSavingChicken}
+      />
+
+      <PhotoPickerModal
+        visible={showPhotoPicker}
+        onCancel={() => setShowPhotoPicker(false)}
+        onTakePhoto={handleChickenPhotoFromCamera}
+        onChooseLibrary={handleChickenPhotoFromLibrary}
       />
 
       {/* Filter menu — same handleStatusFilter used by the stat cards, just
@@ -1333,9 +1398,17 @@ useEffect(() => {
         </TouchableOpacity>
       </Modal>
 
-      <Modal animationType="slide" transparent visible={showQRModal} onRequestClose={() => setShowQRModal(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showQRModal} onRequestClose={() => setShowQRModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.verifySheet, { backgroundColor: colors.card, maxWidth: MAX_CONTENT_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.verifySheet, {
+            backgroundColor: colors.card,
+            maxWidth: MAX_CONTENT_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            paddingBottom: Math.max(insets.bottom, 18),
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+          }]}>
             <View style={[styles.verifyHeader, { borderBottomColor: colors.divider }]}>
               <View style={{ flexShrink: 1 }}>
                 <Text style={[styles.verifyTitle, { color: colors.text }]}>Chicken Added</Text>
@@ -1424,9 +1497,17 @@ useEffect(() => {
         </View>
       </Modal>
 
-      <Modal animationType="slide" transparent visible={showScanDetailModal} onRequestClose={() => setShowScanDetailModal(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showScanDetailModal} onRequestClose={() => setShowScanDetailModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.scanDetailModal, { backgroundColor: colors.card, maxWidth: MAX_CONTENT_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.scanDetailModal, {
+            backgroundColor: colors.card,
+            maxWidth: MAX_CONTENT_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            paddingBottom: Math.max(insets.bottom, 20),
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+          }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Capture Details</Text>
               <TouchableOpacity onPress={() => setShowScanDetailModal(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -1466,8 +1547,11 @@ useEffect(() => {
                 </View>
 
                 <TouchableOpacity style={styles.scanDetailButton} onPress={() => setShowScanDetailModal(false)}>
-                  <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.scanDetailGradient}>
-                    <Text style={styles.scanDetailButtonText}>Close</Text>
+                  <LinearGradient
+                    colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+                    style={styles.scanDetailGradient}
+                  >
+                    <Text style={[styles.scanDetailButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Close</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </ScrollView>
@@ -1490,7 +1574,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 30,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#1B5E20',
+    backgroundColor: '#0E1210',
   },
   headerBgImage: {
     width: '100%',
@@ -1518,28 +1602,57 @@ const styles = StyleSheet.create({
 
   floatingPanel: {
     marginTop: -34,
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     borderRadius: 22,
     padding: 16,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
-
-  toggleTabs: { flexDirection: 'row', borderRadius: 26, padding: 4, marginBottom: 14 },
-  toggleTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 22 },
-  toggleTabText: { fontSize: 14, fontWeight: '600' },
 
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   searchContainer: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 16,
-    paddingHorizontal: 14, paddingVertical: 11, gap: 10,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
-  searchInput: { flex: 1, fontSize: 14 },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 2 },
   filterIconButton: {
-    width: 42, height: 42, borderRadius: 14, borderWidth: 1.5,
-    justifyContent: 'center', alignItems: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchFilterDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: '#FFD54F',
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
 
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
@@ -1631,7 +1744,7 @@ const styles = StyleSheet.create({
   resetButton: { paddingVertical: 9, paddingHorizontal: 18, borderRadius: 20 },
   resetButtonText: { fontSize: 13, fontWeight: '700' },
 
-  bottomPadding: { height: 40 },
+  bottomPadding: { height: 110 },
 
   scanHistoryTab: { paddingHorizontal: 20, paddingTop: 16 },
   scanHistorySectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -1657,8 +1770,16 @@ const styles = StyleSheet.create({
   emptyStateSubtext: { fontSize: 13, lineHeight: 18, paddingHorizontal: 24 },
 
   fab: {
-    position: 'absolute', bottom: 30, borderRadius: 30, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5,
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 100 : 88,
+    borderRadius: 30,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
+    zIndex: 20,
   },
   fabGradient: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center' },
 

@@ -21,6 +21,8 @@ import PasswordStrengthMeter, {
     isPasswordStrongEnough,
     passwordRequirementMessage,
 } from '../components/ui/PasswordStrengthMeter';
+import { useDarkMode } from '../context/DarkModeContext';
+import { apiCheckEmailExists, apiResetPassword } from '../lib/api';
 import { sendResetCodeEmail } from '../utils/email';
 
 const RESET_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -30,6 +32,7 @@ const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString(
 
 export default function ForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
+  const { colors, isDarkMode } = useDarkMode();
   const params = useLocalSearchParams<{ email?: string }>();
 
   const [step, setStep] = useState<'email' | 'reset'>('email');
@@ -55,19 +58,26 @@ export default function ForgotPasswordScreen() {
   };
 
   // Generates a code, stores it locally (so we can verify it later), and
-  // emails it via EmailJS to the real inbox.
+  // emails it via EmailJS / backend directly to the user's Gmail inbox.
   const issueAndSendCode = async (normalizedEmail: string): Promise<boolean> => {
     const newCode = generateCode();
     await AsyncStorage.setItem(
       'passwordResetCode',
       JSON.stringify({ code: newCode, email: normalizedEmail, expiresAt: Date.now() + RESET_CODE_TTL_MS })
     );
-    return sendResetCodeEmail(normalizedEmail, newCode);
+    const sent = await sendResetCodeEmail(normalizedEmail, newCode);
+    if (!sent) {
+      Alert.alert(
+        'Email Sending Failed',
+        'Could not send the verification code to your email. Please check your internet connection or email address and try again.'
+      );
+      return false;
+    }
+    return true;
   };
 
-  // Step 1: confirm this email actually belongs to an account, then email
-  // the code — mirrors the same lookup login.tsx uses (saved userData,
-  // falling back to the built-in demo account).
+  // Step 1: confirm this email actually belongs to an account in the database
+  // or local demo account, then issue the verification code.
   const handleSendCode = async () => {
     setEmailError('');
     const normalizedEmail = email.trim().toLowerCase();
@@ -79,27 +89,36 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      const userDataString = await AsyncStorage.getItem('userData');
       let matches = false;
 
-      if (userDataString) {
-        const userData = JSON.parse(userDataString);
-        matches = userData.email === normalizedEmail;
+      // Check backend database first
+      const checkRes = await apiCheckEmailExists(normalizedEmail);
+      if (checkRes && checkRes.exists) {
+        matches = true;
       } else {
-        matches = normalizedEmail === DEMO_EMAIL;
+        // Fallback to local storage or demo email
+        const userDataString = await AsyncStorage.getItem('userData');
+        if (userDataString) {
+          try {
+            const userData = JSON.parse(userDataString);
+            matches = userData.email?.toLowerCase() === normalizedEmail;
+          } catch (_) {}
+        }
+        if (!matches) {
+          matches = normalizedEmail === DEMO_EMAIL;
+        }
       }
 
       if (!matches) {
         setLoading(false);
-        setEmailError('No account found with this email.');
+        setEmailError('No account found with this email. Please check and try again.');
         return;
       }
 
-      const sent = await issueAndSendCode(normalizedEmail);
+      const sentOk = await issueAndSendCode(normalizedEmail);
       setLoading(false);
 
-      if (!sent) {
-        setEmailError('Could not send the reset email. Please try again.');
+      if (!sentOk) {
         return;
       }
 
@@ -121,22 +140,21 @@ export default function ForgotPasswordScreen() {
   const handleResendCode = async () => {
     setLoading(true);
     try {
-      const sent = await issueAndSendCode(targetEmail);
+      const sentOk = await issueAndSendCode(targetEmail);
       setLoading(false);
-      setCode('');
-      setCodeError('');
-      if (!sent) {
-        Alert.alert('Error', 'Could not resend the email. Please try again.');
-      } else {
-        Alert.alert('Code Sent', `A new code was sent to ${targetEmail}.`);
+      if (sentOk) {
+        setCode('');
+        setCodeError('');
+        Alert.alert('Code Sent', `A new verification code was sent to ${targetEmail}. Please check your inbox.`);
       }
     } catch (error) {
       console.error('Error resending reset code:', error);
       setLoading(false);
+      Alert.alert('Error', 'Failed to resend verification code. Please try again.');
     }
   };
 
-  // Step 2: verify the code, enforce a strong password, then persist it.
+  // Step 2: verify the code, enforce a strong password, then persist it in PostgreSQL and local storage.
   const handleResetPassword = async () => {
     setCodeError('');
     setPasswordError('');
@@ -186,17 +204,30 @@ export default function ForgotPasswordScreen() {
         return;
       }
 
-      // Persist the new password — update the existing account, or create
-      // one (for the built-in demo account, which has no stored record).
+      // Update password in PostgreSQL backend
+      try {
+        await apiResetPassword(targetEmail, newPassword);
+      } catch (apiErr: any) {
+        console.warn('Backend reset password error (fallback to local if demo):', apiErr);
+        if (targetEmail !== DEMO_EMAIL) {
+          setLoading(false);
+          Alert.alert('Reset Failed', apiErr?.message || 'Could not update password on server. Please try again.');
+          return;
+        }
+      }
+
+      // Sync local storage if present
       const userDataString = await AsyncStorage.getItem('userData');
       if (userDataString) {
-        const userData = JSON.parse(userDataString);
-        userData.password = newPassword;
-        await AsyncStorage.setItem('userData', JSON.stringify(userData));
+        try {
+          const userData = JSON.parse(userDataString);
+          userData.password = newPassword;
+          await AsyncStorage.setItem('userData', JSON.stringify(userData));
+        } catch (_) {}
       } else {
         await AsyncStorage.setItem(
           'userData',
-          JSON.stringify({ fullName: 'Demo User', email: targetEmail, password: newPassword, phone: '' })
+          JSON.stringify({ fullName: 'User', email: targetEmail, password: newPassword, phone: '' })
         );
       }
 
@@ -216,8 +247,8 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar style="dark" />
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <ScrollView
@@ -226,16 +257,16 @@ export default function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <TouchableOpacity onPress={() => (step === 'reset' ? setStep('email') : router.back())} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#2e7d32" />
-            <Text style={styles.backButtonText}>Back</Text>
+            <Ionicons name="arrow-back" size={24} color={colors.primary} />
+            <Text style={[styles.backButtonText, { color: colors.primary }]}>Back</Text>
           </TouchableOpacity>
 
           <View style={styles.headerContainer}>
-            <View style={styles.iconCircle}>
-              <Ionicons name={step === 'email' ? 'key-outline' : 'shield-checkmark-outline'} size={36} color="#2e7d32" />
+            <View style={[styles.iconCircle, { backgroundColor: colors.badgeBackground }]}>
+              <Ionicons name={step === 'email' ? 'key-outline' : 'shield-checkmark-outline'} size={36} color={colors.primary} />
             </View>
-            <Text style={styles.headerTitle}>{step === 'email' ? 'Forgot Password' : 'Reset Password'}</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{step === 'email' ? 'Forgot Password' : 'Reset Password'}</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               {step === 'email'
                 ? "Enter the email on your account and we'll send a reset code."
                 : `Enter the code sent to ${targetEmail} and choose a new password.`}
@@ -245,12 +276,12 @@ export default function ForgotPasswordScreen() {
           {step === 'email' ? (
             <>
               <View style={styles.inputContainer}>
-                <View style={[styles.inputWrapper, emailError ? styles.inputWrapperError : null]}>
-                  <Ionicons name="mail-outline" size={20} color={emailError ? '#e53935' : '#999'} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }, emailError ? styles.inputWrapperError : null]}>
+                  <Ionicons name="mail-outline" size={20} color={emailError ? '#e53935' : colors.textLight} style={styles.inputIcon} />
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { color: colors.text }]}
                     placeholder="Email"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={colors.textLight}
                     value={email}
                     onChangeText={handleEmailChange}
                     keyboardType="email-address"
@@ -261,28 +292,28 @@ export default function ForgotPasswordScreen() {
               </View>
 
               <TouchableOpacity style={styles.primaryButton} onPress={handleSendCode} disabled={loading} activeOpacity={0.85}>
-                <View style={styles.primaryGradient}>
-                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send Reset Code</Text>}
+                <View style={[styles.primaryGradient, { backgroundColor: colors.primary }]}>
+                  {loading ? <ActivityIndicator color={isDarkMode ? '#0E1210' : '#fff'} /> : <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Send Reset Code</Text>}
                 </View>
               </TouchableOpacity>
             </>
           ) : (
             <>
-              <View style={styles.sentNoticeCard}>
-                <Ionicons name="mail-open-outline" size={18} color="#2e7d32" />
-                <Text style={styles.sentNoticeText}>
-                  We emailed a 6-digit code to <Text style={{ fontWeight: '700' }}>{targetEmail}</Text>. Check your inbox
+              <View style={[styles.sentNoticeCard, { backgroundColor: colors.badgeBackground, borderColor: colors.border }]}>
+                <Ionicons name="mail-open-outline" size={18} color={colors.primary} />
+                <Text style={[styles.sentNoticeText, { color: colors.text }]}>
+                  We emailed a 6-digit code to <Text style={{ fontWeight: '700', color: colors.primary }}>{targetEmail}</Text>. Check your inbox
                   (and spam folder) — it expires in 15 minutes.
                 </Text>
               </View>
 
               <View style={styles.inputContainer}>
-                <View style={[styles.inputWrapper, codeError ? styles.inputWrapperError : null]}>
-                  <Ionicons name="keypad-outline" size={20} color={codeError ? '#e53935' : '#999'} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }, codeError ? styles.inputWrapperError : null]}>
+                  <Ionicons name="keypad-outline" size={20} color={codeError ? '#e53935' : colors.textLight} style={styles.inputIcon} />
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { color: colors.text }]}
                     placeholder="6-digit code"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={colors.textLight}
                     value={code}
                     onChangeText={(t) => {
                       setCode(t);
@@ -294,17 +325,17 @@ export default function ForgotPasswordScreen() {
                 </View>
                 {codeError ? <Text style={styles.errorText}>{codeError}</Text> : null}
                 <TouchableOpacity onPress={handleResendCode} disabled={loading} style={styles.resendButton}>
-                  <Text style={styles.resendText}>Didn't get it? Resend code</Text>
+                  <Text style={[styles.resendText, { color: colors.primary }]}>Didn't get it? Resend code</Text>
                 </TouchableOpacity>
               </View>
 
               <View style={styles.inputContainer}>
-                <View style={[styles.inputWrapper, passwordError ? styles.inputWrapperError : null]}>
-                  <Ionicons name="lock-closed-outline" size={20} color={passwordError ? '#e53935' : '#999'} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }, passwordError ? styles.inputWrapperError : null]}>
+                  <Ionicons name="lock-closed-outline" size={20} color={passwordError ? '#e53935' : colors.textLight} style={styles.inputIcon} />
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { color: colors.text }]}
                     placeholder="New password"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={colors.textLight}
                     value={newPassword}
                     onChangeText={(t) => {
                       setNewPassword(t);
@@ -318,12 +349,12 @@ export default function ForgotPasswordScreen() {
               </View>
 
               <View style={styles.inputContainer}>
-                <View style={[styles.inputWrapper, confirmError ? styles.inputWrapperError : null]}>
-                  <Ionicons name="lock-closed-outline" size={20} color={confirmError ? '#e53935' : '#999'} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }, confirmError ? styles.inputWrapperError : null]}>
+                  <Ionicons name="lock-closed-outline" size={20} color={confirmError ? '#e53935' : colors.textLight} style={styles.inputIcon} />
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { color: colors.text }]}
                     placeholder="Confirm new password"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={colors.textLight}
                     value={confirmPassword}
                     onChangeText={(t) => {
                       setConfirmPassword(t);
@@ -336,27 +367,27 @@ export default function ForgotPasswordScreen() {
               </View>
 
               <TouchableOpacity style={styles.primaryButton} onPress={handleResetPassword} disabled={loading} activeOpacity={0.85}>
-                <View style={styles.primaryGradient}>
-                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Reset Password</Text>}
+                <View style={[styles.primaryGradient, { backgroundColor: colors.primary }]}>
+                  {loading ? <ActivityIndicator color={isDarkMode ? '#0E1210' : '#fff'} /> : <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Reset Password</Text>}
                 </View>
               </TouchableOpacity>
             </>
           )}
 
-          <Text style={styles.footer}>© 2026 Clucko. All rights reserved.</Text>
+          <Text style={[styles.footer, { color: colors.textLight }]}>© 2026 Clucko. All rights reserved.</Text>
         </ScrollView>
       </KeyboardAvoidingView>
 
       <Modal visible={showSuccessModal} transparent animationType="fade" onRequestClose={handleProceedToLogin}>
         <View style={styles.successOverlay}>
-          <View style={styles.successCard}>
+          <View style={[styles.successCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
             <View style={styles.successIconCircle}>
-              <Ionicons name="checkmark-circle" size={48} color="#2e7d32" />
+              <Ionicons name="checkmark-circle" size={48} color={colors.primary} />
             </View>
-            <Text style={styles.successTitle}>Password Reset!</Text>
-            <Text style={styles.successMessage}>Your password has been updated. Please login with your new password.</Text>
-            <TouchableOpacity style={styles.successButton} onPress={handleProceedToLogin} activeOpacity={0.85}>
-              <Text style={styles.successButtonText}>Proceed to Login</Text>
+            <Text style={[styles.successTitle, { color: colors.text }]}>Password Reset!</Text>
+            <Text style={[styles.successMessage, { color: colors.textSecondary }]}>Your password has been updated. Please login with your new password.</Text>
+            <TouchableOpacity style={[styles.successButton, { backgroundColor: colors.primary }]} onPress={handleProceedToLogin} activeOpacity={0.85}>
+              <Text style={[styles.successButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Proceed to Login</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -366,66 +397,66 @@ export default function ForgotPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#0E1210' },
   keyboardView: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 30 },
   backButton: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, alignSelf: 'flex-start', gap: 8 },
-  backButtonText: { fontSize: 16, color: '#2e7d32', fontWeight: '500' },
+  backButtonText: { fontSize: 16, color: '#8FE0B0', fontWeight: '500' },
 
   headerContainer: { alignItems: 'center', marginBottom: 28 },
   iconCircle: {
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: 'rgba(143, 224, 176, 0.14)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 14,
   },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#2e7d32', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 19, paddingHorizontal: 10 },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#8FE0B0', marginBottom: 8, textAlign: 'center' },
+  subtitle: { fontSize: 13, color: '#A3B5AA', textAlign: 'center', lineHeight: 19, paddingHorizontal: 10 },
 
   sentNoticeCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
-    backgroundColor: '#F5FAF5',
+    backgroundColor: 'rgba(143, 224, 176, 0.1)',
     borderWidth: 1,
-    borderColor: '#C8E6C9',
+    borderColor: '#26322B',
     borderRadius: 14,
     padding: 14,
     marginBottom: 18,
   },
-  sentNoticeText: { flex: 1, fontSize: 12.5, color: '#3a5a3a', lineHeight: 18 },
+  sentNoticeText: { flex: 1, fontSize: 12.5, color: '#EBF2EE', lineHeight: 18 },
 
   inputContainer: { marginBottom: 18 },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#26322B',
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: '#202824',
     paddingHorizontal: 16,
   },
   inputWrapperError: { borderColor: '#e53935' },
   inputIcon: { marginRight: 12 },
-  input: { flex: 1, paddingVertical: 14, fontSize: 16, color: '#333' },
+  input: { flex: 1, paddingVertical: 14, fontSize: 16, color: '#EBF2EE' },
   errorText: { color: '#e53935', fontSize: 12, marginTop: 6, marginLeft: 4 },
   resendButton: { alignSelf: 'flex-end', marginTop: 8 },
-  resendText: { fontSize: 12, color: '#2e7d32', fontWeight: '600' },
+  resendText: { fontSize: 12, color: '#8FE0B0', fontWeight: '600' },
 
   primaryButton: { borderRadius: 30, overflow: 'hidden', marginTop: 8, marginBottom: 20 },
-  primaryGradient: { backgroundColor: '#2e7d32', paddingVertical: 16, alignItems: 'center' },
-  primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
+  primaryGradient: { backgroundColor: '#8FE0B0', paddingVertical: 16, alignItems: 'center' },
+  primaryButtonText: { color: '#0E1210', fontSize: 17, fontWeight: 'bold' },
 
-  footer: { textAlign: 'center', color: '#999', fontSize: 12, marginTop: 10 },
+  footer: { textAlign: 'center', color: '#6C8074', fontSize: 12, marginTop: 10 },
 
-  successOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  successCard: { width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center' },
+  successOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  successCard: { width: '100%', maxWidth: 360, backgroundColor: '#181E1B', borderRadius: 20, padding: 24, alignItems: 'center' },
   successIconCircle: { marginBottom: 12 },
-  successTitle: { fontSize: 20, fontWeight: 'bold', color: '#2e7d32', marginBottom: 8, textAlign: 'center' },
-  successMessage: { fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
-  successButton: { backgroundColor: '#2e7d32', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 32, width: '100%', alignItems: 'center' },
-  successButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  successTitle: { fontSize: 20, fontWeight: 'bold', color: '#8FE0B0', marginBottom: 8, textAlign: 'center' },
+  successMessage: { fontSize: 14, color: '#A3B5AA', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  successButton: { backgroundColor: '#8FE0B0', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 32, width: '100%', alignItems: 'center' },
+  successButtonText: { color: '#0E1210', fontSize: 16, fontWeight: 'bold' },
 });

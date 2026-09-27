@@ -1,4 +1,9 @@
-.add-form { }
+.add-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+}
 
 .form-row {
   display: grid;
@@ -44,12 +49,15 @@
   font-family: var(--font-mono);
 }
 
-.chip:hover { border-color: var(--accent-green); color: var(--accent-green); }
+.chip:hover {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
 
 .chip-active {
-  background: rgba(74, 222, 128, 0.1);
-  border-color: rgba(74, 222, 128, 0.3);
-  color: var(--accent-green);
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--accent-green-bright);
 }
 
 .chip-removable {
@@ -74,12 +82,28 @@
   gap: 8px;
 }
 
-.symptom-input-row input { flex: 1; }
+.symptom-input-row input {
+  flex: 1;
+}
 
 /* Disease list */
-.diseases-list { display: flex; flex-direction: column; gap: 12px; }
+.diseases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
-.disease-card { cursor: default; }
+.disease-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  transition: border-color 0.2s ease, transform 0.18s ease;
+}
+
+.disease-card:hover {
+  border-color: var(--border-light);
+}
 
 .disease-header {
   display: flex;
@@ -91,13 +115,14 @@
 .disease-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .disease-name {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
+  color: var(--text-white);
 }
 
 .disease-details {
@@ -116,32 +141,35 @@
 .disease-module-filter-bar {
   display: flex;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
   flex-wrap: wrap;
 }
 
 .filter-pill {
   padding: 8px 16px;
   border-radius: 20px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  background: var(--bg-card);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
 }
 
 .filter-pill:hover {
-  border-color: rgba(74, 222, 128, 0.4);
+  background: var(--bg-elevated);
+  border-color: var(--border-light);
   color: var(--text-primary);
 }
 
 .filter-pill-active {
-  background: rgba(74, 222, 128, 0.12);
-  border-color: var(--accent-green);
-  color: var(--accent-green);
-  box-shadow: 0 0 12px rgba(74, 222, 128, 0.15);
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: var(--accent-green-bright);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.18);
 }
 
 /* Module Choice Cards in Form */
@@ -173,18 +201,20 @@
 }
 
 .module-choice-card:hover {
-  border-color: rgba(74, 222, 128, 0.4);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(34, 197, 94, 0.35);
+  background: var(--bg-elevated-hover);
 }
 
 .module-choice-selected {
   border-color: var(--accent-green) !important;
-  background: rgba(74, 222, 128, 0.08) !important;
-  box-shadow: 0 0 14px rgba(74, 222, 128, 0.15);
+  background: rgba(34, 197, 94, 0.09) !important;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.2);
 }
 
 .choice-icon {
-  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
 }
 
@@ -195,9 +225,10 @@
 }
 
 .choice-title {
-  font-size: 14px;
+  font-family: var(--font-display);
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text-white);
 }
 
 .choice-sub {
@@ -211,18 +242,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 9px 13px;
   margin-bottom: 16px;
   border-radius: 8px;
-  background: rgba(74, 222, 128, 0.06);
-  border: 1px dashed rgba(74, 222, 128, 0.3);
+  background: rgba(34, 197, 94, 0.07);
+  border: 1px dashed rgba(34, 197, 94, 0.35);
   font-size: 12px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
 }
 
 .target-folder-feedback strong {
-  color: var(--accent-green);
+  color: var(--accent-green-bright);
 }
 
 /* Disease Card Header Additions */
@@ -241,6 +272,8 @@
   background: rgba(59, 130, 246, 0.12);
   border: 1px solid rgba(59, 130, 246, 0.3);
   color: #60a5fa;
+  display: inline-flex;
+  align-items: center;
 }
 
 .disease-folder-tag {

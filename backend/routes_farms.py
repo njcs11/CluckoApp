@@ -115,6 +115,13 @@ def create_farm():
                 VALUES (%s, %s, 'owner')
             ''', (farm_id, request.user_id))
 
+            # Sync with users table if user has no farm_name yet
+            cur.execute('''
+                UPDATE users
+                SET farm_name = %s, farm_location = %s
+                WHERE id = %s AND (farm_name IS NULL OR farm_name = '')
+            ''', (d['farm_name'], d.get('farm_location', ''), request.user_id))
+
             db.commit()
             cur.execute('SELECT * FROM farms WHERE id=%s', (farm_id,))
             farm = cur.fetchone()
@@ -130,25 +137,45 @@ def update_farm(farm_id):
     db = get_db()
     try:
         with db.cursor() as cur:
-            cur.execute('SELECT owner_id FROM farms WHERE id=%s', (farm_id,))
+            cur.execute('SELECT owner_id, farm_name, farm_location, description, latitude, longitude FROM farms WHERE id=%s', (farm_id,))
             farm = cur.fetchone()
-            if not farm or farm['owner_id'] != request.user_id:
+            if not farm:
+                return jsonify({'error': 'Farm not found'}), 404
+            if int(farm['owner_id']) != int(request.user_id):
                 return jsonify({'error': 'Only farm owner can edit this farm'}), 403
 
-            d = request.json
+            d = request.json or {}
+            new_name = (d.get('farm_name') or farm.get('farm_name') or '').strip()
+            new_loc = (d.get('farm_location') if d.get('farm_location') is not None else (farm.get('farm_location') or '')).strip()
+            desc = d.get('description', farm.get('description'))
+            lat = d.get('latitude', farm.get('latitude'))
+            lng = d.get('longitude', farm.get('longitude'))
+
             cur.execute('''
                 UPDATE farms
                 SET farm_name = %s, farm_location = %s, description = %s,
                     latitude = %s, longitude = %s
                 WHERE id = %s
             ''', (
-                d.get('farm_name'), d.get('farm_location'), d.get('description'),
-                d.get('latitude'), d.get('longitude'), farm_id
+                new_name, new_loc, desc,
+                lat, lng, farm_id
             ))
+
+            # Sync with users table so profile & auth immediately reflect the edited farm
+            cur.execute('''
+                UPDATE users
+                SET farm_name = %s, farm_location = %s
+                WHERE id = %s
+            ''', (new_name, new_loc, request.user_id))
+
             db.commit()
             cur.execute('SELECT * FROM farms WHERE id=%s', (farm_id,))
             updated = cur.fetchone()
         return jsonify(updated)
+    except Exception as e:
+        print(f"[FARMS] Error updating farm {farm_id}: {e}")
+        db.rollback()
+        return jsonify({'error': 'Failed to update farm. Please try again.'}), 500
     finally:
         db.close()
 
@@ -204,7 +231,7 @@ def delete_farm(farm_id):
         with db.cursor() as cur:
             cur.execute('SELECT owner_id FROM farms WHERE id=%s', (farm_id,))
             farm = cur.fetchone()
-            if not farm or farm['owner_id'] != request.user_id:
+            if not farm or int(farm['owner_id']) != int(request.user_id):
                 return jsonify({'error': 'Only farm owner can delete this farm'}), 403
             cur.execute('DELETE FROM farms WHERE id=%s', (farm_id,))
             db.commit()

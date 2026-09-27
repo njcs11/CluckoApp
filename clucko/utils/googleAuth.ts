@@ -120,11 +120,55 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
       };
     }
 
-    // 6. Authenticate / register with Clucko backend
+    // 6. Extract real first name, last name, and phone number from Google
+    let firstName = (googleUser.given_name || '').trim();
+    let lastName = (googleUser.family_name || '').trim();
+    const fullName = (googleUser.name || '').trim();
+
+    if (!firstName && fullName) {
+      const parts = fullName.split(/\s+/);
+      firstName = parts[0] || '';
+      lastName = parts.slice(1).join(' ') || '';
+    } else if (firstName && !lastName && fullName) {
+      const parts = fullName.split(/\s+/);
+      if (parts.length > 1 && parts[0].toLowerCase() === firstName.toLowerCase()) {
+        lastName = parts.slice(1).join(' ');
+      }
+    }
+
+    if (!firstName) {
+      firstName = googleUser.email.split('@')[0] || 'User';
+    }
+
+    // Try fetching People API to retrieve phone number if granted/available
+    let phoneNumber = '';
+    try {
+      const peopleRes = await fetch(
+        'https://people.googleapis.com/v1/people/me?personFields=phoneNumbers,names',
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (peopleRes.ok) {
+        const peopleData = await peopleRes.json();
+        if (peopleData.phoneNumbers && peopleData.phoneNumbers.length > 0) {
+          phoneNumber = peopleData.phoneNumbers[0].value || peopleData.phoneNumbers[0].canonicalForm || '';
+        }
+        if (!lastName && peopleData.names && peopleData.names.length > 0) {
+          const pName = peopleData.names[0];
+          if (pName.familyName) lastName = pName.familyName;
+          if (!firstName && pName.givenName) firstName = pName.givenName;
+        }
+      }
+    } catch {
+      // People API optional if scopes don't include it
+    }
+
+    // 7. Authenticate / register with Clucko backend
     const authPayload = {
       email: googleUser.email,
-      first_name: googleUser.given_name || googleUser.name?.split(' ')[0] || 'Google',
-      last_name: googleUser.family_name || googleUser.name?.split(' ').slice(1).join(' ') || 'User',
+      name: fullName,
+      first_name: firstName,
+      last_name: lastName, // NEVER 'User'
+      phone: phoneNumber,
       picture: googleUser.picture,
       google_id: googleUser.id,
     };

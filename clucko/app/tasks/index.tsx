@@ -33,10 +33,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
+import TimePickerModal from '../../components/ui/TimePickerModal';
 import { apiGetFarms, apiGetFarmMembers, getUserRole } from '../../lib/api';
 
 const MAX_CONTENT_WIDTH = 520;
@@ -59,6 +60,34 @@ const buildMonthMatrix = (year: number, month: number): (number | null)[][] => {
   return matrix;
 };
 
+const formatTaskDateTime = (dateStr?: string | null, fallbackDate?: string, fallbackTime?: string) => {
+  if (!dateStr) {
+    if (fallbackDate) {
+      return fallbackTime ? `${fallbackDate} at ${fallbackTime}` : fallbackDate;
+    }
+    return '—';
+  }
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      return fallbackTime ? `${dateStr} at ${fallbackTime}` : dateStr;
+    }
+    const dateFormatted = d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const timeFormatted = d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+    return `${dateFormatted} at ${timeFormatted}`;
+  } catch {
+    return dateStr;
+  }
+};
+
 const emptyForm = {
   title: '',
   note: '',
@@ -70,6 +99,7 @@ const emptyForm = {
 };
 
 export default function TasksScreen() {
+  const insets = useSafeAreaInsets();
   const { colors, isDarkMode } = useDarkMode();
   const { notify } = useNotifications();
   const { width: screenWidth } = useWindowDimensions();
@@ -83,6 +113,7 @@ export default function TasksScreen() {
   })();
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskTab, setTaskTab] = useState<'day' | 'done'>('day');
   const [visibleMonth, setVisibleMonth] = useState(initialDateObj);
   const [selectedDateKey, setSelectedDateKey] = useState(initialDate);
 
@@ -100,6 +131,9 @@ export default function TasksScreen() {
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [deletingTask, setDeletingTask] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [togglingTaskIds, setTogglingTaskIds] = useState<string[]>([]);
+  const [isSavingTask, setIsSavingTask] = useState(false);
 
   const guestAlert = (featureLabel: string = 'this feature') => {
     setGuestFeature(featureLabel);
@@ -150,6 +184,31 @@ export default function TasksScreen() {
 
   const selectedTasks = useMemo(() => getTasksForDate(displayedTasks, selectedDateKey), [displayedTasks, selectedDateKey]);
 
+  // Active (To-Do) tasks for the selected date
+  const activeSelectedTasks = useMemo(
+    () => selectedTasks.filter((t) => !t.completed),
+    [selectedTasks]
+  );
+
+  // Done tasks for the selected date
+  const doneSelectedTasks = useMemo(
+    () => selectedTasks.filter((t) => t.completed),
+    [selectedTasks]
+  );
+
+  // All completed tasks across all dates for the current farm filter
+  const allDoneTasks = useMemo(
+    () =>
+      displayedTasks
+        .filter((t) => t.completed)
+        .sort((a, b) => {
+          const timeA = a.completed_at || a.date;
+          const timeB = b.completed_at || b.date;
+          return timeB.localeCompare(timeA);
+        }),
+    [displayedTasks]
+  );
+
   const goPrevMonth = () => setVisibleMonth(new Date(year, month - 1, 1));
   const goNextMonth = () => setVisibleMonth(new Date(year, month + 1, 1));
   const jumpToToday = () => {
@@ -162,7 +221,10 @@ export default function TasksScreen() {
     setSelectedDateKey(formatDateKey(new Date(year, month, day)));
   };
 
+  const isCaretaker = userRole === 'caretaker';
+
   const openAddModal = () => {
+    if (isCaretaker) return;
     if (isGuestMode) {
       guestAlert('adding tasks');
       return;
@@ -183,6 +245,7 @@ export default function TasksScreen() {
   };
 
   const openEditModal = (task: Task) => {
+    if (isCaretaker) return;
     if (isGuestMode) {
       guestAlert('editing tasks');
       return;
@@ -213,6 +276,7 @@ export default function TasksScreen() {
   };
 
   const handleSaveTask = async () => {
+    if (isSavingTask) return; // Prevent double saving
     if (!form.title.trim()) {
       notify({
         title: 'Missing Title',
@@ -222,38 +286,46 @@ export default function TasksScreen() {
       return;
     }
 
-    if (editingId) {
-      await updateTask(editingId, {
-        title: form.title.trim(),
-        note: form.note.trim() || undefined,
-        time: form.time.trim() || undefined,
-        color: form.color,
-        icon: form.icon,
-        assigned_to_user_id: form.assigned_to_user_id,
-      });
-      await notify({ title: 'Task Updated', message: `"${form.title.trim()}" was updated.`, type: 'success' });
-    } else {
-      await addTask({
-        farm_id: form.farm_id,
-        date: selectedDateKey,
-        title: form.title.trim(),
-        note: form.note.trim() || undefined,
-        time: form.time.trim() || undefined,
-        color: form.color,
-        icon: form.icon,
-        completed: false,
-        assigned_to_user_id: form.assigned_to_user_id,
-      });
-      await notify({ title: 'Task Scheduled', message: `"${form.title.trim()}" was created and assigned.`, type: 'success' });
-    }
+    setIsSavingTask(true);
+    try {
+      if (editingId) {
+        await updateTask(editingId, {
+          title: form.title.trim(),
+          note: form.note.trim() || undefined,
+          time: form.time.trim() || undefined,
+          color: form.color,
+          icon: form.icon,
+          assigned_to_user_id: form.assigned_to_user_id,
+        });
+        await notify({ title: 'Task Updated', message: `"${form.title.trim()}" was updated.`, type: 'success' });
+      } else {
+        await addTask({
+          farm_id: form.farm_id,
+          date: selectedDateKey,
+          title: form.title.trim(),
+          note: form.note.trim() || undefined,
+          time: form.time.trim() || undefined,
+          color: form.color,
+          icon: form.icon,
+          completed: false,
+          assigned_to_user_id: form.assigned_to_user_id,
+        });
+        await notify({ title: 'Task Scheduled', message: `"${form.title.trim()}" was created and assigned.`, type: 'success' });
+      }
 
-    setShowFormModal(false);
-    setForm(emptyForm);
-    setEditingId(null);
-    refresh();
+      setShowFormModal(false);
+      setForm(emptyForm);
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      console.error('Error saving task:', err);
+    } finally {
+      setIsSavingTask(false);
+    }
   };
 
   const handleDeleteTask = (task: Task) => {
+    if (isCaretaker) return;
     if (isGuestMode) {
       guestAlert('deleting tasks');
       return;
@@ -280,13 +352,18 @@ export default function TasksScreen() {
       guestAlert('completing tasks');
       return;
     }
-    await toggleTaskComplete(task.id);
-    await notify({
-      title: task.completed ? 'Task Reopened' : 'Task Completed',
-      message: `"${task.title}" was updated.`,
-      type: task.completed ? 'info' : 'success',
-    });
-    refresh();
+    if (togglingTaskIds.includes(task.id)) return; // Prevent double clicking
+    setTogglingTaskIds((prev) => [...prev, task.id]);
+    try {
+      await toggleTaskComplete(task.id);
+      // Backend automatically records the detailed completion notification in the database.
+      // Refresh to update UI immediately
+      refresh();
+    } catch (err) {
+      console.error('Error toggling task:', err);
+    } finally {
+      setTogglingTaskIds((prev) => prev.filter((id) => id !== task.id));
+    }
   };
 
   return (
@@ -369,7 +446,7 @@ export default function TasksScreen() {
           )}
 
           {/* ===================== Calendar ===================== */}
-          <View style={[styles.floatingPanel, { backgroundColor: colors.surface, shadowColor: isDarkMode ? '#000' : '#1B5E20' }]}>
+          <View style={[styles.floatingPanel, { backgroundColor: colors.surface, shadowColor: '#000' }]}>
             <View style={styles.monthNavRow}>
               <TouchableOpacity onPress={goPrevMonth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="chevron-back-circle-outline" size={26} color={colors.textSecondary} />
@@ -414,7 +491,7 @@ export default function TasksScreen() {
                         <Text
                           style={[
                             styles.dayText,
-                            { color: isSelected ? '#fff' : isToday ? colors.primary : colors.text },
+                            { color: isSelected ? (isDarkMode ? '#0E1210' : '#FFFFFF') : isToday ? colors.primary : colors.text },
                           ]}
                         >
                           {day}
@@ -424,7 +501,7 @@ export default function TasksScreen() {
                         <View
                           style={[
                             styles.dayDot,
-                            { backgroundColor: counts.pending > 0 ? '#FF9800' : '#4CAF50' },
+                            { backgroundColor: counts.pending > 0 ? '#FF9800' : colors.primary },
                           ]}
                         />
                       )}
@@ -435,111 +512,334 @@ export default function TasksScreen() {
             ))}
           </View>
 
-          {/* ===================== Selected day's tasks ===================== */}
+          {/* ===================== Tasks & Done Tasks Section ===================== */}
           <View style={styles.tasksSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                {getRelativeDateLabel(selectedDateKey)} · {selectedTasks.length} task{selectedTasks.length === 1 ? '' : 's'}
-              </Text>
-              <TouchableOpacity style={[styles.addInlineBtn, { backgroundColor: colors.primary }]} onPress={openAddModal} activeOpacity={0.85}>
-                <Ionicons name="add" size={16} color="#fff" />
-                <Text style={styles.addInlineText}>Add</Text>
+            {/* View Switcher: Day Schedule vs Done Tasks */}
+            <View style={[styles.tabSwitchContainer, { backgroundColor: isDarkMode ? '#1A231E' : '#E8EFEA' }]}>
+              <TouchableOpacity
+                style={[
+                  styles.tabSwitchBtn,
+                  taskTab === 'day' && [styles.tabSwitchBtnActive, { backgroundColor: colors.card }],
+                ]}
+                onPress={() => setTaskTab('day')}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={15}
+                  color={taskTab === 'day' ? colors.primary : colors.textLight}
+                />
+                <Text
+                  style={[
+                    styles.tabSwitchText,
+                    { color: taskTab === 'day' ? colors.primary : colors.textSecondary },
+                    taskTab === 'day' && { fontWeight: '700' },
+                  ]}
+                >
+                  Day Schedule ({activeSelectedTasks.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.tabSwitchBtn,
+                  taskTab === 'done' && [styles.tabSwitchBtnActive, { backgroundColor: colors.card }],
+                ]}
+                onPress={() => setTaskTab('done')}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="checkmark-done-circle"
+                  size={16}
+                  color={taskTab === 'done' ? '#4CAF50' : colors.textLight}
+                />
+                <Text
+                  style={[
+                    styles.tabSwitchText,
+                    { color: taskTab === 'done' ? '#4CAF50' : colors.textSecondary },
+                    taskTab === 'done' && { fontWeight: '700' },
+                  ]}
+                >
+                  Done Tasks ({allDoneTasks.length})
+                </Text>
               </TouchableOpacity>
             </View>
 
-            {selectedTasks.length === 0 ? (
-              <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
-                <Ionicons name="document-text-outline" size={36} color={colors.textLight} />
-                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>Nothing recorded for this day yet</Text>
-                <TouchableOpacity style={[styles.resetButton, { backgroundColor: colors.primary + '15' }]} onPress={openAddModal}>
-                  <Text style={[styles.resetButtonText, { color: colors.primary }]}>Add a Task or Note</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              selectedTasks.map((task) => (
-                <TouchableOpacity
-                  key={task.id}
-                  style={[styles.taskRow, { backgroundColor: colors.card, borderColor: colors.divider }]}
-                  activeOpacity={0.8}
-                  onPress={() => openEditModal(task)}
-                >
-                  <TouchableOpacity
-                    style={[
-                      styles.taskCheck,
-                      { borderColor: task.color || colors.primary },
-                      task.completed && { backgroundColor: task.color || colors.primary },
-                    ]}
-                    onPress={() => handleToggleComplete(task)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    {task.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
-                  </TouchableOpacity>
+            {taskTab === 'day' ? (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    {getRelativeDateLabel(selectedDateKey)} · {activeSelectedTasks.length} task{activeSelectedTasks.length === 1 ? '' : 's'}
+                  </Text>
+                  {!isCaretaker && (
+                    <TouchableOpacity style={[styles.addInlineBtn, { backgroundColor: colors.primary }]} onPress={openAddModal} activeOpacity={0.85}>
+                      <Ionicons name="add" size={16} color="#fff" />
+                      <Text style={styles.addInlineText}>Add</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-                  <View style={[styles.taskIconCircle, { backgroundColor: (task.color || colors.primary) + '18' }]}>
-                    <Ionicons name={(task.icon as any) || 'checkbox-outline'} size={16} color={task.color || colors.primary} />
-                  </View>
-
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <Text
+                {activeSelectedTasks.length === 0 ? (
+                  doneSelectedTasks.length > 0 ? (
+                    <View style={{ gap: 12, marginTop: 4 }}>
+                      <View style={[styles.allDoneDayCard, { backgroundColor: isDarkMode ? '#1B2720' : '#E8F5E9' }]}>
+                        <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                        <Text style={{ color: isDarkMode ? '#A5D6A7' : '#2E7D32', fontSize: 13.5, fontWeight: '700', flex: 1 }}>
+                          All tasks for {getRelativeDateLabel(selectedDateKey)} are completed!
+                        </Text>
+                      </View>
+                      <TouchableOpacity
                         style={[
-                          styles.taskTitle,
-                          { color: colors.text },
-                          task.completed && { textDecorationLine: 'line-through', color: colors.textLight },
+                          styles.viewAllDoneCard,
+                          { backgroundColor: colors.card, borderColor: colors.divider },
                         ]}
-                        numberOfLines={1}
+                        onPress={() => setTaskTab('done')}
+                        activeOpacity={0.8}
                       >
-                        {task.title}
+                        <Ionicons name="checkmark-done-circle-outline" size={22} color="#4CAF50" />
+                        <Text style={[styles.viewAllDoneText, { color: colors.textSecondary, flex: 1 }]}>
+                          {doneSelectedTasks.length} task{doneSelectedTasks.length === 1 ? ' was' : 's were'} completed on this day. View in Done Tasks →
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+                      <Ionicons name="document-text-outline" size={36} color={colors.textLight} />
+                      <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+                        {isCaretaker ? 'No tasks assigned for this day' : 'Nothing recorded for this day yet'}
                       </Text>
-                      {task.farm_name && (
-                        <View style={[styles.taskFarmTag, { backgroundColor: colors.primary + '18' }]}>
-                          <FarmIcon size={11} color={colors.primary} />
-                          <Text style={[styles.taskFarmTagText, { color: colors.primary }]} numberOfLines={1}>
-                            {task.farm_name}
-                          </Text>
-                        </View>
+                      {!isCaretaker && (
+                        <TouchableOpacity style={[styles.resetButton, { backgroundColor: colors.primary + '15' }]} onPress={openAddModal}>
+                          <Text style={[styles.resetButtonText, { color: colors.primary }]}>Add a Task or Note</Text>
+                        </TouchableOpacity>
                       )}
                     </View>
+                  )
+                ) : (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.subSectionTitle, { color: colors.textSecondary }]}>
+                      TO-DO TASKS ({activeSelectedTasks.length})
+                    </Text>
+                    {activeSelectedTasks.map((task) => {
+                      const isToggling = togglingTaskIds.includes(task.id);
+                      return (
+                        <TouchableOpacity
+                          key={task.id}
+                          style={[styles.taskRow, { backgroundColor: colors.card, borderColor: colors.divider }]}
+                          activeOpacity={isCaretaker ? 1 : 0.8}
+                          onPress={() => {
+                            if (!isCaretaker) openEditModal(task);
+                          }}
+                        >
+                          <TouchableOpacity
+                            style={[
+                              styles.taskCheck,
+                              { borderColor: task.color || colors.primary, opacity: isToggling ? 0.5 : 1 },
+                            ]}
+                            onPress={() => handleToggleComplete(task)}
+                            disabled={isToggling}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            {task.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
+                          </TouchableOpacity>
 
-                    {!!(task.time || task.note) && (
-                      <Text style={[styles.taskMeta, { color: colors.textLight }]} numberOfLines={1}>
-                        {[task.time, task.note].filter(Boolean).join(' · ')}
-                      </Text>
-                    )}
+                          <View style={[styles.taskIconCircle, { backgroundColor: (task.color || colors.primary) + '18' }]}>
+                            <Ionicons name={(task.icon as any) || 'checkbox-outline'} size={16} color={task.color || colors.primary} />
+                          </View>
 
-                    {/* Attribution lines: Set by & Assigned to */}
-                    <View style={styles.taskAttributionRow}>
-                      <View style={styles.taskAttrItem}>
-                        <Ionicons name="person-outline" size={10} color={colors.textLight} />
-                        <Text style={[styles.taskAttrText, { color: colors.textLight }]} numberOfLines={1}>
-                          Set by: {task.creator_name || 'Owner'}
-                        </Text>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text style={[styles.taskTitle, { color: colors.text }]} numberOfLines={1}>
+                                {task.title}
+                              </Text>
+                              {task.farm_name && (
+                                <View style={[styles.taskFarmTag, { backgroundColor: colors.primary + '18' }]}>
+                                  <FarmIcon size={11} color={colors.primary} />
+                                  <Text style={[styles.taskFarmTagText, { color: colors.primary }]} numberOfLines={1}>
+                                    {task.farm_name}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+
+                            {!!(task.time || task.note) && (
+                              <Text style={[styles.taskMeta, { color: colors.textLight }]} numberOfLines={1}>
+                                {[task.time, task.note].filter(Boolean).join(' · ')}
+                              </Text>
+                            )}
+
+                            {/* Detailed Start / Creation Info */}
+                            <View style={styles.taskTimestampRow}>
+                              <Ionicons name="time-outline" size={11} color={colors.textLight} />
+                              <Text style={[styles.taskTimestampText, { color: colors.textLight }]} numberOfLines={1}>
+                                Started: {formatTaskDateTime(task.created_at || task.createdAt, task.date, task.time)}
+                              </Text>
+                            </View>
+
+                            {/* Attribution lines: Set by & Assigned to */}
+                            <View style={styles.taskAttributionRow}>
+                              <View style={styles.taskAttrItem}>
+                                <Ionicons name="person-outline" size={10} color={colors.textLight} />
+                                <Text style={[styles.taskAttrText, { color: colors.textLight }]} numberOfLines={1}>
+                                  Set by: {task.creator_name || 'Owner'}
+                                </Text>
+                              </View>
+                              <Text style={{ color: colors.textLight, fontSize: 10 }}>•</Text>
+                              <View style={styles.taskAttrItem}>
+                                <Ionicons name="people-outline" size={10} color={colors.textLight} />
+                                <Text style={[styles.taskAttrText, { color: colors.textLight }]} numberOfLines={1}>
+                                  {task.assignee_name ? `Assigned: ${task.assignee_name}` : 'All Caretakers'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+
+                          {!isCaretaker && (
+                            <TouchableOpacity onPress={() => handleDeleteTask(task)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                              <Ionicons name="trash-outline" size={18} color={colors.textLight} />
+                            </TouchableOpacity>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            ) : (
+              /* All Done Tasks View */
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                      Completed Tasks History ({allDoneTasks.length})
+                    </Text>
+                  </View>
+                </View>
+
+                {allDoneTasks.length === 0 ? (
+                  <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+                    <Ionicons name="checkmark-done-circle-outline" size={38} color={colors.textLight} />
+                    <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+                      No completed tasks yet. When you or your caretakers complete a task, it stays recorded here.
+                    </Text>
+                  </View>
+                ) : (
+                  allDoneTasks.map((task) => (
+                    <View
+                      key={task.id}
+                      style={[
+                        styles.doneTaskCard,
+                        {
+                          backgroundColor: colors.card,
+                          borderColor: isDarkMode ? '#243329' : '#DDE8E1',
+                        },
+                      ]}
+                    >
+                      <View style={styles.doneTaskTopRow}>
+                        <TouchableOpacity
+                          style={[styles.taskCheck, { borderColor: '#4CAF50', backgroundColor: '#4CAF50' }]}
+                          onPress={() => handleToggleComplete(task)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="checkmark" size={14} color="#fff" />
+                        </TouchableOpacity>
+
+                        <View style={[styles.taskIconCircle, { backgroundColor: 'rgba(76, 175, 80, 0.15)' }]}>
+                          <Ionicons name={(task.icon as any) || 'checkbox-outline'} size={16} color="#4CAF50" />
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text
+                              style={[
+                                styles.taskTitle,
+                                { color: colors.textLight, textDecorationLine: 'line-through' },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {task.title}
+                            </Text>
+                            <View style={[styles.doneBadge, { backgroundColor: '#4CAF5018' }]}>
+                              <Text style={[styles.doneBadgeText, { color: '#4CAF50' }]}>DONE</Text>
+                            </View>
+                            {task.farm_name && (
+                              <View style={[styles.taskFarmTag, { backgroundColor: colors.primary + '18' }]}>
+                                <FarmIcon size={11} color={colors.primary} />
+                                <Text style={[styles.taskFarmTagText, { color: colors.primary }]} numberOfLines={1}>
+                                  {task.farm_name}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          {!!task.note && (
+                            <Text style={[styles.taskMeta, { color: colors.textLight }]} numberOfLines={1}>
+                              {task.note}
+                            </Text>
+                          )}
+                        </View>
+
+                        <TouchableOpacity
+                          style={[styles.reopenPillBtn, { backgroundColor: colors.primary + '14' }]}
+                          onPress={() => handleToggleComplete(task)}
+                          activeOpacity={0.75}
+                        >
+                          <Ionicons name="refresh-outline" size={13} color={colors.primary} />
+                          <Text style={[styles.reopenPillText, { color: colors.primary }]}>Reopen</Text>
+                        </TouchableOpacity>
+
+                        {!isCaretaker && (
+                          <TouchableOpacity onPress={() => handleDeleteTask(task)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Ionicons name="trash-outline" size={18} color={colors.textLight} />
+                          </TouchableOpacity>
+                        )}
                       </View>
-                      <Text style={{ color: colors.textLight, fontSize: 10 }}>•</Text>
-                      <View style={styles.taskAttrItem}>
-                        <Ionicons name="people-outline" size={10} color={colors.textLight} />
-                        <Text style={[styles.taskAttrText, { color: colors.textLight }]} numberOfLines={1}>
-                          {task.assignee_name ? `Assigned: ${task.assignee_name}` : 'All Caretakers'}
-                        </Text>
+
+                      {/* Detailed Start & End Timestamps Box */}
+                      <View
+                        style={[
+                          styles.doneDetailsBox,
+                          {
+                            backgroundColor: isDarkMode ? '#16221A' : '#F8FCF9',
+                            borderColor: isDarkMode ? '#283A30' : '#E2EEE7',
+                          },
+                        ]}
+                      >
+                        <View style={styles.doneDetailRow}>
+                          <Ionicons name="play-circle-outline" size={13} color="#2196F3" />
+                          <Text style={[styles.doneDetailLabel, { color: colors.textLight }]}>
+                            Started / Created:
+                          </Text>
+                          <Text style={[styles.doneDetailVal, { color: colors.text }]} numberOfLines={1}>
+                            {formatTaskDateTime(task.created_at || task.createdAt, task.date, task.time)}
+                          </Text>
+                        </View>
+
+                        <View style={styles.doneDetailRow}>
+                          <Ionicons name="checkmark-circle-outline" size={13} color="#4CAF50" />
+                          <Text style={[styles.doneDetailLabel, { color: colors.textLight }]}>
+                            Ended / Completed:
+                          </Text>
+                          <Text style={[styles.doneDetailVal, { color: colors.text }]} numberOfLines={1}>
+                            {formatTaskDateTime(task.completed_at, task.date, 'Completed')}
+                          </Text>
+                        </View>
+
+                        {task.completer_name && (
+                          <View style={styles.doneDetailRow}>
+                            <Ionicons name="person-circle-outline" size={13} color={colors.primary} />
+                            <Text style={[styles.doneDetailLabel, { color: colors.textLight }]}>
+                              Completed by:
+                            </Text>
+                            <Text style={[styles.doneDetailVal, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
+                              {task.completer_name} {task.completer_role ? `(${task.completer_role})` : ''}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
-
-                    {/* Completion Info */}
-                    {task.completed && task.completer_name && (
-                      <View style={[styles.completedNoticeRow, { backgroundColor: '#4CAF5015' }]}>
-                        <Ionicons name="checkmark-done-circle" size={12} color="#4CAF50" />
-                        <Text style={[styles.completedNoticeText, { color: '#4CAF50' }]} numberOfLines={1}>
-                          Done by {task.completer_name} ({task.completer_role || 'Member'})
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <TouchableOpacity onPress={() => handleDeleteTask(task)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="trash-outline" size={18} color={colors.textLight} />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              ))
+                  ))
+                )}
+              </View>
             )}
           </View>
 
@@ -548,12 +848,20 @@ export default function TasksScreen() {
       </ScrollView>
 
       {/* ===================== Add / Edit modal ===================== */}
-      <Modal animationType="slide" transparent visible={showFormModal} onRequestClose={() => setShowFormModal(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showFormModal} onRequestClose={() => setShowFormModal(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
         >
-          <View style={[styles.formSheet, { backgroundColor: colors.card, maxWidth: MAX_CONTENT_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.formSheet, {
+            backgroundColor: colors.card,
+            maxWidth: MAX_CONTENT_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+            paddingBottom: Math.max(insets.bottom, 16),
+          }]}>
             <View style={[styles.formHeader, { borderBottomColor: colors.divider }]}>
               <Text style={[styles.formTitle, { color: colors.text }]}>
                 {editingId ? 'Edit Task' : 'New Task or Note'}
@@ -644,13 +952,45 @@ export default function TasksScreen() {
               />
 
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Time (optional)</Text>
-              <TextInput
-                style={[styles.textInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-                placeholder="e.g. 9:00 AM"
-                placeholderTextColor={colors.textLight}
-                value={form.time}
-                onChangeText={(text) => setForm({ ...form, time: text })}
-              />
+              <TouchableOpacity
+                style={[
+                  styles.timePickerBtn,
+                  {
+                    borderColor: form.time ? colors.primary : colors.border,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+                onPress={() => setShowTimePicker(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={18}
+                  color={form.time ? colors.primary : colors.textLight}
+                />
+                <Text
+                  style={[
+                    styles.timePickerText,
+                    { color: form.time ? colors.text : colors.textLight },
+                    form.time ? { fontWeight: '600' } : undefined,
+                  ]}
+                >
+                  {form.time || 'Tap to choose time (e.g. 8:00 AM)'}
+                </Text>
+                {form.time ? (
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setForm({ ...form, time: '' });
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close-circle" size={18} color={colors.textLight} />
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+                )}
+              </TouchableOpacity>
 
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Note (optional)</Text>
               <TextInput
@@ -711,9 +1051,17 @@ export default function TasksScreen() {
               <TouchableOpacity style={[styles.formCancelBtn, { borderColor: colors.border }]} onPress={() => setShowFormModal(false)} activeOpacity={0.75}>
                 <Text style={[styles.formCancelText, { color: colors.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formSaveBtn, { backgroundColor: colors.primary }]} onPress={handleSaveTask} activeOpacity={0.85}>
+              <TouchableOpacity
+                style={[
+                  styles.formSaveBtn,
+                  { backgroundColor: colors.primary, opacity: isSavingTask ? 0.7 : 1 },
+                ]}
+                onPress={handleSaveTask}
+                disabled={isSavingTask}
+                activeOpacity={0.85}
+              >
                 <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                <Text style={styles.formSaveText}>{editingId ? 'Save Changes' : 'Schedule Task'}</Text>
+                <Text style={styles.formSaveText}>{isSavingTask ? 'Saving…' : editingId ? 'Save Changes' : 'Schedule Task'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -725,8 +1073,11 @@ export default function TasksScreen() {
         onPress={openAddModal}
         activeOpacity={0.85}
       >
-        <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.fabGradient}>
-          <Ionicons name="add" size={32} color="#fff" />
+        <LinearGradient
+          colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+          style={styles.fabGradient}
+        >
+          <Ionicons name="add" size={32} color={isDarkMode ? '#0E1210' : '#fff'} />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -746,6 +1097,15 @@ export default function TasksScreen() {
         icon="trash-outline"
         onConfirm={confirmDeleteTask}
         onCancel={() => setTaskToDelete(null)}
+      />
+
+      <TimePickerModal
+        visible={showTimePicker}
+        currentTime={form.time}
+        onClose={() => setShowTimePicker(false)}
+        onSelectTime={(time) => setForm({ ...form, time })}
+        colors={colors}
+        isDarkMode={isDarkMode}
       />
     </SafeAreaView>
   );
@@ -852,6 +1212,155 @@ const styles = StyleSheet.create({
   },
   completedNoticeText: { fontSize: 10, fontWeight: '700' },
 
+  tabSwitchContainer: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 16,
+    gap: 6,
+  },
+  tabSwitchBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  tabSwitchBtnActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabSwitchText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  subSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  taskTimestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  taskTimestampText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  allDoneDayCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  doneSectionWrap: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+  },
+  doneSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  doneSectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptyDoneBox: {
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewAllDoneCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  viewAllDoneText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    flex: 1,
+  },
+  doneTaskCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  doneTaskTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  doneBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  doneBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  doneDetailsBox: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 6,
+  },
+  doneDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  doneDetailLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  doneDetailVal: {
+    fontSize: 11,
+    fontWeight: '500',
+    flex: 1,
+  },
+  reopenPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  reopenPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   bottomPadding: { height: 100 },
 
   // --- Add/Edit modal ---
@@ -901,4 +1410,19 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5,
   },
   fabGradient: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center' },
+
+  timePickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 6,
+    gap: 10,
+  },
+  timePickerText: {
+    flex: 1,
+    fontSize: 14,
+  },
 });

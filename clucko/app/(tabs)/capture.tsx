@@ -1,15 +1,17 @@
+import { useDarkMode } from '@/context/DarkModeContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { exitGuestMode } from '@/utils/guestMode';
 import { generateNextChickenCode } from '@/utils/chickenStorage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
-import Constants from 'expo-constants';
-import { pickOrCaptureChickenPhoto, photoUriToBase64, resizeAndCompress } from '@/utils/photoStorage';
+import { pickOrCaptureChickenPhoto, photoUriToBase64, resizeAndCompress, captureFromCamera, pickFromLibrary } from '@/utils/photoStorage';
+import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
 import { File as ExpoFile, Paths } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { router, useLocalSearchParams } from 'expo-router';
+import Constants from 'expo-constants';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,7 +31,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenIcon from '../../components/ui/ChickenIcon';
@@ -47,7 +49,7 @@ const CAPTURE_FORM_COLORS = {
   card: '#fff',
   border: '#ddd',
   divider: '#eee',
-  primary: '#2E7D32',
+  primary: '#2D5541',
 };
 
 // WORKAROUND: see photoStorage.ts / other screens for the full explanation
@@ -117,7 +119,7 @@ const ANALYZING_MESSAGES = [
   'Evaluating symptom patterns & cross-referencing health markers…',
   'Finalizing diagnostic report & confidence metrics…',
 ];
-const ANALYZING_COLORS = ['#4DA3FF', '#FFD54F', '#4CAF50'];
+const ANALYZING_COLORS = ['#4DA3FF', '#FFD54F', '#8FE0B0'];
 
 // Maps a detection result into the DB's severity_level enum. The backend
 // doesn't compute this for us — /api/detect only returns a disease name +
@@ -134,6 +136,8 @@ const mapSeverity = (
 };
 
 export default function CaptureScreen() {
+  const insets = useSafeAreaInsets();
+  const { isDarkMode, colors } = useDarkMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const frameWidth = Math.min(screenWidth, MAX_PHONE_WIDTH);
   const isWideScreen = screenWidth > MAX_PHONE_WIDTH;
@@ -231,6 +235,7 @@ export default function CaptureScreen() {
   const analyzingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isSavingScan, setIsSavingScan] = useState(false);
   const [isCreatingChicken, setIsCreatingChicken] = useState(false);
+  const [showPhotoPicker, setShowPhotoPicker] = useState(false);
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -685,8 +690,21 @@ export default function CaptureScreen() {
     setShowChickenPicker(true);
   };
 
-  const handlePickChickenPhoto = async () => {
-    const uri = await pickOrCaptureChickenPhoto();
+  const handlePickChickenPhoto = () => {
+    setShowPhotoPicker(true);
+  };
+
+  const handlePhotoFromCamera = async () => {
+    setShowPhotoPicker(false);
+    const uri = await captureFromCamera();
+    if (uri) {
+      setNewChicken((prev) => ({ ...prev, photo: uri }));
+    }
+  };
+
+  const handlePhotoFromLibrary = async () => {
+    setShowPhotoPicker(false);
+    const uri = await pickFromLibrary();
     if (uri) {
       setNewChicken((prev) => ({ ...prev, photo: uri }));
     }
@@ -1040,8 +1058,11 @@ export default function CaptureScreen() {
             Please sign up or login first to access Scan &amp; Detect.
           </Text>
           <TouchableOpacity style={styles.guestBlockButton} onPress={() => router.push('/signup')}>
-            <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.guestBlockButtonGradient}>
-              <Text style={styles.guestBlockButtonText}>Sign Up</Text>
+            <LinearGradient
+              colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+              style={styles.guestBlockButtonGradient}
+            >
+              <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Sign Up</Text>
             </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity style={styles.guestBlockSecondaryButton} onPress={() => router.replace('/login')}>
@@ -1076,8 +1097,11 @@ export default function CaptureScreen() {
           </Text>
           {permission.canAskAgain ? (
             <TouchableOpacity style={styles.guestBlockButton} onPress={requestPermission}>
-              <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.guestBlockButtonGradient}>
-                <Text style={styles.guestBlockButtonText}>Allow Camera Access</Text>
+              <LinearGradient
+                colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+                style={styles.guestBlockButtonGradient}
+              >
+                <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Allow Camera Access</Text>
               </LinearGradient>
             </TouchableOpacity>
           ) : null}
@@ -1231,7 +1255,7 @@ export default function CaptureScreen() {
                                 ? '#f44336'
                                 : scanResult?.severity === 'moderate' || scanResult?.severity === 'high'
                                 ? '#FF9800'
-                                : '#4CAF50',
+                                : '#8FE0B0',
                           },
                         ]}
                       />
@@ -1408,10 +1432,10 @@ export default function CaptureScreen() {
                           activeOpacity={0.85}
                         >
                           {isSavingScan ? (
-                            <ActivityIndicator size="small" color="#fff" />
+                            <ActivityIndicator size="small" color="#0E1210" />
                           ) : (
                             <>
-                              <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                              <Ionicons name="checkmark-circle" size={18} color="#0E1210" />
                               <Text style={styles.reviewSaveText}>Save</Text>
                             </>
                           )}
@@ -1491,7 +1515,7 @@ export default function CaptureScreen() {
           <View style={[styles.scannedTagCard, { maxWidth: MAX_PHONE_WIDTH - 40 }]}>
             <View style={styles.scannedTagHeaderRow}>
               <View style={styles.scannedTagIconCircle}>
-                <Ionicons name="qr-code" size={24} color="#2E7D32" />
+                <Ionicons name="qr-code" size={24} color={colors.primary} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.scannedTagTitle}>Chicken Tag Detected</Text>
@@ -1518,7 +1542,7 @@ export default function CaptureScreen() {
                   <Image source={{ uri: scannedTagInfo.photoUrl }} style={styles.scannedTagAvatar} />
                 ) : (
                   <View style={styles.scannedTagAvatarPlaceholder}>
-                    <ChickenIcon size={26} color="#2E7D32" />
+                    <ChickenIcon size={26} color={colors.primary} />
                   </View>
                 )}
               </View>
@@ -1573,7 +1597,7 @@ export default function CaptureScreen() {
                     }}
                     activeOpacity={0.85}
                   >
-                    <Ionicons name="document-text-outline" size={18} color="#2E7D32" />
+                    <Ionicons name="document-text-outline" size={18} color={colors.primary} />
                     <Text style={styles.scannedTagSecondaryText}>View Profile & History</Text>
                   </TouchableOpacity>
                 </>
@@ -1623,9 +1647,17 @@ export default function CaptureScreen() {
       </Modal>
 
       {/* Scan result modal */}
-      <Modal animationType="slide" transparent visible={showResultModal} onRequestClose={() => setShowResultModal(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showResultModal} onRequestClose={() => setShowResultModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.verifySheet, { backgroundColor: CAPTURE_FORM_COLORS.card, maxWidth: MAX_PHONE_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.verifySheet, {
+            backgroundColor: CAPTURE_FORM_COLORS.card,
+            maxWidth: MAX_PHONE_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            paddingBottom: Math.max(insets.bottom, 16),
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+          }]}>
             <View style={[styles.verifyHeader, { borderBottomColor: CAPTURE_FORM_COLORS.divider }]}>
               <View style={{ flexShrink: 1 }}>
                 <Text style={[styles.verifyTitle, { color: CAPTURE_FORM_COLORS.text }]}>Scan Result</Text>
@@ -1674,9 +1706,19 @@ export default function CaptureScreen() {
 
       {/* Chicken picker — shared by the pre-capture pill and the post-capture
           "existing chicken" branch. */}
-      <Modal animationType="slide" transparent visible={showChickenPicker} onRequestClose={() => setShowChickenPicker(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showChickenPicker} onRequestClose={() => setShowChickenPicker(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.pickerSheet, { backgroundColor: CAPTURE_FORM_COLORS.card, maxWidth: MAX_PHONE_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.pickerSheet, {
+            backgroundColor: CAPTURE_FORM_COLORS.card,
+            maxWidth: MAX_PHONE_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+            paddingBottom: Math.max(insets.bottom, 16),
+          }]}>
             <View style={[styles.verifyHeader, { borderBottomColor: CAPTURE_FORM_COLORS.divider }]}>
               <Text style={[styles.verifyTitle, { color: CAPTURE_FORM_COLORS.text }]}>Select a Chicken</Text>
               <TouchableOpacity onPress={() => setShowChickenPicker(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -1728,9 +1770,24 @@ export default function CaptureScreen() {
         maxWidth={MAX_PHONE_WIDTH}
       />
 
-      <Modal animationType="slide" transparent visible={showQRModal} onRequestClose={() => setShowQRModal(false)}>
+      <PhotoPickerModal
+        visible={showPhotoPicker}
+        onCancel={() => setShowPhotoPicker(false)}
+        onTakePhoto={handlePhotoFromCamera}
+        onChooseLibrary={handlePhotoFromLibrary}
+      />
+
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showQRModal} onRequestClose={() => setShowQRModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.verifySheet, { backgroundColor: CAPTURE_FORM_COLORS.card, maxWidth: MAX_PHONE_WIDTH, width: '100%', alignSelf: 'center' }]}>
+          <View style={[styles.verifySheet, {
+            backgroundColor: CAPTURE_FORM_COLORS.card,
+            maxWidth: MAX_PHONE_WIDTH,
+            width: '100%',
+            alignSelf: 'center',
+            paddingBottom: Math.max(insets.bottom, 16),
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+          }]}>
             <View style={[styles.verifyHeader, { borderBottomColor: CAPTURE_FORM_COLORS.divider }]}>
               <View style={{ flexShrink: 1 }}>
                 <Text style={[styles.verifyTitle, { color: CAPTURE_FORM_COLORS.text }]}>Verify & Save</Text>
@@ -1791,7 +1848,7 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any)
     if (s === 'critical') return { bg: '#FFEBEE', text: '#D32F2F', label: 'CRITICAL' };
     if (s === 'high') return { bg: '#FFF3E0', text: '#E65100', label: 'HIGH' };
     if (s === 'moderate') return { bg: '#FFF8E1', text: '#F57F17', label: 'MODERATE' };
-    return { bg: '#E8F5E9', text: '#2E7D32', label: 'NONE (HEALTHY)' };
+    return { bg: '#EAF2EC', text: '#2D5541', label: 'NONE (HEALTHY)' };
   };
 
   const badge = getSeverityBadge(scanResult.severity || 'none');
@@ -1800,8 +1857,8 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any)
   return (
     <ScrollView showsVerticalScrollIndicator={false} style={styles.verifyBody} contentContainerStyle={{ paddingBottom: 16 }}>
       <View style={styles.resultStatusRow}>
-        <View style={[styles.resultStatusDot, { backgroundColor: isHealthy ? '#4CAF50' : '#D32F2F' }]} />
-        <Text style={[styles.resultStatusText, { color: isHealthy ? '#4CAF50' : '#D32F2F' }]}>
+        <View style={[styles.resultStatusDot, { backgroundColor: isHealthy ? '#2D5541' : '#D32F2F' }]} />
+        <Text style={[styles.resultStatusText, { color: isHealthy ? '#2D5541' : '#D32F2F' }]}>
           {isHealthy ? 'Healthy Gamefowl' : 'Condition Detected'}
         </Text>
       </View>
@@ -1866,7 +1923,7 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any)
             key={line}
             style={[styles.recordRow, i === recommendations.length - 1 && { borderBottomWidth: 0 }]}
           >
-            <Ionicons name="checkmark-circle" size={16} color={isHealthy ? "#2E7D32" : "#D32F2F"} />
+            <Ionicons name="checkmark-circle" size={16} color={isHealthy ? "#2D5541" : "#D32F2F"} />
             <Text style={[styles.recordValue, { marginLeft: 8, flex: 1 }]}>{line}</Text>
           </View>
         ))}
@@ -1995,10 +2052,10 @@ const styles = StyleSheet.create({
   guestBlockButtonGradient: { paddingVertical: 15, alignItems: 'center' },
   guestBlockButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   guestBlockSecondaryButton: {
-    width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#2E7D32', borderRadius: 30,
+    width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#8FE0B0', borderRadius: 30,
     paddingVertical: 14, alignItems: 'center', marginBottom: 16,
   },
-  guestBlockSecondaryText: { color: '#4CAF50', fontSize: 15, fontWeight: '600' },
+  guestBlockSecondaryText: { color: '#8FE0B0', fontSize: 15, fontWeight: '600' },
   guestBlockBackButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
   guestBlockBackText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '500' },
 
@@ -2120,8 +2177,8 @@ const styles = StyleSheet.create({
     borderColor: '#FFD54F',
   },
   cornerDetected: {
-    borderColor: '#4CAF50',
-    shadowColor: '#4CAF50',
+    borderColor: '#8FE0B0',
+    shadowColor: '#8FE0B0',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 10,
@@ -2177,8 +2234,8 @@ const styles = StyleSheet.create({
   },
 
   controlDeck: {
-    paddingTop: 18,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 22,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 104 : 88,
     zIndex: 5,
   },
   partSelectorContainer: {
@@ -2282,7 +2339,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     paddingVertical: 12,
     paddingHorizontal: 18,
     borderRadius: 24,
@@ -2293,7 +2350,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   reviewSaveText: {
-    color: '#fff',
+    color: '#0E1210',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -2425,7 +2482,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#2D5541',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 14,
@@ -2440,7 +2497,7 @@ const styles = StyleSheet.create({
   },
   newOrExistingPrimaryBtn: {
     width: '100%',
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#2D5541',
     paddingVertical: 14,
     borderRadius: 30,
     alignItems: 'center',
@@ -2450,12 +2507,12 @@ const styles = StyleSheet.create({
   newOrExistingSecondaryBtn: {
     width: '100%',
     borderWidth: 1,
-    borderColor: '#2E7D32',
+    borderColor: '#2D5541',
     paddingVertical: 13,
     borderRadius: 30,
     alignItems: 'center',
   },
-  newOrExistingSecondaryText: { color: '#2E7D32', fontSize: 14, fontWeight: '700' },
+  newOrExistingSecondaryText: { color: '#2D5541', fontSize: 14, fontWeight: '700' },
 
   // --- Chicken picker sheet ---
   pickerSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '80%' },
@@ -2508,7 +2565,7 @@ const styles = StyleSheet.create({
   verifyFooter: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 14, paddingBottom: Platform.OS === 'ios' ? 28 : 18, borderTopWidth: 1 },
   verifyCancelButton: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
   verifyCancelText: { fontSize: 14, fontWeight: '600', color: '#555' },
-  verifyConfirmButton: { flex: 2, flexDirection: 'row', gap: 8, backgroundColor: '#2E7D32', borderRadius: 8, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
+  verifyConfirmButton: { flex: 2, flexDirection: 'row', gap: 8, backgroundColor: '#2D5541', borderRadius: 8, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
   verifyConfirmText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
   resultStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', marginTop: 18 },
@@ -2555,7 +2612,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   confBadge: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
@@ -2563,7 +2620,7 @@ const styles = StyleSheet.create({
   confBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: '#2D5541',
   },
   severityBadge: {
     paddingHorizontal: 8,
@@ -2597,14 +2654,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
   scannedTagTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#1B5E20',
+    color: '#2D5541',
   },
   scannedTagSubtitle: {
     fontSize: 12,
@@ -2626,7 +2683,7 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
   },
   scannedTagAvatar: {
     width: '100%',
@@ -2650,7 +2707,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   scannedTagPill: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -2658,7 +2715,7 @@ const styles = StyleSheet.create({
   scannedTagPillText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: '#2D5541',
   },
   scannedFarmPill: {
     flexDirection: 'row',
@@ -2673,7 +2730,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   scannedTagPrimaryBtn: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#2D5541',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2687,9 +2744,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scannedTagSecondaryBtn: {
-    backgroundColor: '#F1F8F1',
+    backgroundColor: '#EAF2EC',
     borderWidth: 1,
-    borderColor: '#C8E6C9',
+    borderColor: 'rgba(45, 85, 65, 0.2)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2698,7 +2755,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   scannedTagSecondaryText: {
-    color: '#2E7D32',
+    color: '#2D5541',
     fontSize: 13,
     fontWeight: '700',
   },

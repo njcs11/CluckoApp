@@ -13,7 +13,7 @@ export default function SignupSuccessModal({ visible, onProceed }: SignupSuccess
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.iconCircle}>
-            <Ionicons name="checkmark-circle" size={48} color="#2e7d32" />
+            <Ionicons name="checkmark-circle" size={48} color="#2D5541" />
           </View>
           <Text style={styles.title}>Account Created!</Text>
           <Text style={styles.message}>
@@ -48,7 +48,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: '#2D5541',
     marginBottom: 8,
     textAlign: 'center',
   },
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   button: {
-    backgroundColor: '#2e7d32',
+    backgroundColor: '#2D5541',
     borderRadius: 30,
     paddingVertical: 14,
     paddingHorizontal: 32,

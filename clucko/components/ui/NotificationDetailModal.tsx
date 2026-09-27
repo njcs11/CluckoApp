@@ -33,16 +33,16 @@ interface NotificationDetailModalProps {
   onViewTasks?: () => void;
 }
 
-const getBadge = (type: string) => {
+const getBadge = (type: string, primaryColor: string) => {
   switch (type) {
     case 'success':
-      return { icon: 'checkmark-circle' as const, color: '#4CAF50' };
+      return { icon: 'checkmark-circle' as const, color: primaryColor };
     case 'warning':
       return { icon: 'alert-circle' as const, color: '#FF9800' };
     case 'alert':
       return { icon: 'warning' as const, color: '#f44336' };
     default:
-      return { icon: 'information-circle' as const, color: '#2196F3' };
+      return { icon: 'information-circle' as const, color: primaryColor };
   }
 };
 
@@ -80,7 +80,7 @@ export default function NotificationDetailModal({
   }, [visible]);
 
   if (!notification) return null;
-  const badge = getBadge(notification.type);
+  const badge = getBadge(notification.type, colors.primary);
 
   const titleLower = (notification.title || '').toLowerCase();
   const messageLower = (notification.message || '').toLowerCase();
@@ -140,7 +140,7 @@ export default function NotificationDetailModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback onPress={handleBannerPress}>
@@ -218,18 +218,18 @@ export default function NotificationDetailModal({
                 <TouchableOpacity
                   style={[
                     styles.chickenStrip,
-                    { backgroundColor: '#2196F314', borderColor: '#2196F330' },
+                    { backgroundColor: colors.primary + '14', borderColor: colors.primary + '30' },
                   ]}
                   onPress={handleProfilePress}
                   activeOpacity={0.75}
                 >
-                  <View style={[styles.chickenStripIcon, { backgroundColor: '#2196F322' }]}>
-                    <Ionicons name="person-outline" size={14} color="#2196F3" />
+                  <View style={[styles.chickenStripIcon, { backgroundColor: colors.primary + '22' }]}>
+                    <Ionicons name="person-outline" size={14} color={colors.primary} />
                   </View>
-                  <Text style={[styles.chickenStripText, { color: '#2196F3' }]} numberOfLines={1}>
+                  <Text style={[styles.chickenStripText, { color: colors.primary }]} numberOfLines={1}>
                     Go to your Profile
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color="#2196F3" />
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
                 </TouchableOpacity>
               )}
 
@@ -294,7 +294,7 @@ export default function NotificationDetailModal({
                   </TouchableOpacity>
                 ) : isProfile ? (
                   <TouchableOpacity
-                    style={[styles.viewButton, { backgroundColor: '#2196F3' }]}
+                    style={[styles.viewButton, { backgroundColor: colors.primary }]}
                     onPress={handleProfilePress}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     activeOpacity={0.85}

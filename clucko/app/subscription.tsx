@@ -317,11 +317,11 @@ export default function SubscriptionScreen() {
         <View style={[styles.currentPlanCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.currentPlanHeader}>
             <View style={styles.planBadgeRow}>
-              <View style={[styles.planIconWrap, { backgroundColor: isPremiumTier ? '#FFF8E1' : isProTier ? '#E8F5E9' : '#EDE7F6' }]}>
+              <View style={[styles.planIconWrap, { backgroundColor: isPremiumTier ? '#FFF8E1' : isProTier ? (isDarkMode ? '#1E2621' : '#EAF2EC') : '#EDE7F6' }]}>
                 <FontAwesome5
                   name={isPremiumTier ? 'crown' : isProTier ? 'award' : 'seedling'}
                   size={20}
-                  color={isPremiumTier ? '#F59E0B' : isProTier ? '#2E7D32' : '#7C3AED'}
+                  color={isPremiumTier ? '#F59E0B' : isProTier ? colors.primary : '#7C3AED'}
                 />
               </View>
               <View style={{ flex: 1 }}>
@@ -342,8 +342,8 @@ export default function SubscriptionScreen() {
               style={[
                 styles.statusPill,
                 {
-                  backgroundColor: isInGrace ? '#FFF3E0' : isExpired ? '#FFEBEE' : '#E8F5E9',
-                  borderColor: isInGrace ? '#FFB74D' : isExpired ? '#EF9A9A' : '#A5D6A7',
+                  backgroundColor: isInGrace ? '#FFF3E0' : isExpired ? '#FFEBEE' : (isDarkMode ? '#1E2621' : '#EAF2EC'),
+                  borderColor: isInGrace ? '#FFB74D' : isExpired ? '#EF9A9A' : colors.primary,
                 },
               ]}
             >
@@ -351,7 +351,7 @@ export default function SubscriptionScreen() {
                 style={[
                   styles.statusPillText,
                   {
-                    color: isInGrace ? '#E65100' : isExpired ? '#C62828' : '#2E7D32',
+                    color: isInGrace ? '#E65100' : isExpired ? '#C62828' : colors.primary,
                   },
                 ]}
               >
@@ -461,7 +461,7 @@ export default function SubscriptionScreen() {
                     <Text style={[styles.planCardPeriod, { color: colors.textSecondary }]}>Valid for 3 Months</Text>
                   </View>
 
-                  <View style={[styles.priceTagWrap, { backgroundColor: selectedPlan === 'pro' ? '#E8F5E9' : (isDarkMode ? '#262626' : '#F5F5F5') }]}>
+                  <View style={[styles.priceTagWrap, { backgroundColor: selectedPlan === 'pro' ? (isDarkMode ? '#1E2621' : '#EAF2EC') : (isDarkMode ? '#262626' : '#F5F5F5') }]}>
                     <Text style={[styles.priceTagAmount, { color: colors.primary }]}>₱479</Text>
                     <Text style={[styles.priceTagInterval, { color: colors.textSecondary }]}>for 3 months</Text>
                   </View>
@@ -1114,14 +1114,14 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   popularBadge: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
     alignSelf: 'flex-start',
   },
   popularBadgeText: {
-    color: '#2E7D32',
+    color: '#2D5541',
     fontSize: 10,
     fontWeight: '700',
   },

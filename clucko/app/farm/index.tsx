@@ -22,7 +22,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import FarmMap from '../../components/ui/FarmMap';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import FarmIcon from '../../components/ui/FarmIcon';
@@ -44,12 +44,13 @@ interface Farm {
 }
 
 export default function FarmListScreen() {
+  const insets = useSafeAreaInsets();
   const { colors, isDarkMode } = useDarkMode();
   const { width } = useWindowDimensions();
   const tablet = isTablet();
   const numColumns = tablet ? 2 : 1;
 
-  const { from } = useLocalSearchParams<{ from?: string }>();
+  const { from, autoAdd } = useLocalSearchParams<{ from?: string; autoAdd?: string }>();
   const cameFromAddChicken = from === 'add-chicken';
 
   const { notify } = useNotifications();
@@ -92,9 +93,15 @@ export default function FarmListScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadFarms();
+      loadFarms().then(() => {
+        if (autoAdd === '1' || autoAdd === 'true') {
+          setTimeout(() => {
+            openAddForm();
+          }, 200);
+        }
+      });
       checkGuestMode();
-    }, [])
+    }, [autoAdd])
   );
 
   const checkGuestMode = async () => {
@@ -193,6 +200,19 @@ export default function FarmListScreen() {
         await apiCreateFarm(payload);
       }
 
+      // Sync local AsyncStorage userData
+      try {
+        const storedUser = await AsyncStorage.getItem('userData');
+        if (storedUser) {
+          const parsed = JSON.parse(storedUser);
+          parsed.farm_name = payload.farm_name;
+          parsed.farm_location = payload.farm_location;
+          await AsyncStorage.setItem('userData', JSON.stringify(parsed));
+        }
+      } catch (storageErr) {
+        console.warn('Failed to update local userData on farm save:', storageErr);
+      }
+
       setShowFormModal(false);
       await loadFarms();
 
@@ -209,9 +229,21 @@ export default function FarmListScreen() {
         setShowFormModal(false);
         setShowUpgradeModal(true);
       } else {
+        let userMsg = msg;
+        if (
+          !userMsg ||
+          userMsg.toLowerCase().includes('json parse') ||
+          userMsg.toLowerCase().includes('syntax') ||
+          userMsg.toLowerCase().includes('500') ||
+          userMsg.toLowerCase().includes('unexpected') ||
+          userMsg.toLowerCase().includes('relation') ||
+          userMsg.toLowerCase().includes('column')
+        ) {
+          userMsg = 'Unable to save farm details. Please check your connection and try again.';
+        }
         await notify({
           title: 'Save Failed',
-          message: msg || 'Failed to save farm. Please try again.',
+          message: userMsg,
           type: 'alert',
         });
       }
@@ -331,9 +363,12 @@ export default function FarmListScreen() {
             Add a farm to start organizing your flock by location.
           </Text>
           <TouchableOpacity style={styles.emptyStateButton} onPress={openAddForm}>
-            <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.emptyStateButtonGradient}>
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.emptyStateButtonText}>Add Your First Farm</Text>
+            <LinearGradient
+              colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+              style={styles.emptyStateButtonGradient}
+            >
+              <Ionicons name="add" size={20} color={isDarkMode ? '#0E1210' : '#fff'} />
+              <Text style={[styles.emptyStateButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Add Your First Farm</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -379,16 +414,24 @@ export default function FarmListScreen() {
 
       {userRole === 'owner' && farms.length > 0 && (
         <TouchableOpacity style={styles.fab} onPress={openAddForm} activeOpacity={0.85}>
-          <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.fabGradient}>
-            <Ionicons name="add" size={30} color="#fff" />
+          <LinearGradient
+            colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+            style={styles.fabGradient}
+          >
+            <Ionicons name="add" size={30} color={isDarkMode ? '#0E1210' : '#fff'} />
           </LinearGradient>
         </TouchableOpacity>
       )}
 
       {/* Add/Edit Farm Modal */}
-      <Modal animationType="slide" transparent visible={showFormModal} onRequestClose={() => setShowFormModal(false)}>
+      <Modal animationType="slide" transparent statusBarTranslucent visible={showFormModal} onRequestClose={() => setShowFormModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.formModal, { backgroundColor: colors.card }]}>
+          <View style={[styles.formModal, {
+            backgroundColor: colors.card,
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+            paddingBottom: Math.max(insets.bottom, 20),
+          }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {editingFarm ? 'Edit Farm' : 'Add New Farm'}
@@ -456,11 +499,14 @@ export default function FarmListScreen() {
                 onPress={handleSaveFarm}
                 disabled={saving}
               >
-                <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.submitGradient}>
+                <LinearGradient
+                  colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+                  style={styles.submitGradient}
+                >
                   {saving ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={isDarkMode ? '#0E1210' : '#fff'} />
                   ) : (
-                    <Text style={styles.submitButtonText}>{editingFarm ? 'Save Changes' : 'Add Farm'}</Text>
+                    <Text style={[styles.submitButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>{editingFarm ? 'Save Changes' : 'Add Farm'}</Text>
                   )}
                 </LinearGradient>
               </TouchableOpacity>

@@ -45,7 +45,7 @@ function buildPickerHtml(initial?: { latitude: number; longitude: number }) {
 
         var pinIcon = L.divIcon({
           className: '',
-          html: '<div style="width:30px;height:30px;border-radius:50%;background:#2E7D32;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);"><div style="width:10px;height:10px;background:#fff;border-radius:2px;"></div></div>',
+          html: '<div style="width:30px;height:30px;border-radius:50%;background:#2D5541;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);"><div style="width:10px;height:10px;background:#fff;border-radius:2px;"></div></div>',
           iconSize: [30, 30],
           iconAnchor: [15, 15],
         });
@@ -97,7 +97,7 @@ export default function LocationPickerModal({ visible, onClose, onConfirm, initi
           <View style={styles.header}>
             <Text style={styles.title}>Pin Farm Location</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close-circle" size={30} color="#2E7D32" />
+              <Ionicons name="close-circle" size={30} color="#2D5541" />
             </TouchableOpacity>
           </View>
           <Text style={styles.hint}>Tap anywhere on the map (within Davao City) to drop a pin.</Text>
@@ -118,7 +118,7 @@ export default function LocationPickerModal({ visible, onClose, onConfirm, initi
             onPress={handleConfirm}
             disabled={!selected}
           >
-            <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.confirmGradient}>
+            <LinearGradient colors={['#2D5541', '#1B382B']} style={styles.confirmGradient}>
               <Text style={styles.confirmText}>
                 {selected ? 'Confirm Location' : 'Tap the map to set a location'}
               </Text>
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, height: '75%' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#2E7D32' },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#2D5541' },
   hint: { fontSize: 12, color: '#666', marginBottom: 14 },
   mapWrapper: { flex: 1, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
   webview: { flex: 1 },

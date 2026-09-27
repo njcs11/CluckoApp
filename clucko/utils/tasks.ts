@@ -33,6 +33,7 @@ export type Task = {
   completer_role?: string;
   completed_at?: string | null;
   createdAt?: string;
+  created_at?: string;
 };
 
 const STORAGE_KEY = 'tasks';
@@ -154,6 +155,9 @@ export const addTask = async (
         assigned_to_user_id: created.assigned_to_user_id,
         assignee_name: created.assignee_name,
         assignee_role: created.assignee_role,
+        completed_at: created.completed_at || null,
+        created_at: created.created_at || created.createdAt || new Date().toISOString(),
+        createdAt: created.created_at || created.createdAt || new Date().toISOString(),
       };
       await saveTasksToLocal([mapped, ...current]);
       return mapped;
@@ -164,10 +168,12 @@ export const addTask = async (
 
   // Fallback to local
   const tasks = await loadTasks();
+  const nowIso = new Date().toISOString();
   const newTask: Task = {
     ...task,
     id: `${Date.now()}`,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso,
+    created_at: nowIso,
   };
   const ok = await saveTasksToLocal([...tasks, newTask]);
   return ok ? newTask : null;
@@ -223,8 +229,8 @@ export const toggleTaskComplete = async (id: string): Promise<boolean> => {
   const token = await getToken();
   if (token && !id.startsWith('guest-')) {
     try {
-      await apiToggleCompleteTask(id);
-      await loadTasks(); // refresh from remote
+      const res = await apiToggleCompleteTask(id);
+      const tasks = await loadTasks(); // refresh from remote
       return true;
     } catch (err) {
       console.warn('Backend toggle complete failed, applying locally:', err);
@@ -234,7 +240,12 @@ export const toggleTaskComplete = async (id: string): Promise<boolean> => {
   const tasks = await loadTasks();
   const index = tasks.findIndex((t) => t.id === id);
   if (index === -1) return false;
-  tasks[index] = { ...tasks[index], completed: !tasks[index].completed };
+  const isNowCompleted = !tasks[index].completed;
+  tasks[index] = {
+    ...tasks[index],
+    completed: isNowCompleted,
+    completed_at: isNowCompleted ? new Date().toISOString() : null,
+  };
   return saveTasksToLocal(tasks);
 };
 

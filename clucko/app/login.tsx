@@ -1,6 +1,6 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -26,8 +27,61 @@ import { performGoogleSignIn } from '../utils/googleAuth';
 
 const { width } = Dimensions.get('window');
 
+const simplifyAuthError = (raw: string): string => {
+  if (!raw) return 'Sign in failed. Please try again.';
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes('access token') ||
+    lower.includes('google response') ||
+    lower.includes('google sign-in') ||
+    lower.includes('google')
+  ) {
+    return 'Google sign-in failed. Please try again.';
+  }
+  if (lower.includes('cancel') || lower.includes('dismiss')) {
+    return 'Sign in was cancelled.';
+  }
+  if (
+    lower.includes('invalid') ||
+    lower.includes('credential') ||
+    lower.includes('password') ||
+    lower.includes('not found') ||
+    lower.includes('incorrect')
+  ) {
+    return 'Incorrect email or password.';
+  }
+  if (lower.includes('deactivat') || lower.includes('no longer assigned')) {
+    return 'Account has been deactivated.';
+  }
+  if (
+    lower.includes('network') ||
+    lower.includes('connection') ||
+    lower.includes('fetch') ||
+    lower.includes('timeout') ||
+    lower.includes('reach server')
+  ) {
+    return 'Unable to reach server. Check connection.';
+  }
+  if (lower.includes('valid email')) {
+    return 'Please enter a valid email address.';
+  }
+  if (lower.includes('enter your password')) {
+    return 'Please enter your password.';
+  }
+  if (lower.includes('config') || lower.includes('client id')) {
+    return 'Google Sign-In is not configured.';
+  }
+
+  if (raw.length <= 40 && !raw.includes('{') && !raw.includes('Error:')) {
+    return raw;
+  }
+  return 'Sign in failed. Please try again.';
+};
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ toast?: string }>();
   const { colors, isDarkMode, loadDarkModePreference } = useDarkMode();
   const { notify } = useNotifications();
 
@@ -38,8 +92,89 @@ export default function LoginScreen() {
   const [showPw, setShowPw] = useState(false);
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
-  const [loginError, setLoginError] = useState('');
   const [suggestedEmail, setSuggestedEmail] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState(false);
+  const [passwordError, setPasswordError] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height || 0;
+      setKeyboardHeight(h);
+    };
+    const onHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSub1 = Keyboard.addListener('keyboardWillShow', onShow);
+    const showSub2 = Keyboard.addListener('keyboardDidShow', onShow);
+    const hideSub1 = Keyboard.addListener('keyboardWillHide', onHide);
+    const hideSub2 = Keyboard.addListener('keyboardDidHide', onHide);
+
+    return () => {
+      showSub1.remove();
+      showSub2.remove();
+      hideSub1.remove();
+      hideSub2.remove();
+    };
+  }, []);
+
+  // Bottom Toast state for Logout Success
+  const [showLogoutToast, setShowLogoutToast] = useState(false);
+  const toastFadeAnim = useRef(new Animated.Value(0)).current;
+  const toastSlideAnim = useRef(new Animated.Value(25)).current;
+
+  // Bottom Toast state for Sign In Errors
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const errorFadeAnim = useRef(new Animated.Value(0)).current;
+  const errorSlideAnim = useRef(new Animated.Value(25)).current;
+  const errorToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const displayErrorToast = (rawMsg: string) => {
+    const msg = simplifyAuthError(rawMsg);
+    setErrorMessage(msg);
+    setShowLogoutToast(false);
+    setShowErrorToast(true);
+
+    if (errorToastTimerRef.current) {
+      clearTimeout(errorToastTimerRef.current);
+    }
+
+    errorFadeAnim.setValue(0);
+    errorSlideAnim.setValue(25);
+
+    Animated.parallel([
+      Animated.timing(errorFadeAnim, { toValue: 1, duration: 320, useNativeDriver: true }),
+      Animated.spring(errorSlideAnim, { toValue: 0, friction: 7, tension: 70, useNativeDriver: true }),
+    ]).start();
+
+    errorToastTimerRef.current = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(errorFadeAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
+        Animated.timing(errorSlideAnim, { toValue: 20, duration: 350, useNativeDriver: true }),
+      ]).start(() => setShowErrorToast(false));
+    }, 4000);
+  };
+
+  useEffect(() => {
+    if (params.toast === 'logout_success') {
+      setShowLogoutToast(true);
+      Animated.parallel([
+        Animated.timing(toastFadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.spring(toastSlideAnim, { toValue: 0, friction: 7, tension: 70, useNativeDriver: true }),
+      ]).start();
+
+      const timer = setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(toastFadeAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+          Animated.timing(toastSlideAnim, { toValue: 20, duration: 400, useNativeDriver: true }),
+        ]).start(() => setShowLogoutToast(false));
+      }, 3500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [params.toast]);
 
   const emailInputRef = useRef<TextInput>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
@@ -71,7 +206,8 @@ export default function LoginScreen() {
 
   const handleEmailChange = (val: string) => {
     setEmail(val);
-    setLoginError('');
+    if (emailError) setEmailError(false);
+    if (showErrorToast) setShowErrorToast(false);
     if (val.trim()) {
       const suggestion = suggestEmailTypo(val);
       setSuggestedEmail(suggestion);
@@ -83,6 +219,7 @@ export default function LoginScreen() {
   const applyEmailSuggestion = () => {
     if (suggestedEmail) {
       setEmail(suggestedEmail);
+      if (emailError) setEmailError(false);
       setSuggestedEmail(null);
       setEmailTouched(true);
     }
@@ -97,26 +234,30 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    setEmailError(false);
+    setPasswordError(false);
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
-      setLoginError('Please enter your email address.');
+      setEmailError(true);
+      displayErrorToast('Please enter your email address.');
       triggerShake();
       emailInputRef.current?.focus();
       return;
     }
     if (!isValidEmail(cleanEmail)) {
-      setLoginError('Please enter a valid email address.');
+      setEmailError(true);
+      displayErrorToast('Please enter a valid email address.');
       triggerShake();
       return;
     }
     if (!password) {
-      setLoginError('Please enter your password.');
+      setPasswordError(true);
+      displayErrorToast('Please enter your password.');
       triggerShake();
       return;
     }
 
     setLoading(true);
-    setLoginError('');
     try {
       const loginRes = await apiLogin(cleanEmail, password);
       // Remember email for subsequent logins
@@ -140,15 +281,17 @@ export default function LoginScreen() {
     } catch (err: any) {
       triggerShake();
       const rawMsg = err?.message || '';
-      if (rawMsg.toLowerCase().includes('deactivat') || rawMsg.toLowerCase().includes('no longer assigned')) {
-        setLoginError(rawMsg);
-      } else if (rawMsg.toLowerCase().includes('invalid') || rawMsg.toLowerCase().includes('credentials') || rawMsg.toLowerCase().includes('password')) {
-        setLoginError('Incorrect email or password. Please verify your credentials or reset your password.');
-      } else if (rawMsg.toLowerCase().includes('network') || rawMsg.toLowerCase().includes('connection') || rawMsg.toLowerCase().includes('fetch')) {
-        setLoginError('Unable to reach server. Please check your internet connection or server settings.');
+      const lower = rawMsg.toLowerCase();
+      if (lower.includes('email') && !lower.includes('password')) {
+        setEmailError(true);
+      } else if (lower.includes('password') && !lower.includes('email')) {
+        setPasswordError(true);
       } else {
-        setLoginError(rawMsg || 'Login failed. Please try again.');
+        // Highlight both fields on general auth error so user clearly sees where the error is
+        setEmailError(true);
+        setPasswordError(true);
       }
+      displayErrorToast(rawMsg || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -175,25 +318,13 @@ export default function LoginScreen() {
           skipBackendSync: true,
         });
         router.replace('/(tabs)/home');
-      } else if (res.isNotConfigured) {
-        notify({
-          title: 'Google Client ID Required',
-          message: res.error || 'Please configure your Google Web Client ID in config/googleAuth.ts to connect real Google accounts.',
-          type: 'warning',
-        });
       } else if (res.error && res.error !== 'Sign in was cancelled.') {
-        notify({
-          title: 'Google Sign-In Failed',
-          message: res.error,
-          type: 'alert',
-        });
+        triggerShake();
+        displayErrorToast(res.error);
       }
     } catch (err: any) {
-      notify({
-        title: 'Sign-In Error',
-        message: err.message || 'Could not complete Google Sign-In.',
-        type: 'alert',
-      });
+      triggerShake();
+      displayErrorToast(err?.message || 'Could not complete Google Sign-In.');
     } finally {
       setGoogleLoading(false);
     }
@@ -212,10 +343,19 @@ export default function LoginScreen() {
         >
           {/* Header & Logo */}
           <View style={styles.header}>
-            <View style={[styles.logoCircle, { backgroundColor: isDarkMode ? '#1E3821' : '#E8F5E9' }]}>
+            {/* Back to Walkthrough */}
+            <TouchableOpacity
+              style={styles.backToWalkthroughBtn}
+              onPress={() => router.replace('/')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <View style={[styles.logoCircle, { backgroundColor: colors.badgeBackground, borderColor: colors.primary, shadowColor: colors.primary }]}>
               <Image source={require('../assets/images/logo.png')} style={styles.logoImage} resizeMode="contain" />
             </View>
-            <Text style={[styles.welcomeTitle, { color: isDarkMode ? '#FFFFFF' : '#1B5E20' }]}>Welcome Back</Text>
+            <Text style={[styles.welcomeTitle, { color: isDarkMode ? '#EBF2EE' : '#131A16' }]}>Welcome Back</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Sign in to manage your flock, scans, and farms
             </Text>
@@ -227,18 +367,18 @@ export default function LoginScreen() {
               style={[
                 styles.socialButton,
                 styles.googleButton,
-                { backgroundColor: isDarkMode ? '#242424' : '#FFFFFF', borderColor: isDarkMode ? '#404040' : '#E0E0E0' },
+                { backgroundColor: colors.card, borderColor: colors.border },
               ]}
               onPress={handleGoogleAuth}
               activeOpacity={0.8}
               disabled={loading || googleLoading}
             >
               {googleLoading ? (
-                <ActivityIndicator size="small" color="#2E7D32" />
+                <ActivityIndicator size="small" color={colors.primary} />
               ) : (
                 <>
                   <Ionicons name="logo-google" size={18} color="#EA4335" style={styles.socialIcon} />
-                  <Text style={[styles.socialButtonText, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                  <Text style={[styles.socialButtonText, { color: colors.text }]}>
                     Continue with Google
                   </Text>
                 </>
@@ -248,56 +388,36 @@ export default function LoginScreen() {
 
           {/* Divider */}
           <View style={styles.dividerRow}>
-            <View style={[styles.dividerLine, { backgroundColor: isDarkMode ? '#333333' : '#E5E7EB' }]} />
+            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
             <Text style={[styles.dividerText, { color: colors.textSecondary }]}>or continue with email</Text>
-            <View style={[styles.dividerLine, { backgroundColor: isDarkMode ? '#333333' : '#E5E7EB' }]} />
+            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
           </View>
-
-          {/* Failure Alert / Error Card */}
-          {loginError ? (
-            <Animated.View
-              style={[
-                styles.errorCard,
-                { transform: [{ translateX: shakeAnim }] },
-                { backgroundColor: isDarkMode ? '#3E1C1C' : '#FFEBEE', borderColor: '#EF5350' },
-              ]}
-            >
-              <Ionicons name="alert-circle" size={22} color="#D32F2F" style={{ marginRight: 10 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.errorCardTitle}>Sign In Failed</Text>
-                <Text style={styles.errorCardBody}>{loginError}</Text>
-                <TouchableOpacity
-                  onPress={() =>
-                    router.push({
-                      pathname: '/forgot-password',
-                      params: { email: email.trim().toLowerCase() },
-                    })
-                  }
-                  style={styles.errorCardAction}
-                >
-                  <Text style={styles.errorCardActionText}>Forgot your password? Reset it here →</Text>
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
-          ) : null}
 
           {/* Form Fields */}
           <View style={styles.formContainer}>
             {/* Email Field */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Email Address <Text style={styles.requiredStar}>*</Text>
               </Text>
               <View
                 style={[
                   styles.inputWrapper,
                   {
-                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-                    borderColor: emailTouched && !isEmailValid && email.length > 0 ? '#E53935' : isEmailValid ? '#2E7D32' : isDarkMode ? '#333' : '#E0E0E0',
+                    backgroundColor: colors.surface,
+                    borderColor:
+                      emailError
+                        ? '#EF4444'
+                        : emailTouched && !isEmailValid && email.length > 0
+                        ? '#EF4444'
+                        : isEmailValid
+                        ? colors.primary
+                        : colors.border,
+                    borderWidth: (emailError || (emailTouched && !isEmailValid && email.length > 0)) ? 1.5 : 1,
                   },
                 ]}
               >
-                <Ionicons name="mail-outline" size={20} color={isEmailValid ? '#2E7D32' : '#9CA3AF'} style={styles.inputLeadingIcon} />
+                <Ionicons name="mail-outline" size={20} color={isEmailValid ? colors.primary : colors.textLight} style={styles.inputLeadingIcon} />
                 <TextInput
                   ref={emailInputRef}
                   style={[styles.input, { color: colors.text }]}
@@ -314,15 +434,15 @@ export default function LoginScreen() {
                   autoFocus={true}
                 />
                 {isEmailValid ? (
-                  <Ionicons name="checkmark-circle" size={20} color="#2E7D32" style={styles.inputTrailingIcon} />
+                  <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={styles.inputTrailingIcon} />
                 ) : null}
               </View>
 
               {/* Email Typo Suggestion Chip */}
               {suggestedEmail ? (
-                <TouchableOpacity style={styles.suggestionChip} onPress={applyEmailSuggestion} activeOpacity={0.7}>
-                  <Feather name="help-circle" size={14} color="#2E7D32" />
-                  <Text style={styles.suggestionText}>
+                <TouchableOpacity style={[styles.suggestionChip, { backgroundColor: colors.badgeBackground }]} onPress={applyEmailSuggestion} activeOpacity={0.7}>
+                  <Feather name="help-circle" size={14} color={colors.primary} />
+                  <Text style={[styles.suggestionText, { color: colors.primary }]}>
                     Did you mean <Text style={styles.suggestionBold}>{suggestedEmail}</Text>? Tap to fix
                   </Text>
                 </TouchableOpacity>
@@ -336,7 +456,7 @@ export default function LoginScreen() {
             {/* Password Field */}
             <View style={styles.fieldGroup}>
               <View style={styles.passwordLabelRow}>
-                <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>
                   Password <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <TouchableOpacity
@@ -348,7 +468,7 @@ export default function LoginScreen() {
                   }
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                  <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>Forgot Password?</Text>
                 </TouchableOpacity>
               </View>
 
@@ -356,20 +476,22 @@ export default function LoginScreen() {
                 style={[
                   styles.inputWrapper,
                   {
-                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-                    borderColor: isDarkMode ? '#333' : '#E0E0E0',
+                    backgroundColor: colors.surface,
+                    borderColor: passwordError ? '#EF4444' : colors.border,
+                    borderWidth: passwordError ? 1.5 : 1,
                   },
                 ]}
               >
-                <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputLeadingIcon} />
+                <Ionicons name="lock-closed-outline" size={20} color={colors.textLight} style={styles.inputLeadingIcon} />
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
                   placeholder="Enter your password"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textLight}
                   value={password}
                   onChangeText={(val) => {
                     setPassword(val);
-                    setLoginError('');
+                    if (passwordError) setPasswordError(false);
+                    if (showErrorToast) setShowErrorToast(false);
                   }}
                   secureTextEntry={!showPw}
                   autoCapitalize="none"
@@ -382,15 +504,15 @@ export default function LoginScreen() {
                   style={styles.eyeButton}
                   accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                 >
-                  <Ionicons name={showPw ? 'eye-outline' : 'eye-off-outline'} size={20} color="#6B7280" />
+                  <Ionicons name={showPw ? 'eye-outline' : 'eye-off-outline'} size={20} color={colors.textLight} />
                 </TouchableOpacity>
               </View>
 
               {/* Caps Lock Warning */}
               {capsLockOn ? (
-                <View style={styles.capsLockBadge}>
-                  <Ionicons name="warning-outline" size={14} color="#D97706" />
-                  <Text style={styles.capsLockText}>Caps Lock is ON</Text>
+                <View style={[styles.capsLockBadge, { backgroundColor: isDarkMode ? '#2D2415' : '#FEF3C7' }]}>
+                  <Ionicons name="warning-outline" size={14} color="#FBBF24" />
+                  <Text style={[styles.capsLockText, { color: isDarkMode ? '#FBBF24' : '#92400E' }]}>Caps Lock is ON</Text>
                 </View>
               ) : null}
             </View>
@@ -399,7 +521,11 @@ export default function LoginScreen() {
             <TouchableOpacity
               style={[
                 styles.primaryButton,
-                { opacity: loading ? 0.8 : 1 },
+                {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                  opacity: loading ? 0.8 : 1,
+                },
               ]}
               onPress={handleLogin}
               disabled={loading}
@@ -407,11 +533,11 @@ export default function LoginScreen() {
             >
               {loading ? (
                 <View style={styles.buttonLoadingRow}>
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                  <Text style={styles.primaryButtonText}>Signing In...</Text>
+                  <ActivityIndicator color={isDarkMode ? '#0E1210' : '#FFFFFF'} size="small" />
+                  <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Signing In...</Text>
                 </View>
               ) : (
-                <Text style={styles.primaryButtonText}>Sign In</Text>
+                <Text style={[styles.primaryButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Sign In</Text>
               )}
             </TouchableOpacity>
 
@@ -419,7 +545,10 @@ export default function LoginScreen() {
             <TouchableOpacity
               style={[
                 styles.guestButton,
-                { borderColor: isDarkMode ? '#405B43' : '#A5D6A7', backgroundColor: isDarkMode ? '#172719' : '#F1F8E9' },
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isDarkMode ? 'rgba(143, 224, 176, 0.08)' : '#E8EFEA',
+                },
               ]}
               onPress={async () => {
                 await AsyncStorage.setItem('isGuestMode', 'true');
@@ -430,8 +559,8 @@ export default function LoginScreen() {
               }}
               activeOpacity={0.8}
             >
-              <Ionicons name="person-outline" size={18} color="#2E7D32" />
-              <Text style={styles.guestButtonText}>Continue as Guest</Text>
+              <Ionicons name="person-outline" size={18} color={colors.primary} />
+              <Text style={[styles.guestButtonText, { color: colors.primary }]}>Continue as Guest</Text>
             </TouchableOpacity>
           </View>
 
@@ -439,11 +568,75 @@ export default function LoginScreen() {
           <View style={styles.footerRow}>
             <Text style={[styles.footerText, { color: colors.textSecondary }]}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push('/signup')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.signupLinkText}>Create an Account</Text>
+              <Text style={[styles.signupLinkText, { color: colors.primary }]}>Create an Account</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Floating Bottom Toast for Logout Success */}
+      {showLogoutToast && (
+        <Animated.View
+          style={[
+            styles.bottomToastContainer,
+            {
+              bottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(insets.bottom, 16) + 12,
+              opacity: toastFadeAnim,
+              transform: [{ translateY: toastSlideAnim }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.bottomToastCard,
+              {
+                backgroundColor: isDarkMode ? '#1E2922' : '#FFFFFF',
+                borderColor: '#10B98135',
+              },
+            ]}
+          >
+            <View style={styles.bottomToastIconCircle}>
+              <Ionicons name="checkmark" size={16} color="#10B981" />
+            </View>
+            <Text style={[styles.bottomToastText, { color: isDarkMode ? '#F0FDF4' : '#111827' }]}>
+              Logout successful
+            </Text>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* Floating Bottom Error Toast */}
+      {showErrorToast && (
+        <Animated.View
+          style={[
+            styles.bottomToastContainer,
+            {
+              bottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(insets.bottom, 16) + 12,
+              opacity: errorFadeAnim,
+              transform: [{ translateY: errorSlideAnim }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.bottomToastCard,
+              {
+                backgroundColor: isDarkMode ? '#2A1515' : '#FFFFFF',
+                borderColor: '#EF535040',
+              },
+            ]}
+          >
+            <View style={[styles.bottomToastIconCircle, { backgroundColor: '#EF535018' }]}>
+              <Ionicons name="alert-circle" size={16} color="#EF5350" />
+            </View>
+            <Text style={[styles.bottomToastText, { color: isDarkMode ? '#FFCDD2' : '#B71C1C' }]}>
+              {errorMessage}
+            </Text>
+          </View>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
@@ -460,6 +653,15 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 24,
+    position: 'relative',
+    width: '100%',
+  },
+  backToWalkthroughBtn: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    padding: 4,
+    zIndex: 10,
   },
   logoCircle: {
     width: 86,
@@ -469,9 +671,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 14,
     borderWidth: 2,
-    borderColor: '#4CAF50',
+    borderColor: '#8FE0B0',
     elevation: 3,
-    shadowColor: '#2E7D32',
+    shadowColor: '#131A16',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 6,
@@ -561,7 +763,7 @@ const styles = StyleSheet.create({
   errorCardActionText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: '#8FE0B0',
     textDecorationLine: 'underline',
   },
   formContainer: {
@@ -587,7 +789,7 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: '#8FE0B0',
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -613,7 +815,7 @@ const styles = StyleSheet.create({
   suggestionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#DEEAE2',
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
@@ -622,7 +824,7 @@ const styles = StyleSheet.create({
   },
   suggestionText: {
     fontSize: 12,
-    color: '#2E7D32',
+    color: '#2D5541',
   },
   suggestionBold: {
     fontWeight: '700',
@@ -649,7 +851,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   primaryButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
@@ -657,7 +859,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 14,
     elevation: 3,
-    shadowColor: '#2E7D32',
+    shadowColor: '#8FE0B0',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
@@ -668,7 +870,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: '#0E1210',
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -683,7 +885,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   guestButtonText: {
-    color: '#2E7D32',
+    color: '#8FE0B0',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -699,6 +901,40 @@ const styles = StyleSheet.create({
   signupLinkText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: '#8FE0B0',
+  },
+  bottomToastContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  bottomToastCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    gap: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+  },
+  bottomToastIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#10B98118',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomToastText: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

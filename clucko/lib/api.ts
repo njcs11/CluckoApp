@@ -117,6 +117,54 @@ const headers = async () => {
   return h;
 };
 
+// ─── HIGH PERFORMANCE REQUEST DEDUPLICATION & SHORT-TTL CACHE ─────
+const _inflightRequests = new Map<string, Promise<any>>();
+const _responseCache = new Map<string, { data: any; expiry: number }>();
+
+export const deduplicatedFetch = async <T = any>(
+  key: string,
+  fetchFn: () => Promise<T>,
+  ttlMs: number = 2500
+): Promise<T> => {
+  const now = Date.now();
+  const cached = _responseCache.get(key);
+  if (cached && cached.expiry > now) {
+    return cached.data as T;
+  }
+
+  const inflight = _inflightRequests.get(key);
+  if (inflight) {
+    return inflight as Promise<T>;
+  }
+
+  const promise = (async () => {
+    try {
+      const data = await fetchFn();
+      if (ttlMs > 0 && data !== undefined && data !== null) {
+        _responseCache.set(key, { data, expiry: Date.now() + ttlMs });
+      }
+      return data;
+    } finally {
+      _inflightRequests.delete(key);
+    }
+  })();
+
+  _inflightRequests.set(key, promise);
+  return promise;
+};
+
+export const invalidateApiCache = (keyPrefix?: string) => {
+  if (!keyPrefix) {
+    _responseCache.clear();
+    return;
+  }
+  for (const k of Array.from(_responseCache.keys())) {
+    if (k.startsWith(keyPrefix)) {
+      _responseCache.delete(k);
+    }
+  }
+};
+
 // ─── ROLE HELPER ──────────────────────────────────────────────
 export const getUserRole = async (): Promise<string> => {
   return (await AsyncStorage.getItem("user_role")) || "owner";
@@ -238,32 +286,81 @@ export const apiUpdateProfile = async (data: any) => {
   return json;
 };
 
+export const apiCheckEmailExists = async (email: string): Promise<{ exists: boolean; name?: string }> => {
+  try {
+    const API_URL = await getApiUrl();
+    const res = await fetch(`${API_URL}/api/auth/check-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+    const json = await res.json();
+    return json;
+  } catch (err) {
+    console.error("apiCheckEmailExists error:", err);
+    return { exists: false };
+  }
+};
+
+export const apiSendResetCode = async (email: string, code: string): Promise<boolean> => {
+  const API_URL = await getApiUrl();
+  try {
+    const res = await fetch(`${API_URL}/api/auth/send-reset-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.trim() }),
+    });
+    const json = await res.json();
+    return res.ok && json.success === true;
+  } catch (err) {
+    console.error("apiSendResetCode error:", err);
+    return false;
+  }
+};
+
+export const apiResetPassword = async (email: string, newPassword: string): Promise<{ success: boolean; message?: string }> => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      new_password: newPassword,
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Password reset failed");
+  return json;
+};
+
 // ─── CHICKENS ─────────────────────────────────────────────────
 export const apiGetChickens = async (farm_id?: number) => {
-  const token = await getToken();
-  if (!token) return [];
-  const API_URL = await getApiUrl();
-  const url = farm_id
-    ? `${API_URL}/api/chickens?farm_id=${farm_id}`
-    : `${API_URL}/api/chickens`;
-  try {
-    const res = await fetch(url, { headers: await headers() });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (res.status === 401) {
+  return deduplicatedFetch(`chickens:${farm_id || 'all'}`, async () => {
+    const token = await getToken();
+    if (!token) return [];
+    const API_URL = await getApiUrl();
+    const url = farm_id
+      ? `${API_URL}/api/chickens?farm_id=${farm_id}`
+      : `${API_URL}/api/chickens`;
+    try {
+      const res = await fetch(url, { headers: await headers() });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) {
+          await clearStaleSession();
+          return [];
+        }
+        throw new Error(json.error || "Failed to load chickens");
+      }
+      return json;
+    } catch (err: any) {
+      if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
         await clearStaleSession();
         return [];
       }
-      throw new Error(json.error || "Failed to load chickens");
+      throw err;
     }
-    return json;
-  } catch (err: any) {
-    if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
-      await clearStaleSession();
-      return [];
-    }
-    throw err;
-  }
+  }, 2500);
 };
 
 export const apiCreateChicken = async (data: {
@@ -273,6 +370,7 @@ export const apiCreateChicken = async (data: {
   photo_url?: string;
   farm_id?: number; // ← ADDED
 }) => {
+  invalidateApiCache("chickens");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/chickens`, {
     method: "POST",
@@ -295,6 +393,7 @@ export const apiGetChicken = async (id: string) => {
 };
 
 export const apiDeleteChicken = async (id: string) => {
+  invalidateApiCache("chickens");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/chickens/${id}`, {
     method: "DELETE",
@@ -314,6 +413,7 @@ export const apiUpdateChicken = async (
     location?: string;
   },
 ) => {
+  invalidateApiCache("chickens");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/chickens/${id}`, {
     method: "PUT",
@@ -356,6 +456,8 @@ export const apiGetStats = async () => {
 
 // ─── SCANS ────────────────────────────────────────────────────
 export const apiSaveScan = async (data: any) => {
+  invalidateApiCache("reports");
+  invalidateApiCache("chickens");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/scans`, {
     method: "POST",
@@ -494,29 +596,31 @@ export const apiGetActivities = async () => {
 
 // ─── REPORTS ──────────────────────────────────────────────────
 export const apiGetReports = async () => {
-  const token = await getToken();
-  if (!token) return { total_scans: 0, scans: [] };
-  const API_URL = await getApiUrl();
-  try {
-    const res = await fetch(`${API_URL}/api/reports`, {
-      headers: await headers(),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (res.status === 401) {
+  return deduplicatedFetch("reports", async () => {
+    const token = await getToken();
+    if (!token) return { total_scans: 0, scans: [] };
+    const API_URL = await getApiUrl();
+    try {
+      const res = await fetch(`${API_URL}/api/reports`, {
+        headers: await headers(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) {
+          await clearStaleSession();
+          return { total_scans: 0, scans: [] };
+        }
+        throw new Error(json.error || "Failed to load reports");
+      }
+      return json;
+    } catch (err: any) {
+      if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
         await clearStaleSession();
         return { total_scans: 0, scans: [] };
       }
-      throw new Error(json.error || "Failed to load reports");
+      throw err;
     }
-    return json;
-  } catch (err: any) {
-    if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
-      await clearStaleSession();
-      return { total_scans: 0, scans: [] };
-    }
-    throw err;
-  }
+  }, 3000);
 };
 
 // ─── AI DETECT ────────────────────────────────────────────────
@@ -547,29 +651,31 @@ export const apiGetGradcam = async (base64Image: string, module: string = "eye")
 
 // ─── FARMS ────────────────────────────────────────────────────
 export const apiGetFarms = async () => {
-  const token = await getToken();
-  if (!token) return [];
-  const API_URL = await getApiUrl();
-  try {
-    const res = await fetch(`${API_URL}/api/farms`, {
-      headers: await headers(),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (res.status === 401) {
+  return deduplicatedFetch("farms", async () => {
+    const token = await getToken();
+    if (!token) return [];
+    const API_URL = await getApiUrl();
+    try {
+      const res = await fetch(`${API_URL}/api/farms`, {
+        headers: await headers(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) {
+          await clearStaleSession();
+          return [];
+        }
+        throw new Error(json.error || "Failed to load farms");
+      }
+      return json;
+    } catch (err: any) {
+      if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
         await clearStaleSession();
         return [];
       }
-      throw new Error(json.error || "Failed to load farms");
+      throw err;
     }
-    return json;
-  } catch (err: any) {
-    if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
-      await clearStaleSession();
-      return [];
-    }
-    throw err;
-  }
+  }, 3000);
 };
 
 export const apiCreateFarm = async (data: {
@@ -579,6 +685,7 @@ export const apiCreateFarm = async (data: {
   latitude?: number;
   longitude?: number;
 }) => {
+  invalidateApiCache("farms");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms`, {
     method: "POST",
@@ -600,6 +707,7 @@ export const apiUpdateFarm = async (
     longitude?: number;
   },
 ) => {
+  invalidateApiCache("farms");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
     method: "PUT",
@@ -622,6 +730,7 @@ export const apiGetFarm = async (farm_id: number) => {
 };
 
 export const apiDeleteFarm = async (farm_id: number) => {
+  invalidateApiCache("farms");
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
     method: "DELETE",
@@ -884,4 +993,5 @@ export const apiDevToggleSubscription = async (
   if (!res.ok) throw new Error(json.error || "State toggle failed");
   return json;
 };
+
 

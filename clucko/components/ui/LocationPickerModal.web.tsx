@@ -147,11 +147,11 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 12, color: '#777' },
   hint: { fontSize: 12, color: '#777', marginTop: 10, marginBottom: 14, textAlign: 'center' },
   confirmButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#2D5541',
     borderRadius: 30,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  confirmButtonDisabled: { backgroundColor: '#a5c9a8' },
+  confirmButtonDisabled: { backgroundColor: '#7F9489', opacity: 0.5 },
   confirmButtonText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
 });

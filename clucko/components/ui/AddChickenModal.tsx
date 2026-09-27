@@ -1,6 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRole } from '../../hooks/useRole';
 import ChickenIcon from './ChickenIcon';
 import FarmIcon from './FarmIcon';
 import {
@@ -57,6 +60,9 @@ export default function AddChickenModal({
   title = 'Add New Chicken',
   isSubmitting = false,
 }: AddChickenModalProps) {
+  const insets = useSafeAreaInsets();
+  const { isCaretaker } = useRole();
+  const [isCaretakerUser, setIsCaretakerUser] = useState(false);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [loadingFarms, setLoadingFarms] = useState(false);
   const [showFarmPicker, setShowFarmPicker] = useState(false);
@@ -67,6 +73,20 @@ export default function AddChickenModal({
     if (visible) {
       refreshFarms();
       setShowFarmPicker(false);
+      AsyncStorage.getItem('user_role').then((r) => {
+        if (r === 'caretaker') {
+          setIsCaretakerUser(true);
+        } else {
+          AsyncStorage.getItem('userData').then((ud) => {
+            if (ud) {
+              try {
+                const p = JSON.parse(ud);
+                if (p.role === 'caretaker') setIsCaretakerUser(true);
+              } catch (_) {}
+            }
+          });
+        }
+      });
     }
   }, [visible]);
 
@@ -99,7 +119,7 @@ export default function AddChickenModal({
   };
 
   return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
+    <Modal animationType="slide" transparent statusBarTranslucent visible={visible} onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
         <View style={[styles.sheet, { backgroundColor: colors.card, maxWidth: maxWidth || 480, width: '100%', alignSelf: 'center' }]}>
           <View style={[styles.header, { borderBottomColor: colors.divider }]}>
@@ -191,7 +211,7 @@ export default function AddChickenModal({
                     {farms.length === 0 && (
                       <View style={styles.dropdownEmpty}>
                         <Text style={[styles.dropdownEmptyText, { color: colors.textLight }]}>
-                          No farms yet — add one below
+                          {(isCaretaker || isCaretakerUser) ? 'No farms assigned yet' : 'No farms yet — add one below'}
                         </Text>
                       </View>
                     )}
@@ -213,21 +233,23 @@ export default function AddChickenModal({
                       </TouchableOpacity>
                     ))}
 
-                    <TouchableOpacity
-                      style={styles.dropdownAddRow}
-                      onPress={handleGoAddFarm}
-                      activeOpacity={0.75}
-                    >
-                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.dropdownAddText, { color: colors.primary }]}>Add New Farm</Text>
-                    </TouchableOpacity>
+                    {!isCaretaker && !isCaretakerUser && (
+                      <TouchableOpacity
+                        style={styles.dropdownAddRow}
+                        onPress={handleGoAddFarm}
+                        activeOpacity={0.75}
+                      >
+                        <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.dropdownAddText, { color: colors.primary }]}>Add New Farm</Text>
+                      </TouchableOpacity>
+                    )}
                   </>
                 )}
               </View>
             )}
           </ScrollView>
 
-          <View style={[styles.footer, { borderTopColor: colors.divider }]}>
+          <View style={[styles.footer, { borderTopColor: colors.divider, paddingBottom: Math.max(insets.bottom, 18) }]}>
             <TouchableOpacity style={[styles.cancelButton, { borderColor: colors.border }]} onPress={onClose} activeOpacity={0.75}>
               <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
@@ -252,7 +274,7 @@ export default function AddChickenModal({
 
 const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '90%' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, maxHeight: '90%' },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14, borderBottomWidth: 1,

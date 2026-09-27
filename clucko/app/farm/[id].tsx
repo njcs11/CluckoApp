@@ -258,8 +258,11 @@ export default function FarmDetailScreen() {
             Please sign up or login to manage your farms.
           </Text>
           <TouchableOpacity style={styles.guestBlockButton} onPress={() => router.push('/signup')}>
-            <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.guestBlockButtonGradient}>
-              <Text style={styles.guestBlockButtonText}>Sign Up</Text>
+            <LinearGradient
+              colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+              style={styles.guestBlockButtonGradient}
+            >
+              <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Sign Up</Text>
             </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity
@@ -306,7 +309,7 @@ export default function FarmDetailScreen() {
       <StatusBar style="light" />
 
       {/* Header */}
-      <LinearGradient colors={['#1B5E20', '#2E7D32', '#388E3C']} style={styles.header}>
+      <LinearGradient colors={isDarkMode ? ['#18231E', '#0E1210'] : ['#2D5541', '#1E3D2D']} style={styles.header}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -552,7 +555,7 @@ export default function FarmDetailScreen() {
                           style={{
                             fontSize: 11.5,
                             fontWeight: '600',
-                            color: isOnline ? '#2E7D32' : colors.textLight,
+                            color: isOnline ? colors.primary : colors.textLight,
                             marginTop: 2,
                           }}
                         >
@@ -570,7 +573,7 @@ export default function FarmDetailScreen() {
                             paddingHorizontal: 8,
                             paddingVertical: 3,
                             borderRadius: 8,
-                            backgroundColor: isActive ? 'rgba(76, 175, 80, 0.14)' : 'rgba(239, 83, 80, 0.14)',
+                            backgroundColor: isActive ? (isDarkMode ? 'rgba(143, 224, 176, 0.14)' : 'rgba(76, 175, 80, 0.14)') : 'rgba(239, 83, 80, 0.14)',
                           }}
                         >
                           <View
@@ -578,14 +581,14 @@ export default function FarmDetailScreen() {
                               width: 5,
                               height: 5,
                               borderRadius: 2.5,
-                              backgroundColor: isActive ? '#4CAF50' : '#EF5350',
+                              backgroundColor: isActive ? colors.primary : '#EF5350',
                             }}
                           />
                           <Text
                             style={{
                               fontSize: 10,
                               fontWeight: '700',
-                              color: isActive ? '#2E7D32' : '#C62828',
+                              color: isActive ? colors.primary : '#C62828',
                               textTransform: 'uppercase',
                               letterSpacing: 0.3,
                             }}
@@ -600,8 +603,8 @@ export default function FarmDetailScreen() {
                               style={[
                                 styles.statusToggleBtn,
                                 {
-                                  backgroundColor: isActive ? 'rgba(255, 152, 0, 0.12)' : 'rgba(76, 175, 80, 0.12)',
-                                  borderColor: isActive ? 'rgba(255, 152, 0, 0.3)' : 'rgba(76, 175, 80, 0.3)',
+                                  backgroundColor: isActive ? 'rgba(255, 152, 0, 0.12)' : (isDarkMode ? 'rgba(143, 224, 176, 0.12)' : 'rgba(76, 175, 80, 0.12)'),
+                                  borderColor: isActive ? 'rgba(255, 152, 0, 0.3)' : (isDarkMode ? 'rgba(143, 224, 176, 0.3)' : 'rgba(76, 175, 80, 0.3)'),
                                 },
                               ]}
                               onPress={() => handleToggleCaretakerStatus(member)}
@@ -610,13 +613,13 @@ export default function FarmDetailScreen() {
                               <Ionicons
                                 name={isActive ? 'pause-circle-outline' : 'play-circle-outline'}
                                 size={13}
-                                color={isActive ? '#E65100' : '#2E7D32'}
+                                color={isActive ? '#E65100' : colors.primary}
                               />
                               <Text
                                 style={{
                                   fontSize: 11,
                                   fontWeight: '600',
-                                  color: isActive ? '#E65100' : '#2E7D32',
+                                  color: isActive ? '#E65100' : colors.primary,
                                 }}
                               >
                                 {isActive ? 'Deactivate' : 'Activate'}
@@ -763,7 +766,7 @@ export default function FarmDetailScreen() {
         confirmText={caretakerToToggle?.nextStatus ? 'Activate' : 'Deactivate'}
         cancelText="Cancel"
         icon={caretakerToToggle?.nextStatus ? 'checkmark-circle-outline' : 'pause-circle-outline'}
-        iconColor={caretakerToToggle?.nextStatus ? '#2E7D32' : '#E65100'}
+        iconColor={caretakerToToggle?.nextStatus ? colors.primary : '#E65100'}
         isDestructive={!caretakerToToggle?.nextStatus}
         loading={togglingStatus}
         onConfirm={confirmToggleStatus}

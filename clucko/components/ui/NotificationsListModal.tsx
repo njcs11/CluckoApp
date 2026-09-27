@@ -17,6 +17,7 @@ import {
     TouchableWithoutFeedback,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface NotificationsListModalProps {
   visible: boolean;
@@ -32,33 +33,33 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 /** Small colored badge that sits on the bottom-right of the main icon,
  *  reflects the notification's severity/type — same language as the toast. */
-const getStatusBadge = (type: NotificationItem['type']) => {
+const getStatusBadge = (type: NotificationItem['type'], primaryColor: string) => {
   switch (type) {
     case 'success':
-      return { icon: 'checkmark' as const, color: '#4CAF50' };
+      return { icon: 'checkmark' as const, color: primaryColor };
     case 'warning':
       return { icon: 'alert' as const, color: '#FF9800' };
     case 'alert':
       return { icon: 'warning' as const, color: '#f44336' };
     default:
-      return { icon: 'information' as const, color: '#2196F3' };
+      return { icon: 'information' as const, color: primaryColor };
   }
 };
 
 /** Main circular icon — inferred from the notification content so existing
  *  notify() calls elsewhere in the app don't need to change. */
-const getMainIcon = (notification: NotificationItem) => {
+const getMainIcon = (notification: NotificationItem, primaryColor: string) => {
   const title = notification.title.toLowerCase();
   if (title.includes('farm')) {
-    return { render: (color: string) => <FarmIcon size={18} color={color} />, bg: '#2E7D32' };
+    return { render: (color: string) => <FarmIcon size={18} color={color} />, bg: '#2D5541' };
   }
   if (title.includes('profile')) {
-    return { render: (color: string) => <Ionicons name="person-outline" size={18} color={color} />, bg: '#2196F3' };
+    return { render: (color: string) => <Ionicons name="person-outline" size={18} color={color} />, bg: primaryColor };
   }
   if (notification.chickenId || title.includes('chicken')) {
-    return { render: (color: string) => <ChickenIcon size={16} color={color} />, bg: '#2E7D32' };
+    return { render: (color: string) => <ChickenIcon size={16} color={color} />, bg: '#2D5541' };
   }
-  return { render: (color: string) => <Ionicons name="notifications-outline" size={17} color={color} />, bg: '#2E7D32' };
+  return { render: (color: string) => <Ionicons name="notifications-outline" size={17} color={color} />, bg: '#2D5541' };
 };
 
 const formatRelative = (date: Date) => {
@@ -82,6 +83,7 @@ export default function NotificationsListModal({
   onPressNotification,
 }: NotificationsListModalProps) {
   const { colors, isDarkMode } = useDarkMode();
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -145,10 +147,17 @@ export default function NotificationsListModal({
   };
 
   const hasUnread = notifications.some((n) => !n.read);
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'ios' ? 24 : 16) + 8;
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View style={StyleSheet.absoluteFill}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      animationType="none"
+      onRequestClose={handleClose}
+    >
+      <View style={styles.modalRoot}>
         <TouchableWithoutFeedback onPress={handleClose}>
           <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
         </TouchableWithoutFeedback>
@@ -158,6 +167,7 @@ export default function NotificationsListModal({
             styles.sheet,
             {
               backgroundColor: isDarkMode ? colors.card : '#fff',
+              paddingBottom: bottomPad,
               transform: [{ translateY }],
             },
           ]}
@@ -201,9 +211,9 @@ export default function NotificationsListModal({
               <Ionicons
                 name="checkmark-circle-outline"
                 size={16}
-                color={hasUnread ? '#4CAF50' : colors.textLight}
+                color={hasUnread ? colors.primary : colors.textLight}
               />
-              <Text style={[styles.actionText, { color: hasUnread ? '#4CAF50' : colors.textLight }]}>
+              <Text style={[styles.actionText, { color: hasUnread ? colors.primary : colors.textLight }]}>
                 Mark all as read
               </Text>
             </TouchableOpacity>
@@ -245,8 +255,8 @@ export default function NotificationsListModal({
               showsVerticalScrollIndicator={false}
             >
               {notifications.map((notification) => {
-                const mainIcon = getMainIcon(notification);
-                const badge = getStatusBadge(notification.type);
+                const mainIcon = getMainIcon(notification, colors.primary);
+                const badge = getStatusBadge(notification.type, colors.primary);
                 return (
                   <TouchableOpacity
                     key={notification.id}
@@ -349,25 +359,25 @@ export default function NotificationsListModal({
 }
 
 const styles = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    maxHeight: SCREEN_HEIGHT * 0.85,
+    width: '100%',
+    maxHeight: SCREEN_HEIGHT * 0.88,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.15,
     shadowRadius: 20,
-    elevation: 20,
+    elevation: 24,
   },
   handleWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 6 },
   handle: { width: 40, height: 4, borderRadius: 2 },

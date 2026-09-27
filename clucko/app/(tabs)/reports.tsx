@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useState } from 'react';
 import {
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -200,6 +201,7 @@ export default function ReportsScreen() {
 
   const [scansRaw, setScansRaw] = useState<any[]>([]);
   const [activitiesList, setActivitiesList] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadScanActivity = async () => {
     try {
@@ -213,6 +215,19 @@ export default function ReportsScreen() {
       console.error('Error loading scan activity:', error);
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const savedChickens = await loadChickensForCurrentUser();
+      setAllChickens(savedChickens || []);
+      await loadScanActivity();
+    } catch (error) {
+      console.warn('Pull-to-refresh error in reports:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const [selectedPeriod, setSelectedPeriod] = useState<'weekly' | 'monthly'>('weekly');
 
@@ -317,35 +332,6 @@ const buildWeeklyActivity = (scans: any[]) => {
     return <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} />;
   }
 
-  // ← ADDED — caretaker block
-  if (isCaretaker) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-        <View style={styles.guestBlockContainer}>
-          <View style={[styles.guestBlockIconCircle, { backgroundColor: colors.primary + '18' }]}>
-            <Ionicons name="lock-closed-outline" size={40} color={colors.primary} />
-          </View>
-          <Text style={[styles.guestBlockTitle, { color: colors.text }]}>
-            Access Restricted
-          </Text>
-          <Text style={[styles.guestBlockText, { color: colors.textSecondary }]}>
-            Reports & Analytics are only available to farm owners.
-          </Text>
-          <TouchableOpacity
-            style={styles.guestBlockBackButton}
-            onPress={() => router.replace('/(tabs)/home')}
-          >
-            <Ionicons name="arrow-back-outline" size={14} color={colors.textLight} />
-            <Text style={[styles.guestBlockBackText, { color: colors.textLight }]}>
-              Back to Home
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   if (isGuestMode) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -359,8 +345,11 @@ const buildWeeklyActivity = (scans: any[]) => {
             Please sign up or login first to view Reports & Analytics.
           </Text>
           <TouchableOpacity style={styles.guestBlockButton} onPress={() => router.push('/signup')}>
-            <LinearGradient colors={['#2E7D32', '#1B5E20']} style={styles.guestBlockButtonGradient}>
-              <Text style={styles.guestBlockButtonText}>Sign Up</Text>
+            <LinearGradient
+              colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+              style={styles.guestBlockButtonGradient}
+            >
+              <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Sign Up</Text>
             </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.guestBlockSecondaryButton, { borderColor: colors.primary }]} onPress={() => router.push('/login')}>
@@ -378,7 +367,18 @@ const buildWeeklyActivity = (scans: any[]) => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+      >
 
         {/* Header */}
         <View style={styles.header}>
@@ -538,7 +538,7 @@ const buildWeeklyActivity = (scans: any[]) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingBottom: 30 },
+  scrollContent: { paddingBottom: 95 },
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 18 },
   headerTitle: { fontSize: 22, fontWeight: 'bold' },
   headerSubtitle: { fontSize: 13, marginTop: 3 },

@@ -196,27 +196,33 @@ def get_reports():
     try:
         with db.cursor() as cur:
             cur.execute('''
-                SELECT DISTINCT ic.*,c.chicken_name,c.qr_code,
-                    dr.predicted_condition,dr.confidence_score,dr.severity_level,dr.detected_at
+                SELECT ic.*, c.chicken_name, c.qr_code,
+                    dr.predicted_condition, dr.confidence_score, dr.severity_level, dr.detected_at
                 FROM image_captures ic
-                JOIN chickens c ON ic.chicken_id=c.id
-                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
-                LEFT JOIN farms f ON f.id = c.farm_id
-                LEFT JOIN detection_results dr ON dr.image_id=ic.id
-                WHERE c.user_id=%s OR fm.user_id=%s OR f.owner_id=%s
+                JOIN chickens c ON ic.chicken_id = c.id
+                LEFT JOIN detection_results dr ON dr.image_id = ic.id
+                WHERE c.user_id = %s
+                   OR c.farm_id IN (
+                       SELECT id FROM farms WHERE owner_id = %s
+                       UNION
+                       SELECT farm_id FROM farm_members WHERE user_id = %s
+                   )
                 ORDER BY ic.capture_datetime DESC LIMIT 20
-            ''', (request.user_id, request.user_id, request.user_id, request.user_id))
+            ''', (request.user_id, request.user_id, request.user_id))
             scans = cur.fetchall()
             cur.execute('''
-                SELECT dr.predicted_condition,COUNT(*) as count,AVG(dr.confidence_score) as avg_confidence
+                SELECT dr.predicted_condition, COUNT(*) as count, AVG(dr.confidence_score) as avg_confidence
                 FROM detection_results dr
-                JOIN image_captures ic ON dr.image_id=ic.id
-                JOIN chickens c ON ic.chicken_id=c.id
-                LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
-                LEFT JOIN farms f ON f.id = c.farm_id
-                WHERE c.user_id=%s OR fm.user_id=%s OR f.owner_id=%s
+                JOIN image_captures ic ON dr.image_id = ic.id
+                JOIN chickens c ON ic.chicken_id = c.id
+                WHERE c.user_id = %s
+                   OR c.farm_id IN (
+                       SELECT id FROM farms WHERE owner_id = %s
+                       UNION
+                       SELECT farm_id FROM farm_members WHERE user_id = %s
+                   )
                 GROUP BY dr.predicted_condition ORDER BY count DESC
-            ''', (request.user_id, request.user_id, request.user_id, request.user_id))
+            ''', (request.user_id, request.user_id, request.user_id))
             breakdown = cur.fetchall()
         return jsonify({'scans':scans,'breakdown':breakdown})
     finally:

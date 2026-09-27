@@ -2,19 +2,32 @@ import React, { useRef, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X } from 'lucide-react';
+import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X, ShieldAlert } from 'lucide-react';
+import { CluckoBrandBadge, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
+import { useDetect } from '../context/DetectContext';
 import './DetectPage.css';
 
 export default function DetectPage() {
   const webcamRef = useRef(null);
   const fileRef = useRef(null);
-  const [capturedImage, setCapturedImage] = useState(null);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [camError, setCamError] = useState(false);
-  const [scanModule, setScanModule] = useState('auto');
-  const [gradcamLoading, setGradcamLoading] = useState(false);
-  const [gradcamData, setGradcamData] = useState(null);
+
+  const {
+    capturedImage,
+    setCapturedImage,
+    result,
+    setResult,
+    loading,
+    camError,
+    setCamError,
+    scanModule,
+    setScanModule,
+    gradcamLoading,
+    gradcamData,
+    setGradcamData,
+    analyze,
+    handleViewGradcam,
+    resetDetection
+  } = useDetect();
 
   const capture = useCallback(() => {
     const img = webcamRef.current?.getScreenshot();
@@ -23,7 +36,7 @@ export default function DetectPage() {
       setResult(null);
       setGradcamData(null);
     }
-  }, []);
+  }, [setCapturedImage, setResult, setGradcamData]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -35,56 +48,6 @@ export default function DetectPage() {
       setGradcamData(null);
     };
     reader.readAsDataURL(file);
-  };
-
-  const analyze = async () => {
-    if (!capturedImage) return;
-    setLoading(true);
-    setGradcamData(null);
-    try {
-      const { data } = await axios.post('/api/detect', {
-        image: capturedImage,
-        module: scanModule
-      });
-      setResult(data);
-      if (data.rejected) {
-        toast.error('Detection rejected — see details below');
-      }
-    } catch (err) {
-      const msg = err.response?.data?.error || 'Detection failed';
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleViewGradcam = async () => {
-    if (!capturedImage) return;
-    const targetModule = scanModule !== 'auto'
-      ? scanModule
-      : (result?.module === 'wing' ? 'wing' : 'eye');
-
-    setGradcamLoading(true);
-    try {
-      const { data } = await axios.post('/api/gradcam', {
-        image: capturedImage,
-        module: targetModule
-      });
-      setGradcamData(data);
-      toast.success('AI focus heatmap generated!');
-    } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to generate Grad-CAM visualization';
-      toast.error(msg);
-    } finally {
-      setGradcamLoading(false);
-    }
-  };
-
-  const reset = () => {
-    setCapturedImage(null);
-    setResult(null);
-    setGradcamData(null);
-    setGradcamLoading(false);
   };
 
   const getSeverityClass = (s) => {
@@ -119,7 +82,7 @@ export default function DetectPage() {
                 onClick={() => setScanModule('eye')}
                 title="Target Eye diseases (Coryza, Fowl Pox)"
               >
-                👁️ Eye
+                <EyeModuleIcon size={13} style={{ marginRight: 4 }} /> Eye
               </button>
               <button
                 type="button"
@@ -127,7 +90,7 @@ export default function DetectPage() {
                 onClick={() => setScanModule('wing')}
                 title="Target Wing diseases (Newcastle)"
               >
-                🪶 Wing
+                <WingModuleIcon size={13} style={{ marginRight: 4 }} /> Wing
               </button>
             </div>
           </div>
@@ -176,11 +139,11 @@ export default function DetectPage() {
               </>
             ) : (
               <>
-                <button className="btn btn-primary" onClick={analyze} disabled={loading}>
+                <button className="btn btn-primary" onClick={() => analyze()} disabled={loading}>
                   {loading ? <Loader size={16} className="spin" /> : <CheckCircle size={16} />}
                   {loading ? 'Analyzing...' : 'Analyze'}
                 </button>
-                <button className="btn btn-secondary" onClick={reset}>
+                <button className="btn btn-secondary" onClick={() => resetDetection()}>
                   <RefreshCw size={16} /> Retake
                 </button>
               </>
@@ -191,16 +154,49 @@ export default function DetectPage() {
         {/* Results Panel */}
         <div className="results-panel">
           {!result && !loading && (
-            <div className="card result-placeholder">
-              <div className="placeholder-icon">🔬</div>
-              <p className="placeholder-text">Capture an image and click Analyze to detect diseases</p>
+            <div className="card detect-hero-stage">
+              <div className="detect-hero-badge-wrap">
+                <CluckoBrandBadge size={54} iconSize={32} glow={true} />
+              </div>
+              <h2 className="detect-hero-title">Where Intelligence Begins</h2>
+              <p className="detect-hero-sub">
+                Capture or upload an image to run dual-head neural diagnostics with explainable Grad-CAM heatmaps
+              </p>
+
+              <div className="detect-feature-cards">
+                <div className="detect-feature-card">
+                  <div className="feature-card-header">
+                    <EyeModuleIcon size={16} color="#22c55e" />
+                    <span className="feature-card-title">Eye Pathology Head</span>
+                  </div>
+                  <p className="feature-card-desc">Specialized in Infectious Coryza and Fowl Pox</p>
+                </div>
+
+                <div className="detect-feature-card">
+                  <div className="feature-card-header">
+                    <WingModuleIcon size={16} color="#22c55e" />
+                    <span className="feature-card-title">Wing & Posture Head</span>
+                  </div>
+                  <p className="feature-card-desc">Detects Newcastle disease, Marek's disease, wing droop, and posture anomalies</p>
+                </div>
+
+                <div className="detect-feature-card">
+                  <div className="feature-card-header">
+                    <Sparkles size={16} color="#22c55e" />
+                    <span className="feature-card-title">Grad-CAM Heatmaps</span>
+                  </div>
+                  <p className="feature-card-desc">Generates visual saliency attention maps highlighting infection clusters</p>
+                </div>
+              </div>
             </div>
           )}
 
           {loading && (
             <div className="card result-placeholder">
-              <Loader size={32} className="spin" color="#4ade80" />
-              <p className="placeholder-text">Running CNN analysis...</p>
+              <CluckoBrandBadge size={46} iconSize={26} glow={true} pulse={true} />
+              <p className="placeholder-text" style={{ color: 'var(--accent-green-bright)', fontWeight: 600 }}>
+                Running MobileNetV2 Neural Analysis...
+              </p>
             </div>
           )}
 
@@ -209,7 +205,9 @@ export default function DetectPage() {
               {/* Rejection Card */}
               {result.rejected && (
                 <div className="card rejection-card">
-                  <div className="rejection-icon">🚫</div>
+                  <div className="rejection-icon">
+                    <ShieldAlert size={36} color="#ef4444" />
+                  </div>
                   <div className="rejection-title">Not a Chicken</div>
                   <p className="rejection-message">{result.message}</p>
                   <div className="rejection-reason">{result.rejection_reason}</div>
@@ -290,7 +288,8 @@ export default function DetectPage() {
                           </div>
                         </div>
                         <p className="gradcam-caption">
-                          🎯 <strong>Highlighted areas show where the AI focused during detection</strong>
+                          <Sparkles size={14} color="#22c55e" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                          <strong>Highlighted areas show where the AI focused during detection</strong>
                         </p>
                       </div>
                     </div>

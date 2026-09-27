@@ -637,7 +637,9 @@ def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: 
     disease_lookup = {d['id']: d for d in diseases_config['diseases'] if d.get('module') == module}
     results = []
     for idx, prob in enumerate(preds):
-        cls_id  = label_map[str(idx)]
+        cls_id = label_map.get(str(idx))
+        if not cls_id:
+            continue
         disease = disease_lookup.get(cls_id, {})
         results.append({
             "disease_id":   cls_id,
@@ -648,6 +650,28 @@ def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: 
             "color":        disease.get('color', '#6366f1'),
             "description":  disease.get('description', '')
         })
+
+    # Fallback if indices had no matches in label_map
+    if not results and label_map:
+        for idx, (k, cls_id) in enumerate(label_map.items()):
+            prob = preds[idx] if idx < len(preds) else 0.0
+            disease = disease_lookup.get(cls_id, {})
+            results.append({
+                "disease_id":   cls_id,
+                "disease_name": disease.get('name', cls_id),
+                "confidence":   round(float(prob) * 100, 2),
+                "symptoms":     disease.get('symptoms', []),
+                "severity":     disease.get('severity', 'unknown'),
+                "color":        disease.get('color', '#6366f1'),
+                "description":  disease.get('description', '')
+            })
+
+    # Re-normalize confidences among valid classes
+    total_conf = sum(r['confidence'] for r in results)
+    if total_conf > 0:
+        for r in results:
+            r['confidence'] = round((r['confidence'] / total_conf) * 100, 2)
+
     results.sort(key=lambda x: x['confidence'], reverse=True)
 
     return {

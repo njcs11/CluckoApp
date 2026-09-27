@@ -20,7 +20,7 @@ interface ImageQualityGuideProps {
   scanType?: 'head' | 'wing' | 'full';
 }
 
-const GREEN = '#2E7D32';
+const GREEN = '#2D5541';
 
 export default function ImageQualityGuide({
   visible,
@@ -181,11 +181,11 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  title: { fontSize: 17, fontWeight: '700', color: '#1B5E20' },
+  title: { fontSize: 17, fontWeight: '700', color: '#2D5541' },
   closeButton: {
     width: 28,
     height: 28,
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     justifyContent: 'center',
     alignItems: 'center',
   },

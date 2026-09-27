@@ -54,41 +54,18 @@ def signup():
                 role = 'caretaker'
 
             else:
-                # Owner path — generate farm code
-                while True:
-                    code = generate_farm_code()
-                    cur.execute('SELECT id FROM farms WHERE farm_code=%s', (code,))
-                    if not cur.fetchone():
-                        break
-
+                # Owner path
                 cur.execute('''
                     INSERT INTO users
                     (first_name, last_name, email, password_hash,
                      phone_number, farm_name, farm_location, role)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'owner')
+                    VALUES (%s,%s,%s,%s,%s,NULL,NULL,'owner')
                 ''', (d['first_name'], d['last_name'], d['email'], pw_hash,
-                      d.get('phone_number', ''),
-                      d.get('farm_name', f"{d['first_name']}'s Farm"),
-                      d.get('farm_location', 'Davao City')))
+                      d.get('phone_number', '')))
                 db.commit()
                 user_id = cur.lastrowid
 
-                # Auto-create first farm for owner
-                cur.execute('''
-                    INSERT INTO farms (owner_id, farm_name, farm_location, farm_code)
-                    VALUES (%s, %s, %s, %s)
-                ''', (user_id,
-                      d.get('farm_name', f"{d['first_name']}'s Farm"),
-                      d.get('farm_location', 'Davao City'),
-                      code))
-                farm_id = cur.lastrowid
-
-                cur.execute('''
-                    INSERT INTO farm_members (farm_id, user_id, role)
-                    VALUES (%s, %s, 'owner')
-                ''', (farm_id, user_id))
-
-                # Auto-provision 30-Day Free Trial
+                # Auto-provision 30-Day Free Trial (starts with 0 farms)
                 now = datetime.utcnow()
                 trial_end = now + timedelta(days=30)
                 trial_grace = trial_end + timedelta(days=7)
@@ -227,8 +204,22 @@ def google_auth():
     if not email:
         return jsonify({'error': 'Google email is required'}), 400
 
-    first_name = (d.get('first_name') or d.get('given_name') or 'Google').strip()
-    last_name = (d.get('last_name') or d.get('family_name') or 'User').strip()
+    raw_first = (d.get('first_name') or d.get('given_name') or '').strip()
+    raw_last = (d.get('last_name') or d.get('family_name') or '').strip()
+    full_name = (d.get('name') or '').strip()
+    phone = (d.get('phone') or d.get('phone_number') or '').strip()
+
+    if not raw_first and full_name:
+        parts = full_name.split()
+        raw_first = parts[0]
+        raw_last = ' '.join(parts[1:]) if len(parts) > 1 else ''
+    elif raw_first and not raw_last and full_name:
+        parts = full_name.split()
+        if len(parts) > 1 and parts[0].lower() == raw_first.lower():
+            raw_last = ' '.join(parts[1:])
+
+    first_name = raw_first if raw_first else 'Google'
+    last_name = raw_last if (raw_last and raw_last.lower() != 'user') else ''
     farm_name = d.get('farm_name') or f"{first_name}'s Farm"
 
     db = get_db()
@@ -245,41 +236,54 @@ def google_auth():
                 user_id = user['id']
                 role = user.get('role') or 'owner'
                 is_new_user = False
+
+                # Auto-heal profile: remove 'User' as last_name, update phone or profile image if available
+                updates = []
+                params = []
+                cur_last = (user.get('last_name') or '').strip()
+                cur_first = (user.get('first_name') or '').strip()
+
+                if cur_last.lower() == 'user':
+                    updates.append("last_name = %s")
+                    params.append(last_name)
+                elif not cur_last and last_name:
+                    updates.append("last_name = %s")
+                    params.append(last_name)
+
+                if (cur_first.lower() == 'google' or not cur_first) and first_name:
+                    updates.append("first_name = %s")
+                    params.append(first_name)
+
+                if phone and not user.get('phone_number'):
+                    updates.append("phone_number = %s")
+                    params.append(phone)
+
+                if d.get('picture') and not user.get('profile_image'):
+                    updates.append("profile_image = %s")
+                    params.append(d['picture'])
+
+                if updates:
+                    params.append(user_id)
+                    cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=%s", tuple(params))
+                    db.commit()
+                    cur.execute('SELECT * FROM users WHERE id=%s', (user_id,))
+                    user = cur.fetchone()
             else:
                 # New user registering via Google OAuth
                 is_new_user = True
                 random_pw = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
                 pw_hash = hashlib.sha256(random_pw.encode()).hexdigest()
 
-                while True:
-                    code = generate_farm_code()
-                    cur.execute('SELECT id FROM farms WHERE farm_code=%s', (code,))
-                    if not cur.fetchone():
-                        break
-
                 cur.execute('''
                     INSERT INTO users
                     (first_name, last_name, email, password_hash,
-                     farm_name, farm_location, role)
-                    VALUES (%s,%s,%s,%s,%s,%s,'owner')
-                ''', (first_name, last_name, email, pw_hash,
-                      farm_name, 'Davao City'))
+                     farm_name, farm_location, role, phone_number)
+                    VALUES (%s,%s,%s,%s,NULL,NULL,'owner',%s)
+                ''', (first_name, last_name, email, pw_hash, phone or None))
                 db.commit()
                 user_id = cur.lastrowid
 
-                # Auto-create first farm for owner
-                cur.execute('''
-                    INSERT INTO farms (owner_id, farm_name, farm_location, farm_code)
-                    VALUES (%s, %s, %s, %s)
-                ''', (user_id, farm_name, 'Davao City', code))
-                farm_id = cur.lastrowid
-
-                cur.execute('''
-                    INSERT INTO farm_members (farm_id, user_id, role)
-                    VALUES (%s, %s, 'owner')
-                ''', (farm_id, user_id))
-
-                # Auto-provision 30-day Free Trial for new Google users
+                # Auto-provision 30-day Free Trial for new Google users (starts with 0 farms)
                 now = datetime.utcnow()
                 trial_end = now + timedelta(days=30)
                 trial_grace = trial_end + timedelta(days=7)
@@ -420,28 +424,31 @@ def get_profile():
                 if not any(m.get('is_active') is not False for m in memberships):
                     return jsonify({'error': 'Your caretaker account has been deactivated. Please contact your farm owner.'}), 403
 
-            # If user has no explicit farm_name or farm_location, resolve dynamically from farms / farm_members
-            if not user.get('farm_name'):
-                if user.get('role') == 'owner':
-                    cur.execute('SELECT farm_name, farm_location FROM farms WHERE owner_id=%s ORDER BY created_at ASC LIMIT 1', (request.user_id,))
-                    f = cur.fetchone()
-                    if f:
-                        user['farm_name'] = f['farm_name']
-                        if not user.get('farm_location'):
-                            user['farm_location'] = f.get('farm_location', '')
+            # Resolve active farm_name and farm_location directly from farms / farm_members
+            if user.get('role') == 'owner':
+                cur.execute('SELECT farm_name, farm_location FROM farms WHERE owner_id=%s ORDER BY created_at ASC LIMIT 1', (request.user_id,))
+                f = cur.fetchone()
+                if f:
+                    user['farm_name'] = f['farm_name']
+                    user['farm_location'] = f.get('farm_location') or ''
                 else:
-                    cur.execute('''
-                        SELECT f.farm_name, f.farm_location 
-                        FROM farms f
-                        JOIN farm_members fm ON fm.farm_id = f.id
-                        WHERE fm.user_id=%s
-                        ORDER BY fm.joined_at ASC LIMIT 1
-                    ''', (request.user_id,))
-                    f = cur.fetchone()
-                    if f:
-                        user['farm_name'] = f['farm_name']
-                        if not user.get('farm_location'):
-                            user['farm_location'] = f.get('farm_location', '')
+                    user['farm_name'] = ''
+                    user['farm_location'] = ''
+            else:
+                cur.execute('''
+                    SELECT f.farm_name, f.farm_location 
+                    FROM farms f
+                    JOIN farm_members fm ON fm.farm_id = f.id
+                    WHERE fm.user_id=%s
+                    ORDER BY fm.joined_at ASC LIMIT 1
+                ''', (request.user_id,))
+                f = cur.fetchone()
+                if f:
+                    user['farm_name'] = f['farm_name']
+                    user['farm_location'] = f.get('farm_location') or ''
+                else:
+                    user['farm_name'] = ''
+                    user['farm_location'] = ''
 
             return jsonify(user)
     finally:
@@ -489,3 +496,91 @@ def update_profile():
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
     return jsonify({'success': True})
+
+@app.route('/api/auth/check-email', methods=['POST'])
+def check_email():
+    d = request.json or {}
+    email = d.get('email', '').strip().lower()
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT id, first_name, email FROM users WHERE LOWER(email) = %s', (email,))
+            u = cur.fetchone()
+            if u:
+                return jsonify({'exists': True, 'name': u.get('first_name', '')})
+            return jsonify({'exists': False})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def reset_password():
+    d = request.json or {}
+    email = d.get('email', '').strip().lower()
+    new_password = d.get('new_password', '')
+
+    if not email or not new_password:
+        return jsonify({'error': 'Email and new password are required'}), 400
+    if len(new_password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+
+    pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT id, first_name, last_name, role FROM users WHERE LOWER(email) = %s', (email,))
+            u = cur.fetchone()
+            if not u:
+                return jsonify({'error': 'No account found with this email'}), 404
+
+            cur.execute('UPDATE users SET password_hash = %s WHERE id = %s', (pw_hash, u['id']))
+            db.commit()
+
+            return jsonify({
+                'success': True,
+                'message': 'Password has been successfully updated'
+            })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/auth/send-reset-code', methods=['POST'])
+def send_reset_code_api():
+    import requests
+    d = request.json or {}
+    email = d.get('email', '').strip().lower()
+    code = d.get('code', '').strip()
+    if not email or not code:
+        return jsonify({'error': 'Email and code are required'}), 400
+
+    try:
+        resp = requests.post(
+            'https://api.emailjs.com/api/v1.0/email/send',
+            headers={
+                'Content-Type': 'application/json',
+                'Origin': 'http://localhost',
+            },
+            json={
+                'service_id': 'service_lzrjxzb',
+                'template_id': 'template_u0b0yl9',
+                'user_id': 'lJJPMqktLrmyBcQBJ',
+                'template_params': {
+                    'to_email': email,
+                    'code': code,
+                },
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return jsonify({'success': True, 'message': 'Code sent to email'})
+        else:
+            return jsonify({'success': False, 'error': resp.text}), resp.status_code
+    except Exception as err:
+        return jsonify({'error': str(err)}), 500

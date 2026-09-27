@@ -1,10 +1,12 @@
 import { useDarkMode } from '@/context/DarkModeContext';
-import { Feather, FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
 import { Tabs, router } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Dimensions, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Dimensions, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import { useRole } from '../../hooks/useRole';
@@ -12,22 +14,126 @@ import { useRole } from '../../hooks/useRole';
 const { width } = Dimensions.get('window');
 const isTablet = width >= 768;
 
+interface AnimatedTabIconProps {
+  focused: boolean;
+  color: any;
+  iconName: string;
+  focusedIconName?: string;
+  iconType?: 'ionicons' | 'chicken';
+  isTablet: boolean;
+}
+
+function AnimatedTabIcon({
+  focused,
+  color,
+  iconName,
+  focusedIconName,
+  iconType = 'ionicons',
+  isTablet,
+}: AnimatedTabIconProps) {
+  const { colors, isDarkMode } = useDarkMode();
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.08 : 1)).current;
+
+  useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: focused ? 1.08 : 1,
+      friction: 6,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [focused]);
+
+  const activeName = focused && focusedIconName ? focusedIconName : iconName;
+
+  return (
+    <View style={[styles.tabIconWrapper, isTablet && styles.tabIconWrapperTablet]}>
+      <Animated.View
+        style={[
+          styles.iconContainer,
+          isTablet && styles.iconContainerTablet,
+          {
+            transform: [{ scale: scaleAnim }],
+          },
+        ]}
+      >
+        {iconType === 'chicken' ? (
+          <ChickenIcon size={isTablet ? 24 : 21} color={color} />
+        ) : (
+          <Ionicons name={activeName as any} size={isTablet ? 25 : 22} color={color} />
+        )}
+      </Animated.View>
+    </View>
+  );
+}
+
+function CurvedTabBarBackground({
+  width: barWidth,
+  height = 66,
+  isDarkMode,
+}: {
+  width: number;
+  height?: number;
+  isDarkMode: boolean;
+}) {
+  const cx = barWidth / 2;
+  const scoopW = 42;
+  const scoopDepth = 30;
+
+  const d = `
+    M 0 0
+    L ${cx - scoopW} 0
+    C ${cx - scoopW + 15} 0, ${cx - 22} ${scoopDepth}, ${cx} ${scoopDepth}
+    C ${cx + 22} ${scoopDepth}, ${cx + scoopW - 15} 0, ${cx + scoopW} 0
+    L ${barWidth} 0
+    L ${barWidth} ${height}
+    L 0 ${height}
+    Z
+  `;
+
+  const fillColor = isDarkMode ? '#131A16' : '#FFFFFF';
+  const strokeColor = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+
+  return (
+    <View style={styles.tabBarBackgroundWrap} pointerEvents="none">
+      <Svg width={barWidth} height={height} viewBox={`0 0 ${barWidth} ${height}`}>
+        <Path d={d} fill={fillColor} stroke={strokeColor} strokeWidth={1} />
+      </Svg>
+    </View>
+  );
+}
+
+function AnimatedCenterButton({ isTablet }: { isTablet: boolean }) {
+  const { isDarkMode } = useDarkMode();
+  // Darkest green in our palette (#1E3D2D)
+  const darkestGreen = isDarkMode ? '#172E22' : '#1E3D2D';
+
+  return (
+    <View
+      style={[
+        styles.centerButtonOuter,
+        {
+          backgroundColor: darkestGreen,
+        },
+        isTablet && styles.centerButtonOuterTablet,
+      ]}
+    >
+      <View style={styles.centerIconWrap}>
+        <Feather name="camera" size={isTablet ? 28 : 23} color="#FFFFFF" />
+      </View>
+    </View>
+  );
+}
+
 export default function TabLayout() {
   const { colors, isDarkMode } = useDarkMode();
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [guestModalVisible, setGuestModalVisible] = useState(false);
   const [guestFeature, setGuestFeature] = useState('this feature');
-  // NEW: gate rendering of the tabs until we've confirmed the person is
-  // actually authenticated (logged in) or explicitly browsing as a guest.
-  // Without this, (tabs) routes were reachable directly — e.g. stale
-  // AsyncStorage/localStorage from a previous session, or just typing the
-  // URL — with no redirect back to /login.
   const [checkingAuth, setCheckingAuth] = useState(true);
   const { isCaretaker } = useRole();
 
-  // Runs once on mount: the actual access-control check for this whole
-  // route group. If neither flag is true, bounce to /login before anything
-  // under (tabs) ever renders.
   useEffect(() => {
     const verifyAccess = async () => {
       try {
@@ -47,8 +153,6 @@ export default function TabLayout() {
         setIsGuestMode(isGuest);
       } catch (error) {
         console.error('Error verifying auth/guest status:', error);
-        // Fail closed — if we can't confirm access, send them to login
-        // rather than silently letting them through.
         router.replace('/login');
         return;
       } finally {
@@ -59,8 +163,6 @@ export default function TabLayout() {
     verifyAccess();
   }, []);
 
-  // Refresh guest status every time the tab bar regains focus
-  // (e.g. after logging in from a guest-triggered login prompt)
   useFocusEffect(
     useCallback(() => {
       const checkGuestStatus = async () => {
@@ -77,148 +179,194 @@ export default function TabLayout() {
 
   const blockIfGuest = (e: any, featureLabel: string) => {
     if (isGuestMode) {
-      // Prevent the default tab navigation
       e.preventDefault();
       setGuestFeature(featureLabel);
       setGuestModalVisible(true);
     }
   };
 
-  // While we're confirming access, render nothing rather than flashing the
-  // tab bar/home screen before a possible redirect fires.
+  const barWidth = screenWidth;
+  const barHeight = (isTablet ? 72 : 64) + (Platform.OS === 'ios' ? insets.bottom : 0);
+  const paddingBottom = Platform.OS === 'ios' ? Math.max(insets.bottom, 6) : 6;
+
   if (checkingAuth) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
 
   return (
     <>
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textLight,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
-          height: isTablet ? 75 : 65,
-          paddingBottom: isTablet ? 12 : 10,
-          paddingTop: isTablet ? 10 : 8,
-        },
-        tabBarLabelStyle: {
-          fontSize: isTablet ? 13 : 11,
-          fontWeight: '500',
-          marginTop: isTablet ? 6 : 4,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ focused, color }) => (
-            <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <Ionicons name="home-outline" size={isTablet ? 26 : 22} color={color} />
-            </View>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: isDarkMode ? '#6C7F74' : '#8A9990',
+          tabBarStyle: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: barHeight,
+            backgroundColor: 'transparent',
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowColor: 'transparent',
+            paddingBottom: paddingBottom,
+            paddingTop: 6,
+          },
+          tabBarBackground: () => (
+            <CurvedTabBarBackground
+              width={barWidth}
+              height={barHeight}
+              isDarkMode={isDarkMode}
+            />
           ),
+          tabBarLabelStyle: {
+            fontSize: isTablet ? 12 : 10.5,
+            fontWeight: '600',
+            marginTop: 1,
+          },
         }}
-      />
+      >
+        <Tabs.Screen
+          name="home"
+          options={{
+            title: 'Home',
+            tabBarIcon: ({ focused, color }) => (
+              <AnimatedTabIcon
+                focused={focused}
+                color={color}
+                iconName="home-outline"
+                focusedIconName="home"
+                isTablet={isTablet}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="chickens"
-        options={{
-          title: 'Chickens',
-          tabBarIcon: ({ focused, color }) => (
-            <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <ChickenIcon size={isTablet ? 25 : 21} color={color} />
-            </View>
-          ),
-        }}
-      />
+        <Tabs.Screen
+          name="chickens"
+          options={{
+            title: 'Chickens',
+            tabBarIcon: ({ focused, color }) => (
+              <AnimatedTabIcon
+                focused={focused}
+                color={color}
+                iconName="egg-outline"
+                iconType="chicken"
+                isTablet={isTablet}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="capture"
-        options={{
-          title: '',
-          tabBarIcon: ({ focused }) => (
-            <View style={[styles.centerIconContainer, { backgroundColor: colors.primary }, isTablet && styles.centerIconContainerTablet]}>
-              <Feather name="camera" size={isTablet ? 32 : 28} color="#fff" />
-            </View>
-          ),
-        }}
-        listeners={{
-          tabPress: (e) => blockIfGuest(e, 'Scan & Detect'),
-        }}
-      />
+        <Tabs.Screen
+          name="capture"
+          options={{
+            title: '',
+            tabBarIcon: ({ focused }) => (
+              <AnimatedCenterButton isTablet={isTablet} />
+            ),
+          }}
+          listeners={{
+            tabPress: (e) => blockIfGuest(e, 'Scan & Detect'),
+          }}
+        />
 
-      <Tabs.Screen
-        name="reports"
-        options={{
-          title: 'Reports',
-          tabBarIcon: ({ focused, color }) => (
-            <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <Ionicons name="stats-chart-outline" size={isTablet ? 25 : 21} color={color} />
-            </View>
-          ),
-        }}
-      />
+        <Tabs.Screen
+          name="reports"
+          options={{
+            title: 'Reports',
+            tabBarIcon: ({ focused, color }) => (
+              <AnimatedTabIcon
+                focused={focused}
+                color={color}
+                iconName="stats-chart-outline"
+                focusedIconName="stats-chart"
+                isTablet={isTablet}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ focused, color }) => (
-            <View style={[styles.iconContainer, focused && { backgroundColor: colors.badgeBackground }, isTablet && styles.iconContainerTablet]}>
-              <Ionicons name="person-outline" size={isTablet ? 26 : 22} color={color} />
-            </View>
-          ),
-        }}
-        listeners={{
-          tabPress: (e) => blockIfGuest(e, 'your Profile'),
-        }}
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Profile',
+            tabBarIcon: ({ focused, color }) => (
+              <AnimatedTabIcon
+                focused={focused}
+                color={color}
+                iconName="person-outline"
+                focusedIconName="person"
+                isTablet={isTablet}
+              />
+            ),
+          }}
+          listeners={{
+            tabPress: (e) => blockIfGuest(e, 'your Profile'),
+          }}
+        />
+      </Tabs>
+      <GuestBlockModal
+        visible={guestModalVisible}
+        onClose={() => setGuestModalVisible(false)}
+        featureLabel={guestFeature}
       />
-    </Tabs>
-    <GuestBlockModal
-      visible={guestModalVisible}
-      onClose={() => setGuestModalVisible(false)}
-      featureLabel={guestFeature}
-    />
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  tabIconWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  tabIconWrapperTablet: {
+    paddingTop: 2,
+  },
   iconContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
   },
   iconContainerTablet: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
-  centerIconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 55,
-    height: 55,
-    borderRadius: 27.5,
-    marginTop: -12,
-    marginBottom: -8,
-    shadowColor: '#2e7d32',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+  tabBarBackgroundWrap: {
+    ...StyleSheet.absoluteFill,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 8,
   },
-  centerIconContainerTablet: {
-    width: 65,
-    height: 65,
-    borderRadius: 32.5,
-    marginTop: -16,
-    marginBottom: -10,
+  centerButtonOuter: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    marginTop: -20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  centerButtonOuterTablet: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    marginTop: -24,
+  },
+  centerIconWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

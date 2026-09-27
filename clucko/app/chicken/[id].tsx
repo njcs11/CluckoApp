@@ -31,7 +31,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ConfidenceBadge from '../../components/ui/ConfidenceBadge';
@@ -44,6 +44,7 @@ const { width } = Dimensions.get('window');
 
 
 export default function ChickenDetailScreen() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
   const { colors, isDarkMode } = useDarkMode();
   const { notify } = useNotifications();
@@ -497,7 +498,7 @@ export default function ChickenDetailScreen() {
   const lastCheckLabel = lastScan ? lastScan.date.toLocaleDateString() : 'Never';
   const addedLabel = chicken.dateAdded || 'N/A';
 
-  const statusColor = chicken.statusColor || (chicken.status === 'HEALTHY' ? '#4CAF50' : chicken.status === 'WARNING' ? '#FF9800' : '#f44336');
+  const statusColor = chicken.statusColor || (chicken.status === 'HEALTHY' ? colors.primary : chicken.status === 'WARNING' ? '#FF9800' : '#f44336');
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -596,8 +597,8 @@ export default function ChickenDetailScreen() {
                   style={styles.avatar}
                 />
               ) : (
-                <View style={[styles.avatar, { backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center' }]}>
-                  <ChickenIcon size={38} color="#4CAF50" />
+                <View style={[styles.avatar, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center' }]}>
+                  <ChickenIcon size={38} color={colors.primary} />
                 </View>
               )}
               {updatingPhoto ? (
@@ -764,7 +765,7 @@ export default function ChickenDetailScreen() {
               </View>
             ) : (
               chickenScans.map((scan) => {
-                const scanColor = scan.status === 'critical' ? '#f44336' : scan.status === 'warning' ? '#FF9800' : '#4CAF50';
+                const scanColor = scan.status === 'critical' ? '#f44336' : scan.status === 'warning' ? '#FF9800' : colors.primary;
                 return (
                   <TouchableOpacity
                     key={scan.id}
@@ -815,7 +816,7 @@ export default function ChickenDetailScreen() {
                 <ConfidenceBadge score={lastScan.confidence} size="medium" showLabel={true} status={lastScan.status} />
                 <View style={styles.healthFooter}>
                   <Text style={[styles.healthDate, { color: colors.textLight }]}>{lastScan.date.toLocaleDateString()}</Text>
-                  <Text style={[styles.healthStatus, { color: lastScan.status === 'healthy' ? '#4CAF50' : lastScan.status === 'warning' ? '#FF9800' : '#f44336' }]}>
+                  <Text style={[styles.healthStatus, { color: lastScan.status === 'healthy' ? colors.primary : lastScan.status === 'warning' ? '#FF9800' : '#f44336' }]}>
                     {lastScan.status === 'healthy' ? '✓ Normal' : lastScan.status === 'warning' ? '⚠ Alert' : '🚨 Critical'}
                   </Text>
                 </View>
@@ -828,15 +829,15 @@ export default function ChickenDetailScreen() {
             <View style={[styles.healthCard, { backgroundColor: colors.card }]}>
               <Text style={[styles.healthCardTitle, { color: colors.text }]}>Recommendations</Text>
               <View style={styles.recommendationItem}>
-                <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
                 <Text style={[styles.recommendationText, { color: colors.textSecondary }]}>Weekly health checks</Text>
               </View>
               <View style={styles.recommendationItem}>
-                <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
                 <Text style={[styles.recommendationText, { color: colors.textSecondary }]}>Keep vaccination records updated</Text>
               </View>
               <View style={styles.recommendationItem}>
-                <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
                 <Text style={[styles.recommendationText, { color: colors.textSecondary }]}>Monitor behavior daily</Text>
               </View>
             </View>
@@ -905,11 +906,17 @@ export default function ChickenDetailScreen() {
       <Modal
         visible={!!selectedScanHistory}
         transparent
+        statusBarTranslucent
         animationType="slide"
         onRequestClose={() => setSelectedScanHistory(null)}
       >
         <View style={styles.scanModalOverlay}>
-          <View style={[styles.scanModalCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.scanModalCard, {
+            backgroundColor: colors.card,
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+            paddingBottom: Math.max(insets.bottom, 16),
+          }]}>
             <View style={[styles.scanModalHeader, { borderBottomColor: colors.border }]}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.scanModalTitle, { color: colors.text }]}>Capture Details</Text>
@@ -941,8 +948,8 @@ export default function ChickenDetailScreen() {
                     resizeMode="cover"
                   />
                 ) : (
-                  <View style={[styles.scanModalImage, { backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center' }]}>
-                    <ChickenIcon size={72} color="#4CAF50" />
+                  <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center' }]}>
+                    <ChickenIcon size={72} color={colors.primary} />
                   </View>
                 )}
                 <View
@@ -954,7 +961,7 @@ export default function ChickenDetailScreen() {
                           ? '#f44336'
                           : selectedScanHistory?.status === 'warning'
                           ? '#FF9800'
-                          : '#4CAF50',
+                          : colors.primary,
                     },
                   ]}
                 >
@@ -976,7 +983,7 @@ export default function ChickenDetailScreen() {
                           ? '#f44336'
                           : selectedScanHistory?.status === 'warning'
                           ? '#FF9800'
-                          : '#4CAF50',
+                          : colors.primary,
                     },
                   ]}
                 >
@@ -1000,7 +1007,7 @@ export default function ChickenDetailScreen() {
                             ? '#f44336'
                             : selectedScanHistory?.status === 'warning'
                             ? '#FF9800'
-                            : '#4CAF50',
+                            : colors.primary,
                       },
                     ]}
                   />
@@ -1032,8 +1039,8 @@ export default function ChickenDetailScreen() {
                       </Text>
                     </View>
                   </View>
-                  <View style={{ backgroundColor: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? '#2E7D3220' : '#2196F320', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? '#2E7D32' : '#1976D2' }}>
+                  <View style={{ backgroundColor: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? colors.primary + '20' : '#2196F320', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: selectedScanHistory?.captured_by_role?.toLowerCase() === 'owner' ? colors.primary : '#1976D2' }}>
                       {selectedScanHistory?.captured_by_role || 'Member'}
                     </Text>
                   </View>
@@ -1052,7 +1059,7 @@ export default function ChickenDetailScreen() {
                     ⚠️ Early symptoms detected. Isolate bird for close observation over the next 24-48 hours. Ensure clean, warm shelter and electrolytes in water.
                   </Text>
                 ) : (
-                  <Text style={{ color: '#4CAF50', fontSize: 13, lineHeight: 18 }}>
+                  <Text style={{ color: colors.primary, fontSize: 13, lineHeight: 18 }}>
                     ✓ Bird appears in healthy condition. Maintain regular vaccination schedules, clean water, and standard biosecurity measures.
                   </Text>
                 )}

@@ -32,6 +32,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AboutUsModal from '../../components/ui/AboutUsModal';
+import AnimatedSegmentedTabs from '../../components/ui/AnimatedSegmentedTabs';
 import FarmIcon from '../../components/ui/FarmIcon';
 import LogoutConfirmModal from '../../components/ui/LogoutConfirmModal';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
@@ -96,6 +97,16 @@ export default function ProfileScreen() {
   } = useNotifications();
 
   const [activeTab, setActiveTab] = useState<'details' | 'preferences'>('details');
+  const profileTabFadeAnim = useRef(new Animated.Value(1)).current;
+
+  const handleProfileTabSwitch = (newTab: 'details' | 'preferences') => {
+    if (activeTab === newTab) return;
+    Animated.sequence([
+      Animated.timing(profileTabFadeAnim, { toValue: 0.25, duration: 80, useNativeDriver: true }),
+      Animated.timing(profileTabFadeAnim, { toValue: 1, duration: 160, useNativeDriver: true }),
+    ]).start();
+    setActiveTab(newTab);
+  };
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -228,13 +239,24 @@ export default function ProfileScreen() {
         const primaryFarm = farms[0];
         setProfile((prev) => ({
           ...prev,
-          farmName: prev.farmName || primaryFarm.farm_name || '',
-          farmLocation: prev.farmLocation || primaryFarm.farm_location || '',
+          farmName: primaryFarm.farm_name || '',
+          farmLocation: primaryFarm.farm_location || '',
         }));
         setEditedProfile((prev) => ({
           ...prev,
-          farmName: prev.farmName || primaryFarm.farm_name || '',
-          farmLocation: prev.farmLocation || primaryFarm.farm_location || '',
+          farmName: primaryFarm.farm_name || '',
+          farmLocation: primaryFarm.farm_location || '',
+        }));
+      } else {
+        setProfile((prev) => ({
+          ...prev,
+          farmName: '',
+          farmLocation: '',
+        }));
+        setEditedProfile((prev) => ({
+          ...prev,
+          farmName: '',
+          farmLocation: '',
         }));
       }
     } catch (error) {
@@ -511,7 +533,7 @@ export default function ProfileScreen() {
       await apiLogout();
       await loadDarkModePreference();
       setShowLogoutModal(false);
-      router.replace('/login');
+      router.replace({ pathname: '/login', params: { toast: 'logout_success' } });
     } catch (error) {
       console.error('Logout error:', error);
       setShowLogoutModal(false);
@@ -540,7 +562,7 @@ export default function ProfileScreen() {
         }
       >
         <LinearGradient
-          colors={isDarkMode ? ['#123A16', '#1B5E20'] : ['#1B5E20', '#2E7D32']}
+          colors={isDarkMode ? ['#18231E', '#0E1210'] : ['#2D5541', '#1E3D2D']}
           style={styles.cover}
         >
           <View pointerEvents="none" style={styles.coverDecoRing} />
@@ -579,8 +601,8 @@ export default function ProfileScreen() {
               />
             </View>
             <TouchableOpacity style={styles.cameraIcon} onPress={pickProfileImage}>
-              <View style={[styles.cameraIconCircle, { borderColor: colors.card }]}>
-                <Ionicons name="camera" size={13} color="#fff" />
+              <View style={[styles.cameraIconCircle, { borderColor: colors.card, backgroundColor: colors.primary }]}>
+                <Ionicons name="camera" size={13} color={isDarkMode ? '#0E1210' : '#fff'} />
               </View>
             </TouchableOpacity>
           </View>
@@ -608,8 +630,8 @@ export default function ProfileScreen() {
                 style={[
                   styles.roleBadge,
                   {
-                    backgroundColor: subscription.plan === 'premium' ? '#FEF3C7' : subscription.plan === 'pro' ? '#E8F5E9' : subscription.is_in_grace_period ? '#FFF3E0' : '#EDE7F6',
-                    borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? '#2E7D32' : subscription.is_in_grace_period ? '#FF9800' : '#7C3AED',
+                    backgroundColor: subscription.plan === 'premium' ? (isDarkMode ? '#2D2415' : '#FEF3C7') : subscription.plan === 'pro' ? colors.badgeBackground : subscription.is_in_grace_period ? (isDarkMode ? '#2B1D1A' : '#FFF3E0') : (isDarkMode ? '#23182E' : '#EDE7F6'),
+                    borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? colors.primary : subscription.is_in_grace_period ? '#FF9800' : '#7C3AED',
                     borderWidth: 1,
                   }
                 ]}
@@ -619,14 +641,14 @@ export default function ProfileScreen() {
                 <FontAwesome5
                   name={subscription.plan === 'premium' ? 'crown' : subscription.plan === 'pro' ? 'award' : 'seedling'}
                   size={11}
-                  color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? '#2E7D32' : subscription.is_in_grace_period ? '#E65100' : '#7C3AED'}
+                  color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? colors.primary : subscription.is_in_grace_period ? '#E65100' : '#7C3AED'}
                   style={{ marginRight: 4 }}
                 />
                 <Text
                   style={[
                     styles.roleBadgeText,
                     {
-                      color: subscription.plan === 'premium' ? '#B45309' : subscription.plan === 'pro' ? '#1B5E20' : subscription.is_in_grace_period ? '#C2410C' : '#6D28D9',
+                      color: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? colors.primary : subscription.is_in_grace_period ? '#C2410C' : '#6D28D9',
                       fontWeight: '700'
                     }
                   ]}
@@ -680,32 +702,20 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          <View style={[styles.tabsRow, { backgroundColor: colors.background }]}>
-            <TouchableOpacity
-              style={[styles.tabItem, activeTab === 'details' && { backgroundColor: colors.card }]}
-              onPress={() => setActiveTab('details')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabItemText, { color: activeTab === 'details' ? colors.primary : colors.textLight }, activeTab === 'details' && styles.tabItemTextActive]}>
-                Details
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabItem, activeTab === 'preferences' && { backgroundColor: colors.card }]}
-              onPress={() => setActiveTab('preferences')}
-              activeOpacity={0.8}
-            >
-              <View style={styles.tabItemRow}>
-                <Ionicons name="settings-outline" size={14} color={activeTab === 'preferences' ? colors.primary : colors.textLight} />
-                <Text style={[styles.tabItemText, { color: activeTab === 'preferences' ? colors.primary : colors.textLight }, activeTab === 'preferences' && styles.tabItemTextActive]}>
-                  Preferences
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+          <AnimatedSegmentedTabs
+            tabs={[
+              { key: 'details', label: 'Details', icon: 'person-outline' },
+              { key: 'preferences', label: 'Preferences', icon: 'settings-outline' },
+            ]}
+            activeTab={activeTab}
+            onChangeTab={(key) => handleProfileTabSwitch(key as 'details' | 'preferences')}
+            activeColor={colors.primary}
+            containerStyle={{ marginTop: 16, marginBottom: 4 }}
+          />
         </View>
 
-        {activeTab === 'details' && (
+        <Animated.View style={{ opacity: profileTabFadeAnim, width: '100%' }}>
+          {activeTab === 'details' && (
           <View style={styles.section}>
             <View style={[styles.card, { backgroundColor: colors.card }]}>
               <View style={styles.cardHeader}>
@@ -769,7 +779,7 @@ export default function ProfileScreen() {
 
               <View style={[styles.infoRow, { borderBottomColor: colors.divider }]}>
                 <View style={styles.infoLeft}>
-                  <FieldIcon icon="ribbon-outline" tint="#2E7D32" />
+                  <FieldIcon icon="ribbon-outline" tint={colors.primary} />
                   <Text style={[styles.infoLabel, { color: colors.textLight }]}>Current Plan</Text>
                 </View>
                 <Text style={[styles.infoValue, { color: colors.text, fontWeight: '700' }]}>
@@ -806,7 +816,7 @@ export default function ProfileScreen() {
                   style={[
                     styles.infoValue,
                     {
-                      color: subscription?.is_in_grace_period ? '#E65100' : subscription?.is_expired ? '#C62828' : '#2E7D32',
+                      color: subscription?.is_in_grace_period ? '#E65100' : subscription?.is_expired ? '#C62828' : colors.primary,
                       fontWeight: '700'
                     }
                   ]}
@@ -1038,7 +1048,7 @@ export default function ProfileScreen() {
                 activeOpacity={0.7}
               >
                 <View style={styles.preferenceLeft}>
-                  <FieldIcon icon="information-circle-outline" tint="#2E7D32" />
+                  <FieldIcon icon="information-circle-outline" tint={colors.primary} />
                   <View>
                     <Text style={[styles.preferenceLabel, { color: colors.text }]}>About Clucko</Text>
                     <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>App overview, mission, features & disclaimer</Text>
@@ -1049,6 +1059,7 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+        </Animated.View>
 
         <View style={styles.section}>
           <TouchableOpacity
@@ -1104,6 +1115,7 @@ export default function ProfileScreen() {
       <Modal
         animationType="fade"
         transparent={true}
+        statusBarTranslucent
         visible={showImagePreview}
         onRequestClose={cancelImagePreview}
       >
@@ -1168,6 +1180,7 @@ export default function ProfileScreen() {
       <Modal
         visible={showFarmPickerForCaretakers}
         transparent
+        statusBarTranslucent
         animationType="fade"
         onRequestClose={() => setShowFarmPickerForCaretakers(false)}
       >
@@ -1384,7 +1397,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#8FE0B0',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
@@ -1604,7 +1617,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#000',
     borderWidth: 3,
-    borderColor: '#2E7D32',
+    borderColor: '#8FE0B0',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,

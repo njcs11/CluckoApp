@@ -20,28 +20,36 @@ export function TrainProvider({ children }) {
     wing: { ...DEFAULT_MODULE_STATE }
   });
 
+  const [activeModule, setActiveModule] = useState('eye');
   const pollingRef = useRef(null);
+  const prevStatusRef = useRef({ eye: 'idle', wing: 'idle' });
 
   const fetchStatus = useCallback(async () => {
     try {
       const { data } = await axios.get('/api/train/status');
       if (data && data.eye && data.wing) {
-        setTrainStatus(prev => {
-          // Check if status just transitioned from running to completed
-          if (prev.eye.status === 'running' && data.eye.status === 'completed') {
-            toast.success(`👁️ Eye model training completed! (${data.eye.result?.train_accuracy || 0}%)`);
-          } else if (prev.eye.status === 'running' && data.eye.status === 'failed') {
-            toast.error(`❌ Eye model training failed: ${data.eye.error}`);
-          }
+        // Check transitions
+        const prevEye = prevStatusRef.current.eye;
+        const prevWing = prevStatusRef.current.wing;
 
-          if (prev.wing.status === 'running' && data.wing.status === 'completed') {
-            toast.success(`🪶 Wing model training completed! (${data.wing.result?.train_accuracy || 0}%)`);
-          } else if (prev.wing.status === 'running' && data.wing.status === 'failed') {
-            toast.error(`❌ Wing model training failed: ${data.wing.error}`);
-          }
+        if (prevEye === 'running' && data.eye.status === 'completed') {
+          toast.success(`Eye model training completed! (${data.eye.result?.train_accuracy || 0}%)`);
+        } else if (prevEye === 'running' && data.eye.status === 'failed') {
+          toast.error(`Eye model training failed: ${data.eye.error || 'Unknown error'}`);
+        }
 
-          return data;
-        });
+        if (prevWing === 'running' && data.wing.status === 'completed') {
+          toast.success(`Wing model training completed! (${data.wing.result?.train_accuracy || 0}%)`);
+        } else if (prevWing === 'running' && data.wing.status === 'failed') {
+          toast.error(`Wing model training failed: ${data.wing.error || 'Unknown error'}`);
+        }
+
+        prevStatusRef.current = {
+          eye: data.eye.status,
+          wing: data.wing.status
+        };
+
+        setTrainStatus(data);
       }
     } catch (err) {
       console.warn('Could not fetch train status:', err.message);
@@ -55,18 +63,19 @@ export function TrainProvider({ children }) {
 
   const isAnyTrainingRunning = trainStatus.eye.status === 'running' || trainStatus.wing.status === 'running';
 
-  // Dynamic Polling: poll faster when active training is happening
+  // User controls activeModule freely; startTraining automatically sets activeModule when started
+
+
+  // Robust Polling: 1000ms when actively training, 3000ms background heartbeat
   useEffect(() => {
-    if (isAnyTrainingRunning) {
-      if (!pollingRef.current) {
-        pollingRef.current = setInterval(fetchStatus, 1200);
-      }
-    } else {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+    const intervalTime = isAnyTrainingRunning ? 1000 : 3000;
+    
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
     }
+
+    pollingRef.current = setInterval(fetchStatus, intervalTime);
+
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
@@ -95,6 +104,7 @@ export function TrainProvider({ children }) {
     }
 
     try {
+      setActiveModule(module);
       setTrainStatus(prev => ({
         ...prev,
         [module]: {
@@ -116,7 +126,7 @@ export function TrainProvider({ children }) {
       });
 
       if (data.success) {
-        toast.success(`🚀 Started ${module.toUpperCase()} model training in background!`);
+        toast.success(`Started ${module.toUpperCase()} model training in background!`);
         fetchStatus();
       }
     } catch (err) {
@@ -153,6 +163,8 @@ export function TrainProvider({ children }) {
       value={{
         trainStatus,
         isAnyTrainingRunning,
+        activeModule,
+        setActiveModule,
         startTraining,
         resetTraining,
         refreshStatus: fetchStatus

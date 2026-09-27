@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Plus, Trash2, FlaskConical, ChevronDown, ChevronUp, Folder, Info } from 'lucide-react';
+import { EyeModuleIcon, WingModuleIcon } from '../components/icons';
 import './DiseasesPage.css';
 
 const SEVERITY_OPTIONS = ['none', 'moderate', 'high', 'critical'];
@@ -21,7 +22,7 @@ export default function DiseasesPage() {
   const [diseases, setDiseases] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [filterModule, setFilterModule] = useState('all'); // 'all' | 'eye' | 'wing'
-  
+
   const [form, setForm] = useState({
     name: '',
     module: 'eye',
@@ -31,7 +32,7 @@ export default function DiseasesPage() {
     severity: 'moderate',
     color: COLORS[1]
   });
-  
+
   const [symptomInput, setSymptomInput] = useState('');
   const [expanded, setExpanded] = useState(null);
 
@@ -143,13 +144,13 @@ export default function DiseasesPage() {
           className={`filter-pill ${filterModule === 'eye' ? 'filter-pill-active' : ''}`}
           onClick={() => setFilterModule('eye')}
         >
-          👁️ Eye & Head ({diseases.filter(d => d.module === 'eye').length})
+          <EyeModuleIcon size={13} style={{ marginRight: 5 }} /> Eye & Head ({diseases.filter(d => d.module === 'eye').length})
         </button>
         <button
           className={`filter-pill ${filterModule === 'wing' ? 'filter-pill-active' : ''}`}
           onClick={() => setFilterModule('wing')}
         >
-          🪶 Wing & Posture ({diseases.filter(d => d.module === 'wing').length})
+          <WingModuleIcon size={13} style={{ marginRight: 5 }} /> Wing & Posture ({diseases.filter(d => d.module === 'wing').length})
         </button>
       </div>
 
@@ -171,10 +172,12 @@ export default function DiseasesPage() {
                   affected_parts: ['eye']
                 }))}
               >
-                <span className="choice-icon">👁️</span>
+                <span className="choice-icon">
+                  <EyeModuleIcon size={20} color={form.module === 'eye' ? '#22c55e' : '#8f949a'} />
+                </span>
                 <div className="choice-text">
                   <div className="choice-title">Eye & Head Module</div>
-                  <div className="choice-sub">datasets/eye/... (Coryza, Fowl Pox, Marek's)</div>
+                  <div className="choice-sub">datasets/eye/... (Coryza, Fowl Pox)</div>
                 </div>
               </button>
 
@@ -187,7 +190,9 @@ export default function DiseasesPage() {
                   affected_parts: ['wing', 'posture']
                 }))}
               >
-                <span className="choice-icon">🪶</span>
+                <span className="choice-icon">
+                  <WingModuleIcon size={20} color={form.module === 'wing' ? '#22c55e' : '#8f949a'} />
+                </span>
                 <div className="choice-text">
                   <div className="choice-title">Wing & Posture Module</div>
                   <div className="choice-sub">datasets/wing/... (Newcastle, Droop)</div>
@@ -202,7 +207,7 @@ export default function DiseasesPage() {
               <input
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. Newcastle Disease, Marek's Disease"
+                placeholder="e.g. Newcastle Disease"
                 className="input-field"
               />
             </div>
@@ -319,14 +324,15 @@ export default function DiseasesPage() {
                   <div className="disease-name-row">
                     <span className="disease-name">{d.name}</span>
                     <span className="disease-module-badge">
-                      {d.module === 'eye' ? '👁️ Eye Module' : '🪶 Wing Module'}
+                      {d.module === 'eye' ? <EyeModuleIcon size={12} style={{ marginRight: 4 }} /> : <WingModuleIcon size={12} style={{ marginRight: 4 }} />}
+                      {d.module === 'eye' ? 'Eye Module' : 'Wing Module'}
                     </span>
                     <span className="tag" style={{ background: `${d.color}18`, color: d.color, border: `1px solid ${d.color}30` }}>
                       {d.severity?.toUpperCase()}
                     </span>
                   </div>
-                  <div className="disease-folder-tag">
-                    📁 datasets/{d.module || 'eye'}/{d.id}/
+                  <div className="disease-folder-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <Folder size={12} /> datasets/{d.module || 'eye'}/{d.id}/
                   </div>
                 </div>
               </div>

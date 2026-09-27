@@ -28,17 +28,20 @@ def get_chickens():
                 ''', (farm_id,))
             else:
                 cur.execute('''
-                    SELECT DISTINCT c.*, f.farm_name,
+                    SELECT c.*, f.farm_name,
                            TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
                            u.role as added_by_role
                     FROM chickens c
-                    LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
                     LEFT JOIN farms f ON f.id = c.farm_id
                     LEFT JOIN users u ON u.id = c.user_id
-                    WHERE c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s
+                    WHERE c.user_id = %s
+                       OR c.farm_id IN (
+                           SELECT id FROM farms WHERE owner_id = %s
+                           UNION
+                           SELECT farm_id FROM farm_members WHERE user_id = %s
+                       )
                     ORDER BY c.created_at DESC
-                ''', (request.user_id, request.user_id,
-                      request.user_id, request.user_id))
+                ''', (request.user_id, request.user_id, request.user_id))
             chickens = cur.fetchall()
         return jsonify(chickens)
     finally:

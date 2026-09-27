@@ -16,7 +16,7 @@ export default function ExitGuestConfirmModal({ visible, onCancel, onConfirm }: 
       confirmText="Exit"
       cancelText="Stay"
       icon="exit-outline"
-      iconColor="#2E7D32"
+      iconColor="#2D5541"
       isDestructive={false}
       onConfirm={onConfirm}
       onCancel={onCancel}

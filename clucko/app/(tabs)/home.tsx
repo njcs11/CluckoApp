@@ -20,6 +20,7 @@ import {
   Keyboard,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,8 +39,9 @@ import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
 import WelcomeModal from '../../components/ui/WelcomeModal';
+import FarmOnboardingModal from '../../components/ui/FarmOnboardingModal';
 import { apiGetProfile, apiGetActivities, apiGetMyPlan } from '../../lib/api';
-import { getRelativeDateLabel, getUpcomingTasks, loadTasks, Task, toggleTaskComplete } from '../../utils/tasks';
+import { formatDateKey, getRelativeDateLabel, getUpcomingTasks, loadTasks, Task, toggleTaskComplete } from '../../utils/tasks';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FEATURED_CARD_WIDTH = Math.min(screenWidth - 32, 340);
@@ -128,11 +130,13 @@ export default function HomeScreen() {
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
   const [isGuestMode, setIsGuestMode] = useState(mode === 'guest');
   const [userName, setUserName] = useState('Guest User');
+  const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
   const [activeFilter, setActiveFilter] = useState('All');
   const [allChickens, setAllChickens] = useState<any[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
+  const [togglingTaskId, setTogglingTaskId] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<any>(null);
 
   const [showDisclaimer, setShowDisclaimer] = useState(false);
@@ -148,6 +152,33 @@ export default function HomeScreen() {
 
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [welcomeName, setWelcomeName] = useState('there');
+
+  const [showFarmOnboarding, setShowFarmOnboarding] = useState(false);
+  const farmOnboardingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- Pull-to-refresh ---
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([
+        loadUserName(),
+        loadChickens(),
+        loadFarms().then((f) => {
+          setFarms(f);
+          if (f.length > 0) setShowFarmOnboarding(false);
+        }),
+        loadUpcomingTasks(),
+        loadRecentActivities(),
+        loadSubscription(),
+      ]);
+    } catch (e) {
+      console.warn('Pull to refresh error:', e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   // --- Flock search (live, on Home) ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -221,22 +252,78 @@ export default function HomeScreen() {
     }
   };
 
+  const checkFarmOnboarding = async () => {
+    try {
+      const guest = await checkIsGuestMode();
+      if (guest) return;
+
+      const role = await AsyncStorage.getItem('userRole');
+      const userDataStr = await AsyncStorage.getItem('userData');
+      let isOwner = true;
+      if (role && role.toLowerCase() === 'caretaker') isOwner = false;
+      if (userDataStr) {
+        try {
+          const parsed = JSON.parse(userDataStr);
+          if (parsed.role && parsed.role.toLowerCase() === 'caretaker') isOwner = false;
+        } catch (_) { }
+      }
+      if (!isOwner) return;
+
+      const currentFarms = await loadFarms();
+      if (currentFarms.length === 0) {
+        if (farmOnboardingTimerRef.current) {
+          clearTimeout(farmOnboardingTimerRef.current);
+        }
+        // Exactly 3 seconds after login / landing on home with 0 farms
+        farmOnboardingTimerRef.current = setTimeout(() => {
+          setShowFarmOnboarding(true);
+        }, 3000);
+      } else {
+        setShowFarmOnboarding(false);
+      }
+    } catch (err) {
+      console.error('Error checking farm onboarding:', err);
+    }
+  };
+
+  const handleStartCreateFarm = () => {
+    setShowFarmOnboarding(false);
+    router.push({ pathname: '/farm', params: { autoAdd: '1' } });
+  };
+
   useEffect(() => {
     syncGuestMode();
     loadUserName();
     loadChickens();
-    loadFarms().then(setFarms);
+    loadFarms().then((f) => {
+      setFarms(f);
+      if (f.length > 0) setShowFarmOnboarding(false);
+    });
     loadUpcomingTasks();
     loadSubscription();
     checkDisclaimerStatus();
     checkLoginWelcome();
+    checkFarmOnboarding();
+
+    return () => {
+      if (farmOnboardingTimerRef.current) {
+        clearTimeout(farmOnboardingTimerRef.current);
+      }
+    };
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadUserName();
       loadChickens();
-      loadFarms().then(setFarms);
+      loadFarms().then((f) => {
+        setFarms(f);
+        if (f.length > 0) {
+          setShowFarmOnboarding(false);
+        } else {
+          checkFarmOnboarding();
+        }
+      });
       loadUpcomingTasks();
       loadRecentActivities();
       loadSubscription();
@@ -258,7 +345,12 @@ export default function HomeScreen() {
   const loadUpcomingTasks = async () => {
     try {
       const allTasks = await loadTasks();
-      setUpcomingTasks(getUpcomingTasks(allTasks, 4));
+      const todayKey = formatDateKey(new Date());
+      // On Home, display ONLY open / pending tasks (completed tasks belong strictly in Done Tasks)
+      const activeTasks = allTasks
+        .filter((t) => !t.completed && t.date >= todayKey)
+        .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+      setUpcomingTasks(activeTasks.slice(0, 4));
     } catch (error) {
       console.error('Error loading upcoming tasks:', error);
     }
@@ -269,9 +361,18 @@ export default function HomeScreen() {
       guestAlert('completing tasks');
       return;
     }
-    await toggleTaskComplete(task.id);
-    await notify({ title: 'Task Completed', message: `"${task.title}" marked as done.`, type: 'success' });
-    loadUpcomingTasks();
+    if (togglingTaskId === task.id) return; // Prevent double clicking
+    setTogglingTaskId(task.id);
+    try {
+      await toggleTaskComplete(task.id);
+      // Backend automatically records the completion notification in the database.
+      // Refresh task list so completed task immediately moves off the homepage
+      await loadUpcomingTasks();
+    } catch (err) {
+      console.error('Error completing task on home:', err);
+    } finally {
+      setTogglingTaskId(null);
+    }
   };
 
   const syncGuestMode = async () => {
@@ -406,32 +507,52 @@ export default function HomeScreen() {
       const guest = await checkIsGuestMode();
       if (guest) {
         setUserName('User');
+        setUserRole('owner');
         return;
+      }
+
+      const stripUserSuffix = (name: string) => {
+        if (!name) return '';
+        const trimmed = name.trim();
+        // Remove trailing " User" if it was erroneously appended
+        return trimmed.replace(/\s+user$/i, '').trim() || trimmed;
+      };
+
+      const role = await AsyncStorage.getItem('user_role');
+      if (role) {
+        setUserRole(role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
       }
 
       // 1. Stored name from login/signup
       const storedName = await AsyncStorage.getItem('userName');
-      if (storedName && storedName.trim() && storedName.toLowerCase() !== 'user') {
-        setUserName(storedName.trim());
-        return;
+      if (storedName && storedName.trim()) {
+        const cleaned = stripUserSuffix(storedName);
+        if (cleaned && cleaned.toLowerCase() !== 'user') {
+          setUserName(cleaned);
+          return;
+        }
       }
 
       // 2. Saved userData JSON
       const userData = await AsyncStorage.getItem('userData');
       if (userData) {
         const parsed = JSON.parse(userData);
-        const combined = `${parsed.first_name || ''} ${parsed.last_name || ''}`.trim();
+        const rawFirst = parsed.first_name || '';
+        const rawLast = (parsed.last_name || '').toLowerCase() === 'user' ? '' : (parsed.last_name || '');
+        const combined = stripUserSuffix(`${rawFirst} ${rawLast}`.trim());
         if (combined && combined.toLowerCase() !== 'user') {
           setUserName(combined);
           await AsyncStorage.setItem('userName', combined);
           return;
         }
         if (parsed.name && parsed.name.toLowerCase() !== 'user') {
-          setUserName(parsed.name);
+          const cleanedName = stripUserSuffix(parsed.name);
+          setUserName(cleanedName);
           return;
         }
         if (parsed.fullName && parsed.fullName.toLowerCase() !== 'user') {
-          setUserName(parsed.fullName);
+          const cleanedFullName = stripUserSuffix(parsed.fullName);
+          setUserName(cleanedFullName);
           return;
         }
       }
@@ -439,7 +560,9 @@ export default function HomeScreen() {
       // 3. Fallback: fetch profile from backend
       try {
         const profileData = await apiGetProfile();
-        const pName = `${profileData?.first_name || ''} ${profileData?.last_name || ''}`.trim();
+        const rawFirst = profileData?.first_name || '';
+        const rawLast = (profileData?.last_name || '').toLowerCase() === 'user' ? '' : (profileData?.last_name || '');
+        const pName = stripUserSuffix(`${rawFirst} ${rawLast}`.trim());
         if (pName) {
           setUserName(pName);
           await AsyncStorage.setItem('userName', pName);
@@ -713,12 +836,26 @@ export default function HomeScreen() {
       activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/tasks', params: { date: item.date } })}
     >
-      <View style={[styles.taskIcon, { backgroundColor: (item.color || colors.primary) + '20' }]}>
-        <Ionicons name={(item.icon as any) || 'checkbox-outline'} size={20} color={item.color || colors.primary} />
+      <View style={[styles.taskIcon, { backgroundColor: item.completed ? '#4CAF5020' : (item.color || colors.primary) + '20' }]}>
+        <Ionicons name={(item.icon as any) || 'checkbox-outline'} size={20} color={item.completed ? '#4CAF50' : (item.color || colors.primary)} />
       </View>
       <View style={styles.taskContent}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Text style={[styles.taskTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
+          <Text
+            style={[
+              styles.taskTitle,
+              { color: item.completed ? colors.textLight : colors.text },
+              item.completed && { textDecorationLine: 'line-through' },
+            ]}
+            numberOfLines={1}
+          >
+            {item.title}
+          </Text>
+          {item.completed && (
+            <View style={{ backgroundColor: '#4CAF5018', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+              <Text style={{ color: '#4CAF50', fontSize: 10, fontWeight: '800' }}>DONE</Text>
+            </View>
+          )}
           {item.farm_name && (
             <View style={[styles.taskHomeFarmBadge, { backgroundColor: colors.primary + '18' }]}>
               <FarmIcon size={11} color={colors.primary} />
@@ -733,9 +870,27 @@ export default function HomeScreen() {
             item.assignee_name ? `Assigned: ${item.assignee_name}` : null
           ].filter(Boolean).join(' · ')}
         </Text>
+        {item.completed && (
+          <Text style={{ fontSize: 10, color: '#4CAF50', fontWeight: '600', marginTop: 2 }}>
+            ✓ Done {item.completer_name ? `by ${item.completer_name}` : ''}
+          </Text>
+        )}
       </View>
-      <TouchableOpacity style={[styles.taskAction, { backgroundColor: colors.primary + '18' }]} onPress={() => handleCompleteTask(item)}>
-        <Text style={[styles.taskActionText, { color: colors.primary }]}>Complete</Text>
+      <TouchableOpacity
+        style={[
+          styles.taskAction,
+          {
+            backgroundColor: item.completed ? '#4CAF5018' : colors.primary + '18',
+            opacity: togglingTaskId === item.id ? 0.6 : 1,
+          },
+        ]}
+        onPress={() => handleCompleteTask(item)}
+        disabled={togglingTaskId === item.id}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.taskActionText, { color: item.completed ? '#4CAF50' : colors.primary }]}>
+          {togglingTaskId === item.id ? 'Saving…' : item.completed ? 'Done ✓' : 'Complete'}
+        </Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -750,6 +905,14 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
       >
         {/* ===================== Header ===================== */}
         <View style={styles.headerRow}>
@@ -808,8 +971,8 @@ export default function HomeScreen() {
             style={[
               styles.homePlanPill,
               {
-                backgroundColor: subscription.plan === 'premium' ? '#FEF3C7' : subscription.plan === 'pro' ? '#E8F5E9' : colors.card,
-                borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? '#A5D6A7' : colors.divider,
+                backgroundColor: subscription.plan === 'premium' ? (isDarkMode ? '#2D2415' : '#FEF3C7') : subscription.plan === 'pro' ? colors.badgeBackground : colors.card,
+                borderColor: subscription.plan === 'premium' ? '#F59E0B' : subscription.plan === 'pro' ? colors.primary : colors.divider,
               },
             ]}
             onPress={() => router.push('/subscription')}
@@ -818,7 +981,7 @@ export default function HomeScreen() {
             <FontAwesome5
               name={subscription.plan === 'premium' ? 'crown' : subscription.plan === 'pro' ? 'award' : 'seedling'}
               size={13}
-              color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? '#2E7D32' : '#7C3AED'}
+              color={subscription.plan === 'premium' ? '#D97706' : subscription.plan === 'pro' ? colors.primary : '#7C3AED'}
             />
             <Text style={[styles.homePlanPillText, { color: colors.text }]}>
               <Text style={{ fontWeight: '700' }}>{subscription.plan_name}</Text>
@@ -977,9 +1140,9 @@ export default function HomeScreen() {
                   Instant AI based health check{'\n'}right from your camera.
                 </Text>
                 <View style={styles.promoActionRow}>
-                  <View style={styles.promoButton}>
-                    <Ionicons name="scan-outline" size={16} color="#1B5E20" />
-                    <Text style={styles.promoButtonText}>Scan Now</Text>
+                  <View style={[styles.promoButton, { backgroundColor: isDarkMode ? '#8FE0B0' : '#FFFFFF' }]}>
+                    <Ionicons name="scan-outline" size={16} color={isDarkMode ? '#0E1210' : '#2D5541'} />
+                    <Text style={[styles.promoButtonText, { color: isDarkMode ? '#0E1210' : '#2D5541' }]}>Scan Now</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.promoGuideChip}
@@ -1124,7 +1287,7 @@ export default function HomeScreen() {
             >
               <Ionicons name="calendar-outline" size={26} color={colors.textLight} />
               <Text style={[styles.emptyTasksText, { color: colors.textSecondary }]}>
-                No upcoming tasks — tap to add one
+                {userRole === 'caretaker' ? 'No tasks assigned to you' : 'No upcoming tasks — tap to add one'}
               </Text>
             </TouchableOpacity>
           )}
@@ -1331,21 +1494,26 @@ export default function HomeScreen() {
           }
         }}
       />
+
+      <FarmOnboardingModal
+        visible={showFarmOnboarding}
+        onStartCreateFarm={handleStartCreateFarm}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 16, paddingHorizontal: 16 },
+  scrollContent: { flexGrow: 1, paddingBottom: 95, paddingHorizontal: 16 },
 
   // --- Header ---
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 10,
-    marginBottom: 18,
+    paddingTop: 24,
+    marginBottom: 14,
   },
   greeting: { fontSize: 14 },
   userName: { fontSize: 22, fontWeight: 'bold', marginTop: 2 },
@@ -1551,7 +1719,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 22,
   },
-  promoButtonText: { color: '#1B5E20', fontSize: 14, fontWeight: '700' },
+  promoButtonText: { color: '#2D5541', fontSize: 14, fontWeight: '700' },
   promoGuideChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1901,12 +2069,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    marginTop: 10,
-    marginBottom: 4,
+    marginTop: 0,
+    marginBottom: 10,
     gap: 8,
   },
   homePlanPillText: {
     fontSize: 12,
     flex: 1,
   },
-});
+});

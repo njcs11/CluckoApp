@@ -97,12 +97,32 @@ class PostgresCursorWrapper:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+import threading
+from psycopg2 import pool
+
+_pool_lock = threading.Lock()
+_connection_pool = None
+
+def get_pool():
+    global _connection_pool
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:
+                _connection_pool = pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=20,
+                    **SUPABASE_CONFIG
+                )
+    return _connection_pool
+
 class PostgresConnectionWrapper:
     """
     Transparent wrapper around psycopg2 connection matching PyMySQL connection interface.
     """
-    def __init__(self, conn):
+    def __init__(self, conn, db_pool=None):
         self._conn = conn
+        self._pool = db_pool
+        self._is_closed = False
 
     def cursor(self, *args, **kwargs):
         cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -112,10 +132,30 @@ class PostgresConnectionWrapper:
         return self._conn.commit()
 
     def rollback(self):
-        return self._conn.rollback()
+        try:
+            return self._conn.rollback()
+        except Exception:
+            pass
 
     def close(self):
-        return self._conn.close()
+        if self._is_closed:
+            return
+        self._is_closed = True
+        if self._pool is not None:
+            try:
+                if not self._conn.closed:
+                    self._conn.rollback()
+                self._pool.putconn(self._conn)
+            except Exception:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+        else:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
 
     def __enter__(self):
         return self
@@ -128,8 +168,20 @@ class PostgresConnectionWrapper:
         self.close()
 
 def get_db():
-    conn = psycopg2.connect(**SUPABASE_CONFIG)
-    return PostgresConnectionWrapper(conn)
+    try:
+        p = get_pool()
+        conn = p.getconn()
+        if conn.closed != 0:
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+            conn = p.getconn()
+        return PostgresConnectionWrapper(conn, db_pool=p)
+    except Exception:
+        # Fallback to direct connection if pool is temporarily unavailable or exhausted
+        conn = psycopg2.connect(**SUPABASE_CONFIG)
+        return PostgresConnectionWrapper(conn, db_pool=None)
 
 import time
 

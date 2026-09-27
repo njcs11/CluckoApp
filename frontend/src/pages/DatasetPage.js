@@ -23,6 +23,7 @@ import {
   Film,
   Sparkles
 } from 'lucide-react';
+import { EyeModuleIcon, WingModuleIcon } from '../components/icons';
 import './DatasetPage.css';
 
 export default function DatasetPage() {
@@ -30,7 +31,7 @@ export default function DatasetPage() {
   const [stats, setStats] = useState({});
   const [selectedModule, setSelectedModule] = useState('eye');
   const [selectedDisease, setSelectedDisease] = useState('');
-  
+
   // Upload State
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -318,10 +319,12 @@ export default function DatasetPage() {
               if (first) setSelectedDisease(first.id);
             }}
           >
-            <span className="module-tab-icon">👁️</span>
+            <span className="module-tab-icon-wrap">
+              <EyeModuleIcon size={20} color={selectedModule === 'eye' ? '#22c55e' : '#8f949a'} />
+            </span>
             <div className="module-tab-text">
               <span className="module-tab-title">Eye & Head Module</span>
-              <span className="module-tab-subtitle">Infectious Coryza, Fowl Pox, Marek's, Healthy Eye</span>
+              <span className="module-tab-subtitle">Infectious Coryza, Fowl Pox, Healthy Eye</span>
             </div>
           </button>
 
@@ -333,7 +336,9 @@ export default function DatasetPage() {
               if (first) setSelectedDisease(first.id);
             }}
           >
-            <span className="module-tab-icon">🪶</span>
+            <span className="module-tab-icon-wrap">
+              <WingModuleIcon size={20} color={selectedModule === 'wing' ? '#22c55e' : '#8f949a'} />
+            </span>
             <div className="module-tab-text">
               <span className="module-tab-title">Wing & Posture Module</span>
               <span className="module-tab-subtitle">Newcastle Disease, Wing Droop, Healthy Wing</span>
@@ -346,8 +351,9 @@ export default function DatasetPage() {
         {/* Left Column: Disease Classes Selector & Health Status */}
         <div className="card stats-panel">
           <div className="card-title-row">
-            <span className="card-title">
-              {selectedModule === 'eye' ? '👁️ Eye Classes' : '🪶 Wing Classes'}
+            <span className="card-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {selectedModule === 'eye' ? <EyeModuleIcon size={18} color="#22c55e" /> : <WingModuleIcon size={18} color="#22c55e" />}
+              <span>{selectedModule === 'eye' ? 'Eye Classes' : 'Wing Classes'}</span>
             </span>
             <span className="class-count-badge">{moduleDiseases.length} Classes</span>
           </div>
@@ -420,8 +426,9 @@ export default function DatasetPage() {
                 <div className="hint-label">Target Dataset Class:</div>
                 <div className="hint-val" style={{ color: selectedDiseaseObj.color }}>
                   {selectedDiseaseObj.name}
-                  <span className="hint-module-tag">
-                    {selectedModule === 'eye' ? '👁️ Eye Module' : '🪶 Wing Module'}
+                  <span className="hint-module-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    {selectedModule === 'eye' ? <EyeModuleIcon size={13} color="currentColor" /> : <WingModuleIcon size={13} color="currentColor" />}
+                    <span>{selectedModule === 'eye' ? 'Eye Module' : 'Wing Module'}</span>
                   </span>
                 </div>
               </div>
@@ -678,7 +685,9 @@ export default function DatasetPage() {
 
                   {failedImages.has(img.filename) && (
                     <div className="broken-file-card-action animate-in">
-                      <span className="broken-file-badge">⚠️ Unreadable File</span>
+                      <span className="broken-file-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <AlertCircle size={12} /> Unreadable File
+                      </span>
                       <button
                         className="btn btn-danger btn-xs delete-broken-btn"
                         onClick={(e) => handleDeleteSingle(img.filename, e)}

@@ -22,12 +22,14 @@ interface AboutUsModalProps {
 }
 
 export default function AboutUsModal({ visible, onClose, isDarkMode = false }: AboutUsModalProps) {
-  const bgCard = isDarkMode ? '#1E1E1E' : '#FFFFFF';
-  const textPrimary = isDarkMode ? '#FFFFFF' : '#1A1A1A';
-  const textSecondary = isDarkMode ? '#CCCCCC' : '#555555';
-  const textMuted = isDarkMode ? '#888888' : '#777777';
-  const cardSectionBg = isDarkMode ? '#282828' : '#F7F9F7';
-  const borderCol = isDarkMode ? '#383838' : '#E8ECE8';
+  const primaryBrand = isDarkMode ? '#8FE0B0' : '#2D5541';
+  const primaryBrandText = isDarkMode ? '#0E1210' : '#FFFFFF';
+  const bgCard = isDarkMode ? '#18231E' : '#FFFFFF';
+  const textPrimary = isDarkMode ? '#EAF2EC' : '#1A1A1A';
+  const textSecondary = isDarkMode ? '#A6C5B5' : '#555555';
+  const textMuted = isDarkMode ? '#7F9489' : '#777777';
+  const cardSectionBg = isDarkMode ? '#202D26' : '#F7F9F7';
+  const borderCol = isDarkMode ? '#2D3D34' : '#E8ECE8';
 
   return (
     <Modal
@@ -43,8 +45,8 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
               {/* Header */}
               <View style={[styles.headerRow, { borderBottomColor: borderCol }]}>
                 <View style={styles.headerLeft}>
-                  <View style={styles.appBadge}>
-                    <ChickenIcon size={24} color="#2E7D32" />
+                  <View style={[styles.appBadge, { backgroundColor: isDarkMode ? '#202D26' : '#EAF2EC' }]}>
+                    <ChickenIcon size={24} color={primaryBrand} />
                   </View>
                   <View>
                     <Text style={[styles.appTitle, { color: textPrimary }]}>About Clucko</Text>
@@ -53,7 +55,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
                 </View>
                 <TouchableOpacity
                   onPress={onClose}
-                  style={[styles.closeCircle, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}
+                  style={[styles.closeCircle, { backgroundColor: isDarkMode ? '#28352F' : '#F0F0F0' }]}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Ionicons name="close" size={20} color={textSecondary} />
@@ -67,8 +69,8 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
               >
                 {/* Mission & Overview */}
                 <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
-                  <Text style={[styles.sectionTitle, { color: '#2E7D32' }]}>
-                    <Ionicons name="sparkles-outline" size={16} color="#2E7D32" /> App Mission & Overview
+                  <Text style={[styles.sectionTitle, { color: primaryBrand }]}>
+                    <Ionicons name="sparkles-outline" size={16} color={primaryBrand} /> App Mission & Overview
                   </Text>
                   <Text style={[styles.bodyText, { color: textSecondary }]}>
                     Clucko is an intelligent mobile platform engineered specifically for poultry farmers, gamefowl breeders, and caretakers.
@@ -79,12 +81,12 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
                 {/* Core Features */}
                 <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
                   <Text style={[styles.sectionTitle, { color: textPrimary }]}>
-                    <Ionicons name="grid-outline" size={16} color="#2E7D32" /> Key Capabilities
+                    <Ionicons name="grid-outline" size={16} color={primaryBrand} /> Key Capabilities
                   </Text>
 
                   <View style={styles.featureItem}>
                     <View style={styles.featureIconWrap}>
-                      <Ionicons name="camera-outline" size={16} color="#2E7D32" />
+                      <Ionicons name="camera-outline" size={16} color={primaryBrand} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.featureHeading, { color: textPrimary }]}>AI Symptom Scanner</Text>
@@ -96,7 +98,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
 
                   <View style={styles.featureItem}>
                     <View style={styles.featureIconWrap}>
-                      <ChickenIcon size={16} color="#2E7D32" />
+                      <ChickenIcon size={16} color={primaryBrand} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.featureHeading, { color: textPrimary }]}>Flock Management</Text>
@@ -108,7 +110,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
 
                   <View style={styles.featureItem}>
                     <View style={styles.featureIconWrap}>
-                      <FarmIcon size={16} color="#2E7D32" />
+                      <FarmIcon size={16} color={primaryBrand} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.featureHeading, { color: textPrimary }]}>Multi-Farm & Caretakers</Text>
@@ -120,7 +122,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
 
                   <View style={[styles.featureItem, { marginBottom: 0 }]}>
                     <View style={styles.featureIconWrap}>
-                      <Ionicons name="stats-chart-outline" size={16} color="#2E7D32" />
+                      <Ionicons name="stats-chart-outline" size={16} color={primaryBrand} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.featureHeading, { color: textPrimary }]}>Health Analytics & Reports</Text>
@@ -162,7 +164,7 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
                 {/* Biosecurity Tips */}
                 <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
                   <Text style={[styles.sectionTitle, { color: textPrimary }]}>
-                    <Ionicons name="shield-checkmark-outline" size={16} color="#2E7D32" /> Farm Biosecurity Best Practices
+                    <Ionicons name="shield-checkmark-outline" size={16} color={primaryBrand} /> Farm Biosecurity Best Practices
                   </Text>
                   <Text style={[styles.bulletItem, { color: textSecondary }]}>
                     ✓ Always quarantine newly acquired or arriving birds for 14–21 days.
@@ -186,11 +188,11 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
               {/* Bottom Done Button */}
               <View style={[styles.bottomBar, { borderTopColor: borderCol }]}>
                 <TouchableOpacity
-                  style={styles.doneBtn}
+                  style={[styles.doneBtn, { backgroundColor: primaryBrand }]}
                   onPress={onClose}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.doneBtnText}>Close</Text>
+                  <Text style={[styles.doneBtnText, { color: primaryBrandText }]}>Close</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -363,7 +365,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   doneBtn: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#2D5541',
     borderRadius: 24,
     paddingVertical: 12,
     alignItems: 'center',

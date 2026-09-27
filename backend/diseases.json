@@ -83,20 +83,6 @@
       "module": "wing",
       "severity": "critical",
       "color": "#dc2626"
-    },
-    {
-      "id": "mareks_disease",
-      "name": "Mareks Disease",
-      "description": "",
-      "symptoms": [
-        "drooping_wings",
-        "severe_droop",
-        "wing_weakness"
-      ],
-      "affected_parts": [],
-      "module": "wing",
-      "severity": "high",
-      "color": "#f87171"
     }
   ]
 }

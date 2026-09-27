@@ -78,60 +78,31 @@ def get_tasks():
 
             placeholders = ', '.join(['%s'] * len(target_farm_ids))
 
-            # Role-specific filtering:
-            # Owners see all tasks across target farms.
-            # Caretakers only see tasks for their farm that are either assigned to them OR open (assigned_to IS NULL).
-            if global_role == 'owner':
-                query = f'''
-                    SELECT 
-                        t.id, t.farm_id, f.farm_name,
-                        t.created_by_user_id,
-                        CONCAT(u_c.first_name, ' ', COALESCE(u_c.last_name, '')) AS creator_name,
-                        u_c.role AS creator_role,
-                        t.assigned_to_user_id,
-                        CONCAT(u_a.first_name, ' ', COALESCE(u_a.last_name, '')) AS assignee_name,
-                        u_a.role AS assignee_role,
-                        t.title, t.description, t.due_date, t.due_time,
-                        t.color, t.icon, t.completed,
-                        t.completed_by_user_id,
-                        CONCAT(u_comp.first_name, ' ', COALESCE(u_comp.last_name, '')) AS completer_name,
-                        u_comp.role AS completer_role,
-                        t.completed_at, t.created_at, t.updated_at
-                    FROM tasks t
-                    JOIN farms f ON f.id = t.farm_id
-                    LEFT JOIN users u_c ON u_c.id = t.created_by_user_id
-                    LEFT JOIN users u_a ON u_a.id = t.assigned_to_user_id
-                    LEFT JOIN users u_comp ON u_comp.id = t.completed_by_user_id
-                    WHERE t.farm_id IN ({placeholders})
-                    ORDER BY t.due_date ASC, t.created_at DESC
-                '''
-                cur.execute(query, tuple(target_farm_ids))
-            else:
-                query = f'''
-                    SELECT 
-                        t.id, t.farm_id, f.farm_name,
-                        t.created_by_user_id,
-                        CONCAT(u_c.first_name, ' ', COALESCE(u_c.last_name, '')) AS creator_name,
-                        u_c.role AS creator_role,
-                        t.assigned_to_user_id,
-                        CONCAT(u_a.first_name, ' ', COALESCE(u_a.last_name, '')) AS assignee_name,
-                        u_a.role AS assignee_role,
-                        t.title, t.description, t.due_date, t.due_time,
-                        t.color, t.icon, t.completed,
-                        t.completed_by_user_id,
-                        CONCAT(u_comp.first_name, ' ', COALESCE(u_comp.last_name, '')) AS completer_name,
-                        u_comp.role AS completer_role,
-                        t.completed_at, t.created_at, t.updated_at
-                    FROM tasks t
-                    JOIN farms f ON f.id = t.farm_id
-                    LEFT JOIN users u_c ON u_c.id = t.created_by_user_id
-                    LEFT JOIN users u_a ON u_a.id = t.assigned_to_user_id
-                    LEFT JOIN users u_comp ON u_comp.id = t.completed_by_user_id
-                    WHERE t.farm_id IN ({placeholders})
-                      AND (t.assigned_to_user_id = %s OR t.assigned_to_user_id IS NULL)
-                    ORDER BY t.due_date ASC, t.created_at DESC
-                '''
-                cur.execute(query, (*target_farm_ids, request.user_id))
+            # Both Owners and Caretakers see all tasks across target farms.
+            query = f'''
+                SELECT 
+                    t.id, t.farm_id, f.farm_name,
+                    t.created_by_user_id,
+                    CONCAT(u_c.first_name, ' ', COALESCE(u_c.last_name, '')) AS creator_name,
+                    u_c.role AS creator_role,
+                    t.assigned_to_user_id,
+                    CONCAT(u_a.first_name, ' ', COALESCE(u_a.last_name, '')) AS assignee_name,
+                    u_a.role AS assignee_role,
+                    t.title, t.description, t.due_date, t.due_time,
+                    t.color, t.icon, t.completed,
+                    t.completed_by_user_id,
+                    CONCAT(u_comp.first_name, ' ', COALESCE(u_comp.last_name, '')) AS completer_name,
+                    u_comp.role AS completer_role,
+                    t.completed_at, t.created_at, t.updated_at
+                FROM tasks t
+                JOIN farms f ON f.id = t.farm_id
+                LEFT JOIN users u_c ON u_c.id = t.created_by_user_id
+                LEFT JOIN users u_a ON u_a.id = t.assigned_to_user_id
+                LEFT JOIN users u_comp ON u_comp.id = t.completed_by_user_id
+                WHERE t.farm_id IN ({placeholders})
+                ORDER BY t.due_date ASC, t.created_at DESC
+            '''
+            cur.execute(query, tuple(target_farm_ids))
 
             rows = cur.fetchall()
             results = []
@@ -157,8 +128,9 @@ def get_tasks():
                     'completed_by_user_id': r['completed_by_user_id'],
                     'completer_name': (r['completer_name'] or '').strip() if r['completed_by_user_id'] else None,
                     'completer_role': (r['completer_role'] or '').capitalize() if r['completed_by_user_id'] else None,
-                    'completed_at': r['completed_at'].isoformat() if r['completed_at'] else None,
-                    'created_at': r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at']),
+                    'completed_at': r['completed_at'].isoformat() if r['completed_at'] and hasattr(r['completed_at'], 'isoformat') else (str(r['completed_at']) if r['completed_at'] else None),
+                    'created_at': r['created_at'].isoformat() if r['created_at'] and hasattr(r['created_at'], 'isoformat') else (str(r['created_at']) if r['created_at'] else None),
+                    'createdAt': r['created_at'].isoformat() if r['created_at'] and hasattr(r['created_at'], 'isoformat') else (str(r['created_at']) if r['created_at'] else None),
                 })
             return jsonify(results)
     finally:
@@ -187,6 +159,11 @@ def create_task():
     db = get_db()
     try:
         with db.cursor() as cur:
+            cur.execute('SELECT role FROM users WHERE id=%s', (request.user_id,))
+            u_role = cur.fetchone()
+            if u_role and u_role.get('role') == 'caretaker':
+                return jsonify({'error': 'Caretakers cannot create tasks. Only farm owners can schedule tasks.'}), 403
+
             accessible = _get_accessible_farms(cur, request.user_id)
             if not accessible:
                 return jsonify({'error': 'User has no farm access'}), 403
@@ -289,15 +266,6 @@ def toggle_task_complete(task_id):
             if task['farm_id'] not in accessible:
                 return jsonify({'error': 'No access to this farm'}), 403
 
-            # Check completion permission:
-            # Farm owner, task creator, or assigned caretaker (or any farm caretaker if unassigned)
-            is_owner = task['owner_id'] == request.user_id
-            is_creator = task['created_by_user_id'] == request.user_id
-            is_assignee = task['assigned_to_user_id'] == request.user_id or task['assigned_to_user_id'] is None
-
-            if not (is_owner or is_creator or is_assignee):
-                return jsonify({'error': 'You are not assigned to complete this task'}), 403
-
             current_completed = bool(task['completed'])
             new_completed = not current_completed
 
@@ -307,12 +275,13 @@ def toggle_task_complete(task_id):
             u_name = f"{u_row['first_name']} {u_row['last_name'] or ''}".strip() if u_row else 'User'
             u_role = (u_row['role'] if u_row else 'member').capitalize()
 
+            now_ts = datetime.utcnow()
             if new_completed:
                 cur.execute('''
                     UPDATE tasks
-                    SET completed = TRUE, completed_by_user_id = %s, completed_at = NOW()
+                    SET completed = TRUE, completed_by_user_id = %s, completed_at = %s
                     WHERE id = %s
-                ''', (request.user_id, task_id))
+                ''', (request.user_id, now_ts, task_id))
 
                 # Post completion notification
                 notif_title = f"Task Completed: {task['title']}"
@@ -336,6 +305,7 @@ def toggle_task_complete(task_id):
                 'completed_by_user_id': request.user_id if new_completed else None,
                 'completer_name': u_name if new_completed else None,
                 'completer_role': u_role if new_completed else None,
+                'completed_at': now_ts.isoformat() if new_completed else None,
             })
     except Exception as e:
         db.rollback()
@@ -361,8 +331,13 @@ def update_task(task_id):
             if not task:
                 return jsonify({'error': 'Task not found'}), 404
 
+            cur.execute('SELECT role FROM users WHERE id=%s', (request.user_id,))
+            u_role = cur.fetchone()
+            if u_role and u_role.get('role') == 'caretaker':
+                return jsonify({'error': 'Caretakers cannot edit task details.'}), 403
+
             # Must be farm owner or creator
-            if task['owner_id'] != request.user_id and task['created_by_user_id'] != request.user_id:
+            if int(task['owner_id']) != int(request.user_id) and (not task['created_by_user_id'] or int(task['created_by_user_id']) != int(request.user_id)):
                 return jsonify({'error': 'Only the farm owner or creator can edit this task'}), 403
 
             title = d.get('title', task['title'])
@@ -393,6 +368,11 @@ def delete_task(task_id):
     db = get_db()
     try:
         with db.cursor() as cur:
+            cur.execute('SELECT role FROM users WHERE id=%s', (request.user_id,))
+            u_role = cur.fetchone()
+            if u_role and u_role.get('role') == 'caretaker':
+                return jsonify({'error': 'Caretakers cannot delete tasks.'}), 403
+
             cur.execute('''
                 SELECT t.*, f.owner_id FROM tasks t
                 JOIN farms f ON f.id = t.farm_id
@@ -402,7 +382,7 @@ def delete_task(task_id):
             if not task:
                 return jsonify({'error': 'Task not found'}), 404
 
-            if task['owner_id'] != request.user_id and task['created_by_user_id'] != request.user_id:
+            if int(task['owner_id']) != int(request.user_id) and (not task['created_by_user_id'] or int(task['created_by_user_id']) != int(request.user_id)):
                 return jsonify({'error': 'Only the farm owner or creator can delete this task'}), 403
 
             cur.execute('DELETE FROM tasks WHERE id = %s', (task_id,))

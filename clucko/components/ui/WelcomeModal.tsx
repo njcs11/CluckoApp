@@ -14,7 +14,7 @@ export default function WelcomeModal({ visible, userName, onClose }: WelcomeModa
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.iconCircle}>
-            <Ionicons name="sparkles" size={40} color="#2e7d32" />
+            <Ionicons name="sparkles" size={40} color="#2D5541" />
           </View>
           <Text style={styles.title}>Welcome to Clucko, {userName}! 🎉</Text>
           <Text style={styles.message}>
@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EAF2EC',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: '#2D5541',
     textAlign: 'center',
     marginBottom: 10,
   },
@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   button: {
-    backgroundColor: '#2e7d32',
+    backgroundColor: '#2D5541',
     borderRadius: 30,
     paddingVertical: 14,
     width: '100%',

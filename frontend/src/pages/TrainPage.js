@@ -18,12 +18,11 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useTrain } from '../context/TrainContext';
+import { PipelineActivityIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
 import './TrainPage.css';
 
 export default function TrainPage() {
-  const { trainStatus, startTraining, resetTraining, refreshStatus } = useTrain();
-
-  const [activeModule, setActiveModule] = useState('eye');
+  const { trainStatus, activeModule, setActiveModule, startTraining, resetTraining, refreshStatus } = useTrain();
   const [modelStatus, setModelStatus] = useState(null);
   const [stats, setStats] = useState({});
   const [diseases, setDiseases] = useState([]);
@@ -99,17 +98,17 @@ export default function TrainPage() {
     { key: 'Completed', label: 'Complete' }
   ];
 
-  const getStageIndex = (stage) => {
-    if (!stage) return -1;
+  const getStageIndex = (stage, status) => {
+    if (!stage || status === 'idle' || stage === 'Idle') return -1;
     if (stage.includes('Preprocessing') || stage.includes('Scanning') || stage.includes('Initializing')) return 0;
     if (stage.includes('Phase 1')) return 1;
     if (stage.includes('Phase 2')) return 2;
     if (stage.includes('Evaluating') || stage.includes('Saving')) return 3;
     if (stage.includes('Completed')) return 4;
-    return 1;
+    return -1;
   };
 
-  const currentStageIndex = getStageIndex(currentModuleState.stage);
+  const currentStageIndex = getStageIndex(currentModuleState.stage, currentModuleState.status);
 
   return (
     <div className="page train-page">
@@ -129,7 +128,9 @@ export default function TrainPage() {
             className={`module-tab-btn ${activeModule === 'eye' ? 'active' : ''}`}
             onClick={() => setActiveModule('eye')}
           >
-            <span className="module-tab-icon">👁️</span>
+            <span className="module-tab-icon-wrap">
+              <EyeModuleIcon size={20} color={activeModule === 'eye' ? '#22c55e' : '#8f949a'} />
+            </span>
             <div className="module-tab-text">
               <span className="module-tab-title">Eye Classification Model</span>
               <span className="module-tab-subtitle">
@@ -143,7 +144,9 @@ export default function TrainPage() {
             className={`module-tab-btn ${activeModule === 'wing' ? 'active' : ''}`}
             onClick={() => setActiveModule('wing')}
           >
-            <span className="module-tab-icon">🪶</span>
+            <span className="module-tab-icon-wrap">
+              <WingModuleIcon size={20} color={activeModule === 'wing' ? '#22c55e' : '#8f949a'} />
+            </span>
             <div className="module-tab-text">
               <span className="module-tab-title">Wing & Posture Model</span>
               <span className="module-tab-subtitle">
@@ -162,7 +165,7 @@ export default function TrainPage() {
           <div className="card model-status-card">
             <div className="card-title-row">
               <span className="card-title">
-                {activeModule === 'eye' ? '👁️ Eye Model Status' : '🪶 Wing Model Status'}
+                {activeModule === 'eye' ? 'Eye Model Status' : 'Wing Model Status'}
               </span>
               <button className="btn btn-secondary icon-btn-sm" onClick={loadData} title="Refresh status">
                 <RefreshCw size={13} />
@@ -223,7 +226,7 @@ export default function TrainPage() {
                       <div
                         className="balance-bar-fill"
                         style={{
-                          width: `${Math.min(100, Math.max(4, pct))}%`,
+                          width: `${count === 0 ? 0 : Math.min(100, Math.max(4, pct))}%`,
                           background: d.color || '#4ade80'
                         }}
                       />
@@ -252,53 +255,74 @@ export default function TrainPage() {
               <span className="param-badge">MobileNetV2 Transfer</span>
             </div>
 
-            <div className="params-grid">
-              <div className="param-item">
-                <label>Training Epochs:</label>
-                <div className="param-btn-group">
-                  {[10, 20, 30].map(val => (
+            <div className="params-stack">
+              <div className="param-group">
+                <div className="param-header-row">
+                  <span className="param-label">Training Epochs</span>
+                  <span className="param-val-pill">{epochs} Epochs {epochs === 10 ? '• Fast' : epochs === 20 ? '• Balanced' : '• Deep'}</span>
+                </div>
+                <div className="param-seg-group">
+                  {[
+                    { val: 10, label: '10 (Fast)' },
+                    { val: 20, label: '20 (Balanced)' },
+                    { val: 30, label: '30 (Deep)' }
+                  ].map(item => (
                     <button
-                      key={val}
+                      key={item.val}
                       type="button"
-                      className={`param-chip ${epochs === val ? 'param-chip-active' : ''}`}
-                      onClick={() => setEpochs(val)}
+                      className={`param-seg-btn ${epochs === item.val ? 'active' : ''}`}
+                      onClick={() => setEpochs(item.val)}
                       disabled={isCurrentTraining}
                     >
-                      {val} {val === 10 ? '(Fast)' : val === 20 ? '(Balanced)' : '(Deep)'}
+                      {item.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="param-item">
-                <label>Batch Size:</label>
-                <div className="param-btn-group">
-                  {[8, 16, 32].map(val => (
+              <div className="param-group">
+                <div className="param-header-row">
+                  <span className="param-label">Batch Size</span>
+                  <span className="param-val-pill">{batchSize} Images / Step</span>
+                </div>
+                <div className="param-seg-group">
+                  {[
+                    { val: 8, label: '8 (Small)' },
+                    { val: 16, label: '16 (Recommended)' },
+                    { val: 32, label: '32 (Large)' }
+                  ].map(item => (
                     <button
-                      key={val}
+                      key={item.val}
                       type="button"
-                      className={`param-chip ${batchSize === val ? 'param-chip-active' : ''}`}
-                      onClick={() => setBatchSize(val)}
+                      className={`param-seg-btn ${batchSize === item.val ? 'active' : ''}`}
+                      onClick={() => setBatchSize(item.val)}
                       disabled={isCurrentTraining}
                     >
-                      {val}
+                      {item.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="param-item">
-                <label>Learning Rate:</label>
-                <div className="param-btn-group">
-                  {[0.001, 0.0001, 0.00001].map(val => (
+              <div className="param-group">
+                <div className="param-header-row">
+                  <span className="param-label">Learning Rate</span>
+                  <span className="param-val-pill">{learningRate === 0.001 ? '1e-3 (Fast)' : learningRate === 0.0001 ? '1e-4 (Optimal)' : '1e-5 (Fine)'}</span>
+                </div>
+                <div className="param-seg-group">
+                  {[
+                    { val: 0.001, label: '1e-3 (Fast)' },
+                    { val: 0.0001, label: '1e-4 (Optimal)' },
+                    { val: 0.00001, label: '1e-5 (Fine)' }
+                  ].map(item => (
                     <button
-                      key={val}
+                      key={item.val}
                       type="button"
-                      className={`param-chip ${learningRate === val ? 'param-chip-active' : ''}`}
-                      onClick={() => setLearningRate(val)}
+                      className={`param-seg-btn ${learningRate === item.val ? 'active' : ''}`}
+                      onClick={() => setLearningRate(item.val)}
                       disabled={isCurrentTraining}
                     >
-                      {val.toExponential()}
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -334,7 +358,7 @@ export default function TrainPage() {
           <div className="card live-progress-card">
             <div className="card-title-row">
               <div className="progress-title-wrap">
-                <Activity size={16} color={isCurrentTraining ? '#4ade80' : '#94a3b8'} className={isCurrentTraining ? 'pulse-icon' : ''} />
+                <PipelineActivityIcon size={20} active={isCurrentTraining} color={isCurrentTraining ? '#22c55e' : '#8f949a'} />
                 <span className="card-title">Training Execution Pipeline</span>
               </div>
               <span className={`status-pill status-pill-${currentModuleState.status}`}>
@@ -345,8 +369,8 @@ export default function TrainPage() {
             {/* Pipeline Stage Steps */}
             <div className="pipeline-steps">
               {STAGES.map((s, idx) => {
-                const isPassed = currentStageIndex > idx || currentModuleState.status === 'completed';
-                const isCurrent = currentStageIndex === idx && currentModuleState.status === 'running';
+                const isPassed = currentModuleState.status === 'completed' || (currentModuleState.status === 'running' && currentStageIndex > idx);
+                const isCurrent = currentModuleState.status === 'running' && currentStageIndex === idx;
                 return (
                   <div
                     key={s.key}
