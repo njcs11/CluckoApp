@@ -56,6 +56,8 @@ export default function SignupScreen() {
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [confirmAge, setConfirmAge] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
 
   // Field touch tracking
   const [emailTouched, setEmailTouched] = useState(false);
@@ -237,6 +239,18 @@ export default function SignupScreen() {
       confirmRef.current?.focus();
       return;
     }
+    if (!confirmAge) {
+      setFormError('You must confirm that you are at least 18 years of age.');
+      displayErrorToast('You must confirm that you are at least 18 years of age.');
+      triggerShake();
+      return;
+    }
+    if (!agreeTerms) {
+      setFormError('You must accept the Terms of Service and Privacy Policy.');
+      displayErrorToast('You must accept the Terms of Service and Privacy Policy.');
+      triggerShake();
+      return;
+    }
 
     setLoading(true);
     setFormError('');
@@ -247,6 +261,8 @@ export default function SignupScreen() {
         email: cleanEmail,
         password: form.password,
         phone_number: form.phone_number.trim(),
+        confirm_age_18: true,
+        terms_accepted: true,
       });
       await loadDarkModePreference();
 
@@ -326,11 +342,11 @@ export default function SignupScreen() {
     <SafeAreaView
       style={[
         styles.container,
-        { backgroundColor: isDarkMode ? colors.background : '#FAFAFA', paddingTop: insets.top },
+        { backgroundColor: isDarkMode ? colors.background : '#FAFAFA' },
       ]}
     >
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 36 }]}
           keyboardShouldPersistTaps="handled"
@@ -698,23 +714,62 @@ export default function SignupScreen() {
               ) : null}
             </View>
 
-            {/* Terms and Conditions Note */}
-            <Text style={[styles.termsNote, { color: colors.textSecondary }]}>
-              By tapping Create Account, you agree to Clucko&apos;s{' '}
-              <Text
-                style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
-                onPress={() => setShowTermsModal(true)}
+            {/* Legal Consent Checkboxes (RA 10173 & Age Verification) */}
+            <View style={{ marginVertical: 12, gap: 10 }}>
+              {/* Age Confirmation (18+) */}
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}
+                onPress={() => setConfirmAge(!confirmAge)}
+                activeOpacity={0.8}
               >
-                Terms of Service
-              </Text>{' '}
-              and{' '}
-              <Text
-                style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
-                onPress={() => setShowPrivacyModal(true)}
+                <Ionicons
+                  name={confirmAge ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={confirmAge ? colors.primary : colors.textLight}
+                  style={{ marginTop: 1 }}
+                />
+                <Text style={{ flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18 }}>
+                  I confirm that I am <Text style={{ fontWeight: '700', color: colors.text }}>at least 18 years of age</Text> (required for poultry &amp; gamefowl management).
+                </Text>
+              </TouchableOpacity>
+
+              {/* Terms and Privacy Policy (RA 10173) */}
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}
+                onPress={() => setAgreeTerms(!agreeTerms)}
+                activeOpacity={0.8}
               >
-                Privacy Policy
-              </Text>.
-            </Text>
+                <Ionicons
+                  name={agreeTerms ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={agreeTerms ? colors.primary : colors.textLight}
+                  style={{ marginTop: 1 }}
+                />
+                <Text style={{ flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18 }}>
+                  I agree to Clucko&apos;s{' '}
+                  <Text
+                    style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
+                    onPress={() => {
+                      setAgreeTerms(true);
+                      setShowTermsModal(true);
+                    }}
+                  >
+                    Terms of Service
+                  </Text>{' '}
+                  and{' '}
+                  <Text
+                    style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
+                    onPress={() => {
+                      setAgreeTerms(true);
+                      setShowPrivacyModal(true);
+                    }}
+                  >
+                    Privacy Policy
+                  </Text>{' '}
+                  under Philippine RA 10173.
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Primary Submit CTA */}
             <TouchableOpacity
@@ -862,19 +917,29 @@ export default function SignupScreen() {
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Limitation of Liability</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Limitation of Liability & Warranty</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
                   Under no circumstances will Clucko, its developers, or affiliates be liable for any bird mortality, flock infection spread, financial losses, or operational damages resulting from the use or inability to use this detection software.
+                </Text>
+              </View>
+
+              <View style={styles.legalSection}>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>6. Eligibility & Governing Law</Text>
+                <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
+                  Users must be at least 18 years of age. These terms are governed by the laws of the Republic of the Philippines, with exclusive venue in Davao City. For inquiries: jasphertadlan@gmail.com.
                 </Text>
               </View>
             </ScrollView>
 
             <TouchableOpacity
               style={[styles.legalPrimaryBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setShowTermsModal(false)}
+              onPress={() => {
+                setAgreeTerms(true);
+                setShowTermsModal(false);
+              }}
               activeOpacity={0.85}
             >
-              <Text style={styles.legalPrimaryBtnText}>I Understand & Close</Text>
+              <Text style={styles.legalPrimaryBtnText}>I Agree & Accept Terms</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -900,7 +965,7 @@ export default function SignupScreen() {
             </View>
 
             <ScrollView style={styles.legalModalBody} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.legalEffectiveDate, { color: colors.textLight }]}>Last Updated: September 2026</Text>
+              <Text style={[styles.legalEffectiveDate, { color: colors.textLight }]}>Last Updated: September 2026 (RA 10173)</Text>
 
               <View style={styles.legalSection}>
                 <Text style={[styles.legalSectionHeading, { color: colors.text }]}>1. Information We Collect</Text>
@@ -931,19 +996,22 @@ export default function SignupScreen() {
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. User Rights & Data Deletion</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Data Subject Rights & Erasure (RA 10173)</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
-                  You may update or delete chicken profiles, manage farm memberships, or request complete account erasure at any time by contacting our administrator support.
+                  Under the Philippine Data Privacy Act of 2012, you have the right to access, rectify, or permanently erase your data. You may delete your account and all flock records directly in Profile → Preferences → Danger Zone → Delete Account, or contact our Data Protection Officer at jasphertadlan@gmail.com (Davao City, Philippines).
                 </Text>
               </View>
             </ScrollView>
 
             <TouchableOpacity
               style={[styles.legalPrimaryBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setShowPrivacyModal(false)}
+              onPress={() => {
+                setAgreeTerms(true);
+                setShowPrivacyModal(false);
+              }}
               activeOpacity={0.85}
             >
-              <Text style={styles.legalPrimaryBtnText}>I Understand & Close</Text>
+              <Text style={styles.legalPrimaryBtnText}>I Agree & Accept Policy</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1003,7 +1071,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    minHeight: 48,
+    minWidth: 48,
   },
   backText: {
     fontSize: 15,

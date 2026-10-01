@@ -186,8 +186,9 @@ export default function TabLayout() {
   };
 
   const barWidth = screenWidth;
-  const barHeight = (isTablet ? 72 : 64) + (Platform.OS === 'ios' ? insets.bottom : 0);
-  const paddingBottom = Platform.OS === 'ios' ? Math.max(insets.bottom, 6) : 6;
+  const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
+  const barHeight = (isTablet ? 74 : 66) + safeBottom;
+  const paddingBottom = safeBottom + 2;
 
   if (checkingAuth) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
@@ -223,7 +224,8 @@ export default function TabLayout() {
           tabBarLabelStyle: {
             fontSize: isTablet ? 12 : 10.5,
             fontWeight: '600',
-            marginTop: 1,
+            marginBottom: Platform.OS === 'android' ? 2 : 0,
+            marginTop: 0,
           },
         }}
       >
@@ -349,12 +351,12 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    marginTop: -20,
+    marginTop: -28,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 6,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 7,
+    elevation: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -362,7 +364,7 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 31,
-    marginTop: -24,
+    marginTop: -32,
   },
   centerIconWrap: {
     flex: 1,

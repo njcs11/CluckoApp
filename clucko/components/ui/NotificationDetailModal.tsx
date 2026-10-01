@@ -84,10 +84,17 @@ export default function NotificationDetailModal({
 
   const titleLower = (notification.title || '').toLowerCase();
   const messageLower = (notification.message || '').toLowerCase();
-  const isProfile = titleLower.includes('profile') || messageLower.includes('profile');
-  const isFarm = titleLower.includes('farm') || messageLower.includes('farm');
-  const isTask = titleLower.includes('task') || messageLower.includes('task');
-  const hasChicken = !!notification.chickenId;
+  const hasChicken = !!notification.chickenId || titleLower.includes('chicken');
+  const isPersonalProfile = !hasChicken && (
+    titleLower.includes('personal') ||
+    titleLower.includes('user profile') ||
+    titleLower.includes('account') ||
+    messageLower.includes('personal') ||
+    messageLower.includes('user profile') ||
+    (titleLower.includes('profile') && !titleLower.includes('chicken'))
+  );
+  const isFarm = !hasChicken && !isPersonalProfile && (titleLower.includes('farm') || messageLower.includes('farm'));
+  const isTask = !hasChicken && !isPersonalProfile && !isFarm && (titleLower.includes('task') || messageLower.includes('task'));
 
   const handleChickenPress = () => {
     onClose();
@@ -97,6 +104,8 @@ export default function NotificationDetailModal({
       } else {
         router.push(`/chicken/${notification.chickenId}`);
       }
+    } else {
+      router.push('/(tabs)/chickens');
     }
   };
 
@@ -130,7 +139,7 @@ export default function NotificationDetailModal({
   const handleBannerPress = () => {
     if (hasChicken) {
       handleChickenPress();
-    } else if (isProfile) {
+    } else if (isPersonalProfile) {
       handleProfilePress();
     } else if (isFarm) {
       handleFarmPress();
@@ -214,7 +223,7 @@ export default function NotificationDetailModal({
                 </TouchableOpacity>
               )}
 
-              {!hasChicken && isProfile && (
+              {!hasChicken && isPersonalProfile && (
                 <TouchableOpacity
                   style={[
                     styles.chickenStrip,
@@ -227,13 +236,13 @@ export default function NotificationDetailModal({
                     <Ionicons name="person-outline" size={14} color={colors.primary} />
                   </View>
                   <Text style={[styles.chickenStripText, { color: colors.primary }]} numberOfLines={1}>
-                    Go to your Profile
+                    Go to your Personal Profile
                   </Text>
                   <Ionicons name="chevron-forward" size={16} color={colors.primary} />
                 </TouchableOpacity>
               )}
 
-              {!hasChicken && !isProfile && isFarm && (
+              {!hasChicken && !isPersonalProfile && isFarm && (
                 <TouchableOpacity
                   style={[
                     styles.chickenStrip,
@@ -252,7 +261,7 @@ export default function NotificationDetailModal({
                 </TouchableOpacity>
               )}
 
-              {!hasChicken && !isProfile && !isFarm && isTask && (
+              {!hasChicken && !isPersonalProfile && !isFarm && isTask && (
                 <TouchableOpacity
                   style={[
                     styles.chickenStrip,
@@ -292,7 +301,7 @@ export default function NotificationDetailModal({
                   >
                     <Text style={styles.viewButtonText}>View Chicken</Text>
                   </TouchableOpacity>
-                ) : isProfile ? (
+                ) : isPersonalProfile ? (
                   <TouchableOpacity
                     style={[styles.viewButton, { backgroundColor: colors.primary }]}
                     onPress={handleProfilePress}

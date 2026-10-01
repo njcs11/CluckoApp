@@ -29,14 +29,16 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Linking,
 } from 'react-native';
+import { useCameraPermissions } from 'expo-camera';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AboutUsModal from '../../components/ui/AboutUsModal';
 import AnimatedSegmentedTabs from '../../components/ui/AnimatedSegmentedTabs';
 import FarmIcon from '../../components/ui/FarmIcon';
 import LogoutConfirmModal from '../../components/ui/LogoutConfirmModal';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
-import { apiGetFarms, apiGetProfile, apiLogout, apiUpdateProfile, apiGetMyPlan } from '../../lib/api';
+import { apiGetFarms, apiGetProfile, apiLogout, apiUpdateProfile, apiGetMyPlan, apiDeleteAccount } from '../../lib/api';
 
 const GENERIC_PROFILE_KEY = 'userProfile';
 const GENERIC_LAST_NOTIF_CHECK_KEY = 'lastNotifCheck';
@@ -94,7 +96,85 @@ export default function ProfileScreen() {
     clearAllNotifications,
     deleteNotification,
     refresh: refreshNotifications,
+    showSuccess,
   } = useNotifications();
+
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [mediaPermission, requestMediaPermission] = ImagePicker.useMediaLibraryPermissions();
+
+  const handleRequestCameraApproval = async () => {
+    if (!cameraPermission?.canAskAgain && !cameraPermission?.granted) {
+      Alert.alert(
+        'Camera Permission Required',
+        'Camera access was previously denied. Please enable camera access for Clucko in your Android device settings to use disease detection.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
+    const result = await requestCameraPermission();
+    if (result.granted) {
+      showSuccess(
+        'Camera Approved',
+        'Camera access has been granted for AI scanning.'
+      );
+    }
+  };
+
+  const handleRequestMediaApproval = async () => {
+    if (!mediaPermission?.canAskAgain && !mediaPermission?.granted) {
+      Alert.alert(
+        'Photo Library Permission Required',
+        'Storage/Photos access was previously denied. Please enable access in your device settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
+    const result = await requestMediaPermission();
+    if (result.granted) {
+      showSuccess(
+        'Photos Approved',
+        'Photo gallery access has been granted.'
+      );
+    }
+  };
+
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  const handleDeleteAccountPress = () => {
+    Alert.alert(
+      'Delete Account & Erase Data?',
+      'Are you sure you want to permanently delete your Clucko account? All your farms, chickens, health records, QR scans, and subscription data will be permanently erased pursuant to the Philippine Data Privacy Act of 2012 (RA 10173) and Google Play account deletion policy. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeletingAccount(true);
+              await apiDeleteAccount();
+              notify({
+                title: 'Account Deleted',
+                message: 'Your account and data have been permanently erased.',
+                type: 'alert',
+              });
+              router.replace('/login');
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete account. Please try again.');
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const [activeTab, setActiveTab] = useState<'details' | 'preferences'>('details');
   const profileTabFadeAnim = useRef(new Animated.Value(1)).current;
@@ -269,6 +349,7 @@ export default function ProfileScreen() {
       loadProfile();
       refreshNotifications();
       loadStats();
+      AsyncStorage.removeItem('active_chicken_profile_id');
     }, [])
   );
 
@@ -384,8 +465,8 @@ export default function ProfileScreen() {
       setIsEditing(false);
 
       await notify({
-        title: 'Profile Updated',
-        message: 'Your profile information has been successfully updated.',
+        title: 'Personal Profile Updated',
+        message: 'Your personal user profile has been successfully updated.',
         type: 'success',
       });
 
@@ -506,8 +587,8 @@ export default function ProfileScreen() {
       setShowImagePreview(false);
 
       await notify({
-        title: 'Profile Picture Updated',
-        message: 'Your profile picture has been changed.',
+        title: 'Personal Photo Updated',
+        message: 'Your personal profile picture has been changed.',
         type: 'info',
       });
     } catch (error) {
@@ -557,14 +638,16 @@ export default function ProfileScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
         }
       >
-        <LinearGradient
-          colors={isDarkMode ? ['#18231E', '#0E1210'] : ['#2D5541', '#1E3D2D']}
-          style={styles.cover}
-        >
+        <View style={styles.cover}>
+          <LinearGradient
+            colors={isDarkMode ? ['#18231E', '#0E1210'] : ['#2D5541', '#1E3D2D']}
+            style={StyleSheet.absoluteFill}
+          />
           <View pointerEvents="none" style={styles.coverDecoRing} />
 
           {/* Faint farm silhouette (hills, barn, windmill) — purely
@@ -590,7 +673,7 @@ export default function ProfileScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </LinearGradient>
+        </View>
 
         <View style={[styles.profileCard, { backgroundColor: colors.card }]}>
           <View style={styles.avatarWrap}>
@@ -803,7 +886,9 @@ export default function ProfileScreen() {
                   <Text style={[styles.infoLabel, { color: colors.textLight }]}>Scan Quota</Text>
                 </View>
                 <Text style={[styles.infoValue, { color: colors.text }]}>
-                  {subscription?.limits?.max_captures >= 999999 ? 'Unlimited' : `${subscription?.usage?.captures_count || 0} / ${subscription?.limits?.max_captures || 30}`}
+                  {subscription?.limits?.max_captures >= 999999
+                    ? 'Unlimited'
+                    : `${subscription?.usage?.captures_remaining ?? (30 - (subscription?.usage?.captures_count || 0))} left (${subscription?.usage?.captures_count || 0}/${subscription?.limits?.max_captures || 30} used)`}
                 </Text>
               </View>
 
@@ -1040,6 +1125,113 @@ export default function ProfileScreen() {
               </View>
             </View>
 
+            {/* Hardware & Camera Permissions Approval Card */}
+            <View style={[styles.card, { backgroundColor: colors.card, marginTop: 14 }]}>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Hardware & Permissions</Text>
+                <TouchableOpacity
+                  onPress={() => Linking.openSettings()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primary }}>
+                    Device Settings ↗
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Camera Approval Row */}
+              <View style={[styles.preferenceRow, { borderBottomColor: colors.divider }]}>
+                <View style={[styles.preferenceLeft, { flex: 1, paddingRight: 10 }]}>
+                  <FieldIcon icon="camera-outline" tint={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.preferenceLabel, { color: colors.text, fontWeight: '600' }]}>
+                      Camera Approval
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>
+                      Required for live AI disease detection & poultry QR scanning
+                    </Text>
+                  </View>
+                </View>
+
+                {cameraPermission?.granted ? (
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#4CAF5015',
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#4CAF50' }}>Approved</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: colors.primary,
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 10,
+                    }}
+                    onPress={handleRequestCameraApproval}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                      Grant Approval
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Photo Library Approval Row */}
+              <View style={[styles.preferenceRow, { borderBottomWidth: 0 }]}>
+                <View style={[styles.preferenceLeft, { flex: 1, paddingRight: 10 }]}>
+                  <FieldIcon icon="images-outline" tint="#2196F3" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.preferenceLabel, { color: colors.text, fontWeight: '600' }]}>
+                      Photo Library
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>
+                      Required for uploading poultry photos and profile avatars
+                    </Text>
+                  </View>
+                </View>
+
+                {mediaPermission?.granted ? (
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#4CAF5015',
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#4CAF50' }}>Approved</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: colors.primary,
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 10,
+                    }}
+                    onPress={handleRequestMediaApproval}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                      Grant Approval
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
             <View style={[styles.card, { backgroundColor: colors.card, marginTop: 14 }]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>About & Legal</Text>
               <TouchableOpacity
@@ -1055,6 +1247,41 @@ export default function ProfileScreen() {
                   </View>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Danger Zone: Account Deletion (RA 10173 & Google Play Policy) */}
+            <View style={[styles.card, { backgroundColor: colors.card, marginTop: 14, borderColor: '#ef444450', borderWidth: 1 }]}>
+              <Text style={[styles.cardTitle, { color: '#ef4444' }]}>Danger Zone</Text>
+              <Text style={{ fontSize: 12, color: colors.textLight, marginTop: 2, marginBottom: 12 }}>
+                Permanently delete your account and erase all flock data pursuant to Philippine RA 10173 §16(e).
+              </Text>
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  borderWidth: 1.5,
+                  borderColor: '#ef4444',
+                  borderRadius: 12,
+                  paddingVertical: 12,
+                  backgroundColor: '#ef444415',
+                }}
+                onPress={handleDeleteAccountPress}
+                activeOpacity={0.8}
+                disabled={isDeletingAccount}
+              >
+                {isDeletingAccount ? (
+                  <ActivityIndicator color="#ef4444" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                    <Text style={{ color: '#ef4444', fontSize: 14, fontWeight: '700' }}>
+                      Delete Account &amp; Erase All Data
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1249,6 +1476,7 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 115 },
 
   topBar: {
     position: 'absolute',
@@ -1599,7 +1827,7 @@ const styles = StyleSheet.create({
   logoutButtonText: { fontSize: 15, fontWeight: '700' },
   versionText: { textAlign: 'center', fontSize: 12, marginTop: 14 },
 
-  bottomPadding: { height: 30 },
+  bottomPadding: { height: 40 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
 

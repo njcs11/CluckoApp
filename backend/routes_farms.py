@@ -75,9 +75,35 @@ def create_farm():
             if user['role'] != 'owner':
                 return jsonify({'error': 'Only owners can create farms'}), 403
 
-            d = request.json
-            if not d.get('farm_name'):
-                return jsonify({'error': 'Farm name required'}), 400
+            d = request.json or {}
+            farm_name = str(d.get('farm_name', '')).strip()
+            if not farm_name or len(farm_name) > 100:
+                return jsonify({'error': 'Farm name is required (maximum 100 characters)'}), 400
+
+            farm_location = str(d.get('farm_location', '')).strip()[:255]
+            description = str(d.get('description', '')).strip()[:1000] if d.get('description') else ''
+
+            lat = d.get('latitude')
+            lng = d.get('longitude')
+            if lat is not None and lat != '':
+                try:
+                    lat = float(lat)
+                    if not (-90.0 <= lat <= 90.0):
+                        return jsonify({'error': 'latitude must be between -90 and 90'}), 400
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'latitude must be a valid float'}), 400
+            else:
+                lat = None
+
+            if lng is not None and lng != '':
+                try:
+                    lng = float(lng)
+                    if not (-180.0 <= lng <= 180.0):
+                        return jsonify({'error': 'longitude must be between -180 and 180'}), 400
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'longitude must be a valid float'}), 400
+            else:
+                lng = None
 
             # Check subscription farm quota
             from routes_subscriptions import get_effective_subscription
@@ -105,9 +131,9 @@ def create_farm():
             cur.execute('''
                 INSERT INTO farms (owner_id, farm_name, farm_location, farm_code, description, latitude, longitude)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (request.user_id, d['farm_name'],
-                  d.get('farm_location', ''), code, d.get('description', ''),
-                  d.get('latitude'), d.get('longitude')))
+            ''', (request.user_id, farm_name,
+                  farm_location, code, description,
+                  lat, lng))
             farm_id = cur.lastrowid
 
             cur.execute('''
@@ -120,7 +146,7 @@ def create_farm():
                 UPDATE users
                 SET farm_name = %s, farm_location = %s
                 WHERE id = %s AND (farm_name IS NULL OR farm_name = '')
-            ''', (d['farm_name'], d.get('farm_location', ''), request.user_id))
+            ''', (farm_name, farm_location, request.user_id))
 
             db.commit()
             cur.execute('SELECT * FROM farms WHERE id=%s', (farm_id,))
@@ -145,11 +171,34 @@ def update_farm(farm_id):
                 return jsonify({'error': 'Only farm owner can edit this farm'}), 403
 
             d = request.json or {}
-            new_name = (d.get('farm_name') or farm.get('farm_name') or '').strip()
-            new_loc = (d.get('farm_location') if d.get('farm_location') is not None else (farm.get('farm_location') or '')).strip()
-            desc = d.get('description', farm.get('description'))
+            new_name = str(d.get('farm_name') or farm.get('farm_name') or '').strip()
+            if not new_name or len(new_name) > 100:
+                return jsonify({'error': 'Farm name is required (maximum 100 characters)'}), 400
+
+            new_loc = str(d.get('farm_location') if d.get('farm_location') is not None else (farm.get('farm_location') or '')).strip()[:255]
+            desc = str(d.get('description') if d.get('description') is not None else (farm.get('description') or '')).strip()[:1000]
+
             lat = d.get('latitude', farm.get('latitude'))
             lng = d.get('longitude', farm.get('longitude'))
+            if lat is not None and lat != '':
+                try:
+                    lat = float(lat)
+                    if not (-90.0 <= lat <= 90.0):
+                        return jsonify({'error': 'latitude must be between -90 and 90'}), 400
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'latitude must be a valid float'}), 400
+            else:
+                lat = None
+
+            if lng is not None and lng != '':
+                try:
+                    lng = float(lng)
+                    if not (-180.0 <= lng <= 180.0):
+                        return jsonify({'error': 'longitude must be between -180 and 180'}), 400
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'longitude must be a valid float'}), 400
+            else:
+                lng = None
 
             cur.execute('''
                 UPDATE farms
@@ -244,10 +293,10 @@ def delete_farm(farm_id):
 @app.route('/api/farms/join', methods=['POST'])
 @token_required
 def join_farm():
-    d = request.json
-    farm_code = d.get('farm_code', '').strip().upper()
-    if not farm_code:
-        return jsonify({'error': 'Farm code required'}), 400
+    d = request.json or {}
+    farm_code = str(d.get('farm_code', '')).strip().upper()
+    if not farm_code or len(farm_code) > 16 or not farm_code.isalnum():
+        return jsonify({'error': 'A valid farm code is required'}), 400
 
     db = get_db()
     try:
@@ -292,6 +341,15 @@ def get_farm_members(farm_id):
     db = get_db()
     try:
         with db.cursor() as cur:
+            # Authorization check: user must be owner or active member of this farm
+            cur.execute('''
+                SELECT 1 FROM farms f
+                LEFT JOIN farm_members fm ON fm.farm_id = f.id AND fm.user_id = %s
+                WHERE f.id = %s AND (f.owner_id = %s OR fm.user_id = %s)
+            ''', (request.user_id, farm_id, request.user_id, request.user_id))
+            if not cur.fetchone():
+                return jsonify({'error': 'Farm not found or access denied'}), 403
+
             cur.execute('''
                 SELECT u.id, u.first_name, u.last_name,
                        u.email, u.phone_number, fm.role, fm.joined_at,

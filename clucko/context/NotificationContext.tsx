@@ -69,6 +69,8 @@ interface NotificationContextValue {
   notify: (data: NotifyInput) => Promise<void>;
   /** Presents a clean error pop up modal with a red indicator. Does NOT save to notifications. */
   showError: (title: string, message: string) => void;
+  /** Presents a clean success pop up modal with a green checkmark indicator. Does NOT save to notifications. */
+  showSuccess: (title: string, message: string) => void;
   /** Opens the same banner design for a notification tapped from the
    *  Profile list — stays open until dismissed, no auto-timer. */
   showDetail: (notification: NotificationItem) => void;
@@ -87,7 +89,7 @@ const POLL_INTERVAL_MS = 15000; // Poll backend notifications every 15 seconds
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [displayed, setDisplayed] = useState<NotificationItem | null>(null);
-  const [errorModal, setErrorModal] = useState<{ visible: boolean; title: string; message: string } | null>(null);
+  const [errorModal, setErrorModal] = useState<{ visible: boolean; title: string; message: string; type?: 'error' | 'success' } | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -173,7 +175,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
 
   const showError = useCallback((title: string, message: string) => {
-    setErrorModal({ visible: true, title, message });
+    setErrorModal({ visible: true, title, message, type: 'error' });
+  }, []);
+
+  const showSuccess = useCallback((title: string, message: string) => {
+    setErrorModal({ visible: true, title, message, type: 'success' });
   }, []);
 
   const notify = useCallback(
@@ -290,6 +296,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         unreadCount,
         notify,
         showError,
+        showSuccess,
         showDetail,
         markAsRead,
         markAllAsRead,
@@ -321,6 +328,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         visible={!!errorModal?.visible}
         title={errorModal?.title || ''}
         message={errorModal?.message || ''}
+        type={errorModal?.type || 'error'}
         onClose={() => setErrorModal(null)}
       />
     </NotificationContext.Provider>

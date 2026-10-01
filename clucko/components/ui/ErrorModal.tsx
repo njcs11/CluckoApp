@@ -15,6 +15,7 @@ interface ErrorModalProps {
   visible: boolean;
   title: string;
   message: string;
+  type?: 'error' | 'success' | 'alert';
   onClose: () => void;
 }
 
@@ -22,11 +23,14 @@ export default function ErrorModal({
   visible,
   title,
   message,
+  type = 'error',
   onClose,
 }: ErrorModalProps) {
   const { colors, isDarkMode } = useDarkMode();
   const scale = useRef(new Animated.Value(0.9)).current;
   const opacity = useRef(new Animated.Value(0)).current;
+
+  const isSuccess = type === 'success';
 
   useEffect(() => {
     if (visible) {
@@ -65,23 +69,34 @@ export default function ErrorModal({
                 styles.modalCard,
                 {
                   backgroundColor: isDarkMode ? colors.card : '#FFFFFF',
-                  borderColor: isDarkMode ? 'rgba(239, 83, 80, 0.3)' : 'rgba(239, 83, 80, 0.25)',
+                  borderColor: isSuccess
+                    ? (isDarkMode ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)')
+                    : (isDarkMode ? 'rgba(239, 83, 80, 0.3)' : 'rgba(239, 83, 80, 0.25)'),
                   opacity,
                   transform: [{ scale }],
                 },
               ]}
             >
-              {/* Red Indicator Icon Badge */}
+              {/* Icon Badge */}
               <View
                 style={[
                   styles.iconBadge,
-                  {
-                    backgroundColor: isDarkMode ? 'rgba(239, 83, 80, 0.14)' : 'rgba(239, 83, 80, 0.1)',
-                    borderColor: isDarkMode ? 'rgba(239, 83, 80, 0.35)' : 'rgba(239, 83, 80, 0.25)',
-                  },
+                  isSuccess
+                    ? {
+                        backgroundColor: isDarkMode ? 'rgba(16, 185, 129, 0.16)' : 'rgba(16, 185, 129, 0.12)',
+                        borderColor: isDarkMode ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.25)',
+                      }
+                    : {
+                        backgroundColor: isDarkMode ? 'rgba(239, 83, 80, 0.14)' : 'rgba(239, 83, 80, 0.1)',
+                        borderColor: isDarkMode ? 'rgba(239, 83, 80, 0.35)' : 'rgba(239, 83, 80, 0.25)',
+                      },
                 ]}
               >
-                <Ionicons name="alert-circle" size={38} color="#EF5350" />
+                {isSuccess ? (
+                  <Ionicons name="checkmark-circle" size={38} color="#10B981" />
+                ) : (
+                  <Ionicons name="alert-circle" size={38} color="#EF5350" />
+                )}
               </View>
 
               {/* Title */}
@@ -108,10 +123,15 @@ export default function ErrorModal({
               <TouchableOpacity
                 style={[
                   styles.button,
-                  {
-                    backgroundColor: isDarkMode ? colors.surface : '#F3F4F6',
-                    borderColor: isDarkMode ? colors.border : '#E5E7EB',
-                  },
+                  isSuccess
+                    ? {
+                        backgroundColor: '#10B981',
+                        borderColor: '#10B981',
+                      }
+                    : {
+                        backgroundColor: isDarkMode ? colors.surface : '#F3F4F6',
+                        borderColor: isDarkMode ? colors.border : '#E5E7EB',
+                      },
                 ]}
                 onPress={onClose}
                 activeOpacity={0.8}
@@ -119,7 +139,7 @@ export default function ErrorModal({
                 <Text
                   style={[
                     styles.buttonText,
-                    { color: isDarkMode ? '#FFFFFF' : '#18231E' },
+                    { color: isSuccess ? '#FFFFFF' : (isDarkMode ? '#FFFFFF' : '#18231E') },
                   ]}
                 >
                   Dismiss

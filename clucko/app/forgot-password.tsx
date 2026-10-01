@@ -206,7 +206,7 @@ export default function ForgotPasswordScreen() {
 
       // Update password in PostgreSQL backend
       try {
-        await apiResetPassword(targetEmail, newPassword);
+        await apiResetPassword(targetEmail, newPassword, code.trim());
       } catch (apiErr: any) {
         console.warn('Backend reset password error (fallback to local if demo):', apiErr);
         if (targetEmail !== DEMO_EMAIL) {
@@ -247,10 +247,10 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardView}>
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
@@ -400,7 +400,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0E1210' },
   keyboardView: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 30 },
-  backButton: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, alignSelf: 'flex-start', gap: 8 },
+  backButton: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, alignSelf: 'flex-start', gap: 8, minHeight: 48, minWidth: 48, justifyContent: 'center' },
   backButtonText: { fontSize: 16, color: '#8FE0B0', fontWeight: '500' },
 
   headerContainer: { alignItems: 'center', marginBottom: 28 },

@@ -49,15 +49,16 @@ const getStatusBadge = (type: NotificationItem['type'], primaryColor: string) =>
 /** Main circular icon — inferred from the notification content so existing
  *  notify() calls elsewhere in the app don't need to change. */
 const getMainIcon = (notification: NotificationItem, primaryColor: string) => {
-  const title = notification.title.toLowerCase();
+  const title = (notification.title || '').toLowerCase();
+  const message = (notification.message || '').toLowerCase();
+  if (notification.chickenId || title.includes('chicken')) {
+    return { render: (color: string) => <ChickenIcon size={16} color={color} />, bg: '#2D5541' };
+  }
   if (title.includes('farm')) {
     return { render: (color: string) => <FarmIcon size={18} color={color} />, bg: '#2D5541' };
   }
-  if (title.includes('profile')) {
+  if (title.includes('profile') || title.includes('user') || message.includes('profile')) {
     return { render: (color: string) => <Ionicons name="person-outline" size={18} color={color} />, bg: primaryColor };
-  }
-  if (notification.chickenId || title.includes('chicken')) {
-    return { render: (color: string) => <ChickenIcon size={16} color={color} />, bg: '#2D5541' };
   }
   return { render: (color: string) => <Ionicons name="notifications-outline" size={17} color={color} />, bg: '#2D5541' };
 };

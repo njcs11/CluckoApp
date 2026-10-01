@@ -264,6 +264,29 @@ export const apiLogout = async () => {
   ]);
 };
 
+export const apiDeleteAccount = async () => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/auth/account`, {
+    method: "DELETE",
+    headers: await headers(),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to delete account");
+  await AsyncStorage.multiRemove([
+    "token",
+    "user_id",
+    "userData",
+    "userName",
+    "userEmail",
+    "userPhone",
+    "user_role",
+    "isLoggedIn",
+    "isGuestMode",
+    "current_farm_id",
+  ]);
+  return json;
+};
+
 export const apiGetProfile = async () => {
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/auth/profile`, {
@@ -318,7 +341,7 @@ export const apiSendResetCode = async (email: string, code: string): Promise<boo
   }
 };
 
-export const apiResetPassword = async (email: string, newPassword: string): Promise<{ success: boolean; message?: string }> => {
+export const apiResetPassword = async (email: string, newPassword: string, code?: string): Promise<{ success: boolean; message?: string }> => {
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/auth/reset-password`, {
     method: "POST",
@@ -326,6 +349,7 @@ export const apiResetPassword = async (email: string, newPassword: string): Prom
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
       new_password: newPassword,
+      code: code ? code.trim() : undefined,
     }),
   });
   const json = await res.json();

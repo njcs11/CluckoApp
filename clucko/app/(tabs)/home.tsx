@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Animated,
+  BackHandler,
   Dimensions,
   FlatList,
   Image,
@@ -25,6 +26,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
@@ -44,7 +46,7 @@ import { apiGetProfile, apiGetActivities, apiGetMyPlan } from '../../lib/api';
 import { formatDateKey, getRelativeDateLabel, getUpcomingTasks, loadTasks, Task, toggleTaskComplete } from '../../utils/tasks';
 
 const { width: screenWidth } = Dimensions.get('window');
-const FEATURED_CARD_WIDTH = Math.min(screenWidth - 32, 340);
+const FEATURED_CARD_WIDTH = screenWidth - 32;
 
 // 5 curated stock photography images for the Scan & Detect background slideshow:
 // 1. Aerial drone view of hundreds of aligned gamefowl pens and cordons across green pastures
@@ -179,6 +181,31 @@ export default function HomeScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  // Android hardware back press handler: double-tap to exit Clucko
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return;
+
+      let backPressCount = 0;
+      const onBackPress = () => {
+        if (backPressCount === 0) {
+          backPressCount += 1;
+          ToastAndroid.show('Press back again to exit Clucko', ToastAndroid.SHORT);
+          setTimeout(() => {
+            backPressCount = 0;
+          }, 2000);
+          return true;
+        } else {
+          BackHandler.exitApp();
+          return true;
+        }
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [])
+  );
 
   // --- Flock search (live, on Home) ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -328,6 +355,7 @@ export default function HomeScreen() {
       loadRecentActivities();
       loadSubscription();
       checkLoginWelcome();
+      AsyncStorage.removeItem('active_chicken_profile_id');
     }, [])
   );
 
@@ -916,7 +944,7 @@ export default function HomeScreen() {
       >
         {/* ===================== Header ===================== */}
         <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
+          <View style={styles.headerGreetingCol}>
             <Text style={[styles.greeting, { color: colors.textLight }]}>{getGreeting()},</Text>
             <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
               {isGuestMode ? 'User' : userName}
@@ -985,7 +1013,7 @@ export default function HomeScreen() {
             />
             <Text style={[styles.homePlanPillText, { color: colors.text }]}>
               <Text style={{ fontWeight: '700' }}>{subscription.plan_name}</Text>
-              {subscription.plan === 'free_trial' && ` • ${subscription.days_remaining}d left (${subscription.usage?.captures_count || 0}/30 scans)`}
+              {subscription.plan === 'free_trial' && ` • ${subscription.days_remaining}d left (${subscription.usage?.captures_remaining ?? (30 - (subscription.usage?.captures_count || 0))} scans left)`}
               {subscription.plan === 'pro' && ` • 2 Farms • Unlimited Scans`}
               {subscription.plan === 'premium' && ` • Unlimited All`}
             </Text>
@@ -1078,25 +1106,7 @@ export default function HomeScreen() {
           </TouchableWithoutFeedback>
         )}
 
-        {/* ===================== Quick stat tiles ===================== */}
-        <View style={styles.statsRow}>
-          {quickStats.map((stat) => (
-            <TouchableOpacity
-              key={stat.key}
-              style={[styles.statCard, { backgroundColor: colors.card }]}
-              onPress={stat.onPress}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.statIconCircle, { backgroundColor: stat.circleBg }]}>{stat.icon}</View>
-              <Text style={[styles.statNumber, { color: colors.text }]}>{stat.count}</Text>
-              <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-                {stat.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* ===================== Promo banner — Scan & Detect ===================== */}
+        {/* ===================== Promo banner — Scan & Detect (Hero Section) ===================== */}
         <TouchableOpacity style={styles.promoWrap} activeOpacity={0.9} onPress={handleScanNow}>
           <View style={styles.promoCardContainer}>
             {/* Seamless Buffer A Layer */}
@@ -1166,6 +1176,24 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
 
+        {/* ===================== Quick stat tiles ===================== */}
+        <View style={styles.statsRow}>
+          {quickStats.map((stat) => (
+            <TouchableOpacity
+              key={stat.key}
+              style={[styles.statCard, { backgroundColor: colors.card }]}
+              onPress={stat.onPress}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.statIconCircle, { backgroundColor: stat.circleBg }]}>{stat.icon}</View>
+              <Text style={[styles.statNumber, { color: colors.text }]}>{stat.count}</Text>
+              <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                {stat.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* ===================== "What Clucko Detects" info banner ===================== */}
         <TouchableOpacity
           style={[styles.infoBanner, { backgroundColor: isDarkMode ? '#0D2A44' : '#E3F2FD', borderColor: isDarkMode ? '#123A5C' : '#BBDEFB' }]}
@@ -1184,14 +1212,18 @@ export default function HomeScreen() {
 
         {/* ===================== Featured Gamefowl carousel ===================== */}
         <View style={styles.featuredSection}>
-          <View style={[styles.sectionHeader, styles.featuredSectionHeader]}>
+          <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Gamefowl</Text>
             <TouchableOpacity onPress={handleHealthTrack}>
               <Text style={[styles.viewAllText, { color: colors.primary }]}>See All →</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.filterChipsRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterChipsRow}
+          >
             {filterOptions.map((filter) => {
               const active = activeFilter === filter;
               return (
@@ -1210,7 +1242,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
 
           {featuredBirds.length > 0 ? (
             <>
@@ -1220,11 +1252,17 @@ export default function HomeScreen() {
                 renderItem={renderFeaturedCard}
                 keyExtractor={(item) => String(item.id || item.chickenId)}
                 horizontal
-                pagingEnabled
+                pagingEnabled={false}
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={FEATURED_CARD_WIDTH + 14}
+                snapToAlignment="start"
                 decelerationRate="fast"
                 contentContainerStyle={styles.featuredList}
+                getItemLayout={(_, index) => ({
+                  length: FEATURED_CARD_WIDTH + 14,
+                  offset: (FEATURED_CARD_WIDTH + 14) * index,
+                  index,
+                })}
                 onScrollBeginDrag={() => setIsUserDraggingFeatured(true)}
                 onScrollEndDrag={() => setTimeout(() => setIsUserDraggingFeatured(false), 2000)}
                 onMomentumScrollEnd={(e) => {
@@ -1509,14 +1547,20 @@ const styles = StyleSheet.create({
 
   // --- Header ---
   headerRow: {
+    width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 24,
+    paddingTop: 16,
     marginBottom: 14,
   },
-  greeting: { fontSize: 14 },
-  userName: { fontSize: 22, fontWeight: 'bold', marginTop: 2 },
+  headerGreetingCol: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingRight: 12,
+  },
+  greeting: { fontSize: 13.5, lineHeight: 18, fontWeight: '500' },
+  userName: { fontSize: 21, fontWeight: 'bold', marginTop: 1, lineHeight: 26 },
   avatarButton: {
     width: 52,
     height: 52,
@@ -1543,15 +1587,16 @@ const styles = StyleSheet.create({
   },
 
   // --- Search bar + dropdowns ---
-  searchWrap: { position: 'relative', zIndex: 30, marginBottom: 16 },
+  searchWrap: { width: '100%', position: 'relative', zIndex: 30, marginBottom: 16 },
   searchBar: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     borderRadius: 28,
     borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -1643,13 +1688,14 @@ const styles = StyleSheet.create({
   searchEmptyText: { fontSize: 12 },
 
   // --- Quick stat tiles ---
-  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+  statsRow: { width: '100%', flexDirection: 'row', gap: 8, marginBottom: 16 },
   statCard: {
     flex: 1,
-    borderRadius: 18,
-    paddingVertical: 16,
+    borderRadius: 16,
+    paddingVertical: 11,
+    paddingHorizontal: 2,
     alignItems: 'center',
-    gap: 8,
+    gap: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -1657,19 +1703,20 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   statIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  statNumber: { fontSize: 20, fontWeight: 'bold' },
-  statLabel: { fontSize: 11, textAlign: 'center' },
+  statNumber: { fontSize: 18, fontWeight: 'bold', marginTop: 1 },
+  statLabel: { fontSize: 10, fontWeight: '600', letterSpacing: -0.2, textAlign: 'center' },
 
   // --- Promo banner (Scan & Detect) ---
-  promoWrap: { marginBottom: 18 },
+  promoWrap: { width: '100%', marginBottom: 16 },
   promoCardContainer: {
-    borderRadius: 26,
+    width: '100%',
+    borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#0a1f0d',
@@ -1679,8 +1726,9 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   promoCard: {
-    borderRadius: 26,
-    padding: 22,
+    width: '100%',
+    borderRadius: 24,
+    padding: 20,
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
@@ -1743,13 +1791,15 @@ const styles = StyleSheet.create({
 
   // --- "What Clucko Detects" info banner ---
   infoBanner: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     borderRadius: 18,
     borderWidth: 1,
-    padding: 14,
-    marginBottom: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
   },
   infoBannerIconWrap: {
     width: 36,
@@ -1762,8 +1812,8 @@ const styles = StyleSheet.create({
   infoBannerSubtitle: { fontSize: 12, marginTop: 2 },
 
   // --- Featured Gamefowl carousel ---
-  featuredSection: { marginBottom: 4, marginHorizontal: -16 },
-  featuredSectionHeader: { paddingHorizontal: 16 },
+  featuredSection: { width: '100%', marginBottom: 4 },
+  featuredSectionHeader: { paddingHorizontal: 0 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1773,11 +1823,11 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: 'bold' },
   viewAllText: { fontSize: 12, fontWeight: '600' },
 
-  filterChipsRow: { flexDirection: 'row', gap: 8, marginBottom: 14, paddingHorizontal: 16 },
-  filterChip: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 20, borderWidth: 1 },
-  filterChipText: { fontSize: 13, fontWeight: '600' },
+  filterChipsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  filterChipText: { fontSize: 12.5, fontWeight: '600' },
 
-  featuredList: { paddingHorizontal: 16, gap: 14 },
+  featuredList: { gap: 14 },
   featuredCard: {
     width: FEATURED_CARD_WIDTH,
     borderRadius: 22,
@@ -1841,7 +1891,7 @@ const styles = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3 },
   dotActive: { width: 18 },
 
-  emptyFeatured: { marginHorizontal: 16, borderRadius: 20, alignItems: 'center', paddingVertical: 34, gap: 10 },
+  emptyFeatured: { width: '100%', borderRadius: 20, alignItems: 'center', paddingVertical: 34, gap: 10 },
   emptyFeaturedText: { fontSize: 13 },
 
   // --- Upcoming Tasks ---
@@ -1979,6 +2029,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
     position: 'relative',
   },
   headerBellBadge: {
@@ -2001,9 +2052,11 @@ const styles = StyleSheet.create({
 
   // Recent Activity section on Home
   activitySection: {
-    marginTop: 22,
+    width: '100%',
+    marginTop: 20,
   },
   activityCardWrap: {
+    width: '100%',
     borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 14,
@@ -2036,10 +2089,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   homeGraceBanner: {
+    width: '100%',
     borderRadius: 12,
     overflow: 'hidden',
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: 0,
+    marginBottom: 14,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -2050,7 +2104,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   homeGraceTitle: {
     color: '#fff',
@@ -2063,18 +2117,20 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   homePlanPill: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 6.5,
     borderRadius: 20,
     borderWidth: 1,
     marginTop: 0,
-    marginBottom: 10,
+    marginBottom: 14,
     gap: 8,
   },
   homePlanPillText: {
-    fontSize: 12,
+    fontSize: 11.5,
+    lineHeight: 16,
     flex: 1,
   },
 });

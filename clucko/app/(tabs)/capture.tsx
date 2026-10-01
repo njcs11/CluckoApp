@@ -29,7 +29,8 @@ import {
   Text,
   TouchableOpacity,
   useWindowDimensions,
-  View
+  View,
+  Linking
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
@@ -258,6 +259,29 @@ export default function CaptureScreen() {
   ];
   type PartModuleId = 'auto' | 'eye' | 'wing';
   const [selectedPart, setSelectedPart] = useState<PartModuleId>('auto');
+
+  const handleTopBack = async () => {
+    try {
+      if (chickenIdParam) {
+        await AsyncStorage.removeItem('active_chicken_profile_id');
+        router.replace(`/chicken/${chickenIdParam}`);
+        return;
+      }
+      const storedChickenId = await AsyncStorage.getItem('active_chicken_profile_id');
+      if (storedChickenId) {
+        await AsyncStorage.removeItem('active_chicken_profile_id');
+        router.replace(`/chicken/${storedChickenId}`);
+        return;
+      }
+    } catch (err) {
+      console.warn('Error reading active_chicken_profile_id:', err);
+    }
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/home');
+    }
+  };
 
   useEffect(() => {
     checkGuestAccess();
@@ -782,9 +806,16 @@ export default function CaptureScreen() {
         imageUrl = `data:image/jpeg;base64,${lastPhotoBase64}`;
       }
 
+      const resolvedImageType =
+        scanResult.module === 'wing' || selectedPart === 'wing'
+          ? 'wing'
+          : scanResult.module === 'eye' || selectedPart === 'eye'
+          ? 'eye'
+          : 'other';
+
       await apiSaveScan({
         chicken_id: chickenId,
-        image_type: selectedPart === 'eye' ? 'head' : selectedPart === 'wing' ? 'wing' : 'full',
+        image_type: resolvedImageType,
         predicted_condition: scanResult.disease || 'Healthy',
         confidence_score: scanResult.confidence,
         severity_level: mapSeverity(scanResult.disease, scanResult.confidence),
@@ -815,7 +846,13 @@ export default function CaptureScreen() {
         });
       }
 
-      router.replace('/(tabs)/chickens');
+      const returnTarget = chickenId || chickenIdParam;
+      await AsyncStorage.removeItem('active_chicken_profile_id');
+      if (returnTarget) {
+        router.replace(`/chicken/${returnTarget}`);
+      } else {
+        router.replace('/(tabs)/chickens');
+      }
     } catch (error: any) {
       console.error('Error saving scan:', error);
       const msg = error.message || '';
@@ -900,7 +937,8 @@ export default function CaptureScreen() {
           chickenId: String(savedId),
           chickenName: savedName,
         });
-        router.replace('/(tabs)/chickens');
+        await AsyncStorage.removeItem('active_chicken_profile_id');
+        router.replace(`/chicken/${savedId}`);
       }
     } catch (error: any) {
       console.error('Error creating chicken:', error);
@@ -1104,8 +1142,17 @@ export default function CaptureScreen() {
                 <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Allow Camera Access</Text>
               </LinearGradient>
             </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity style={styles.guestBlockSecondaryButton} onPress={() => router.back()}>
+          ) : (
+            <TouchableOpacity style={styles.guestBlockButton} onPress={() => Linking.openSettings()}>
+              <LinearGradient
+                colors={isDarkMode ? ['#8FE0B0', '#62B887'] : ['#2D5541', '#1E3D2D']}
+                style={styles.guestBlockButtonGradient}
+              >
+                <Text style={[styles.guestBlockButtonText, { color: isDarkMode ? '#0E1210' : '#FFFFFF' }]}>Open App Settings</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.guestBlockSecondaryButton} onPress={handleTopBack}>
             <Text style={styles.guestBlockSecondaryText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -1174,7 +1221,7 @@ export default function CaptureScreen() {
 
               <View style={styles.topBar}>
                 <TouchableOpacity
-                  onPress={() => router.back()}
+                  onPress={handleTopBack}
                   style={styles.topIconButton}
                   disabled={isBusyCapturing}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

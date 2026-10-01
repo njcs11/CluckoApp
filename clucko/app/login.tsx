@@ -333,9 +333,9 @@ export default function LoginScreen() {
   const isEmailValid = isValidEmail(email);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? colors.background : '#FAFAFA', paddingTop: insets.top }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? colors.background : '#FAFAFA' }]}>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 30 }]}
           keyboardShouldPersistTaps="handled"

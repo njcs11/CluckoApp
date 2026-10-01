@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from db import get_db, token_required, SECRET_KEY, DB_CONFIG
+from db import get_db, token_required, admin_required, SECRET_KEY, DB_CONFIG
 import os
 import json
 import base64
@@ -33,14 +33,20 @@ class CustomJSONProvider(DefaultJSONProvider):
 app = Flask(__name__)
 app.json = CustomJSONProvider(app)
 
-# ─── CORS ─────────────────────────────────────────────────────────────────────
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB max payload to protect against memory exhaustion
+
+# ─── CORS & Security Headers ──────────────────────────────────────────────────
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
     return response
 
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), 'datasets')
@@ -129,6 +135,7 @@ def get_diseases():
     return jsonify(load_diseases())
 
 @app.route('/api/diseases', methods=['POST'])
+@admin_required
 def add_disease():
     data = request.json or {}
     name = (data.get('name') or '').strip()
@@ -180,7 +187,10 @@ def add_disease():
     return jsonify({"success": True, "disease": new_disease})
 
 @app.route('/api/diseases/<disease_id>', methods=['DELETE'])
+@admin_required
 def delete_disease(disease_id):
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
+        return jsonify({"error": "Invalid disease_id"}), 400
     diseases = load_diseases()
     diseases['diseases'] = [d for d in diseases['diseases'] if d['id'] != disease_id]
     save_diseases(diseases)
@@ -227,14 +237,15 @@ def extract_video_frames(video_path, target_dir, base_name, frame_interval_sec=0
 
 # ─── Dataset upload (HEIC & Video Frame Extraction Support) ─────────────────────
 @app.route('/api/dataset/upload', methods=['POST'])
+@admin_required
 def upload_dataset():
     disease_id = request.form.get('disease_id')
     module     = request.form.get('module')  # 'eye' or 'wing'
     frame_interval = float(request.form.get('frame_interval', 0.5))
-    max_video_frames = int(request.form.get('max_video_frames', 50))
+    max_video_frames = min(max(1, int(request.form.get('max_video_frames', 50))), 100)
 
-    if not disease_id or not module:
-        return jsonify({"error": "disease_id and module required"}), 400
+    if not disease_id or module not in ('eye', 'wing') or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
+        return jsonify({"error": "Valid disease_id and module ('eye' or 'wing') are required"}), 400
     disease_dir = os.path.join(DATASETS_DIR, module, disease_id)
     os.makedirs(disease_dir, exist_ok=True)
 
@@ -303,18 +314,30 @@ def dataset_stats():
 
 
 import urllib.parse
+import re
 
 def get_safe_file_path(base_dir, module, disease_id, filename):
     """Safely resolves and validates a file path within the specified class directory, preventing path traversal."""
-    if not filename:
+    if not filename or not module or not disease_id:
+        return None
+    # Strictly validate module
+    if module not in ('eye', 'wing'):
+        return None
+    # Strictly validate disease_id (alphanumeric and underscores only)
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
         return None
     # Strip any directory components passed in filename
     clean_filename = os.path.basename(filename)
     if not clean_filename or clean_filename in ('.', '..'):
         return None
+
+    abs_base = os.path.abspath(base_dir)
     expected_dir = os.path.abspath(os.path.join(base_dir, module, disease_id))
     full_path = os.path.abspath(os.path.join(expected_dir, clean_filename))
-    if not full_path.startswith(expected_dir + os.sep) and full_path != expected_dir:
+
+    if not expected_dir.startswith(abs_base + os.sep):
+        return None
+    if not full_path.startswith(expected_dir + os.sep):
         return None
     return full_path
 
@@ -323,8 +346,8 @@ def get_safe_file_path(base_dir, module, disease_id, filename):
 def get_dataset_images():
     module = request.args.get('module', 'eye')
     disease_id = request.args.get('disease_id')
-    if not disease_id:
-        return jsonify({"error": "disease_id is required"}), 400
+    if not disease_id or module not in ('eye', 'wing') or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
+        return jsonify({"error": "Valid disease_id and module ('eye' or 'wing') are required"}), 400
 
     disease_dir = os.path.join(DATASETS_DIR, module, disease_id)
     if not os.path.exists(disease_dir):
@@ -368,6 +391,7 @@ def serve_dataset_image(module, disease_id, filename):
 
 
 @app.route('/api/dataset/image', methods=['DELETE'])
+@admin_required
 def delete_dataset_image():
     data = request.json or {}
     module = data.get('module')
@@ -393,6 +417,7 @@ def delete_dataset_image():
 
 
 @app.route('/api/dataset/delete-bulk', methods=['POST'])
+@admin_required
 def delete_bulk_dataset_images():
     data = request.json or {}
     module = data.get('module')
@@ -493,6 +518,7 @@ def execute_training(module, epochs, batch_size, learning_rate):
 
 
 @app.route('/api/train', methods=['POST'])
+@admin_required
 def train_model():
     data = request.json or {}
     module = data.get('module') or request.args.get('module')
@@ -526,6 +552,7 @@ def get_train_status():
 
 
 @app.route('/api/train/reset', methods=['POST'])
+@admin_required
 def reset_train_status():
     data = request.json or {}
     module = data.get('module')
@@ -558,55 +585,70 @@ def model_status():
 # ─── Detect (module-aware) ─────────────────────────────────────────────────────
 @app.route('/api/detect', methods=['POST'])
 def detect():
-    try:
-        from model_trainer import predict, predict_auto
-        data = request.json
-        image_b64 = data.get('image')
-        module    = data.get('module', 'auto')  # 'auto' checks both eye + wing models
+    data = request.json or {}
+    image_b64 = data.get('image')
+    module    = data.get('module', 'auto')  # 'auto' checks both eye + wing models
 
-        if not image_b64:
-            return jsonify({"error": "No image provided"}), 400
+    if not image_b64:
+        return jsonify({"error": "No image provided"}), 400
+
+    try:
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
-        img = Image.open(io.BytesIO(base64.b64decode(image_b64))).convert('RGB')
+        raw_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(raw_bytes)).convert('RGB')
+    except Exception:
+        return jsonify({"error": "Invalid base64 encoding or corrupted image data"}), 400
 
+    if module not in ('eye', 'wing', 'auto'):
+        return jsonify({"error": "module must be 'eye', 'wing', or 'auto'"}), 400
+
+    try:
+        from model_trainer import predict, predict_auto
         if module == 'auto':
-            return jsonify(predict_auto(img, MODELS_DIR, load_diseases()))
+            pred_result = predict_auto(img, MODELS_DIR, load_diseases())
+        else:
+            pred_result = predict(img, MODELS_DIR, load_diseases(), module)
 
-        if module not in ('eye', 'wing'):
-            return jsonify({"error": "module must be 'eye', 'wing', or 'auto'"}), 400
-        return jsonify(predict(img, MODELS_DIR, load_diseases(), module))
+        if isinstance(pred_result, dict):
+            pred_result['legal_disclaimer'] = 'Clucko AI provides automated screening estimates for poultry flock decision support. It does not provide clinical veterinary diagnoses under the Philippine Veterinary Medicine Act (RA 9286). Consult a licensed veterinarian.'
+
+        return jsonify(pred_result)
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Model detection error occurred"}), 500
 
 
 # ─── Grad-CAM (module-aware) ──────────────────────────────────────────────────
 @app.route('/api/gradcam', methods=['POST'])
 def gradcam():
+    data = request.json or {}
+    image_b64 = data.get('image')
+    module    = data.get('module', 'eye')
+
+    if not image_b64:
+        return jsonify({"error": "No image provided"}), 400
+    if module not in ('eye', 'wing'):
+        return jsonify({"error": "module must be 'eye' or 'wing'"}), 400
+
+    model_path = os.path.join(MODELS_DIR, f'gamefowl_model_{module}.h5')
+    label_path = os.path.join(MODELS_DIR, f'labels_{module}.json')
+
+    if not os.path.exists(model_path) or not os.path.exists(label_path):
+        return jsonify({"error": f"Model for '{module}' module not trained yet"}), 400
+
     try:
-        from model_trainer import _load_tf, generate_gradcam, preprocess_image
-        data = request.json or {}
-        image_b64 = data.get('image')
-        module    = data.get('module', 'eye')
-
-        if not image_b64:
-            return jsonify({"error": "No image provided"}), 400
-        if module not in ('eye', 'wing'):
-            return jsonify({"error": "module must be 'eye' or 'wing'"}), 400
-
-        model_path = os.path.join(MODELS_DIR, f'gamefowl_model_{module}.h5')
-        label_path = os.path.join(MODELS_DIR, f'labels_{module}.json')
-
-        if not os.path.exists(model_path) or not os.path.exists(label_path):
-            return jsonify({"error": f"Model for '{module}' module not trained yet"}), 400
-
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
-        img = Image.open(io.BytesIO(base64.b64decode(image_b64))).convert('RGB')
+        raw_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(raw_bytes)).convert('RGB')
+    except Exception:
+        return jsonify({"error": "Invalid base64 encoding or corrupted image data"}), 400
 
+    try:
+        from model_trainer import _load_tf, generate_gradcam, preprocess_image
         tf, *_ = _load_tf()
         model = tf.keras.models.load_model(model_path)
         with open(label_path, 'r') as f:

@@ -1,5 +1,6 @@
 from flask import request, jsonify
 from datetime import datetime
+import re
 from app import app
 from db import get_db, token_required
 
@@ -142,17 +143,19 @@ def get_tasks():
 @token_required
 def create_task():
     d = request.json or {}
-    title = (d.get('title') or '').strip()
-    due_date = (d.get('date') or d.get('due_date') or '').strip()
-    description = (d.get('note') or d.get('description') or '').strip()
-    due_time = (d.get('time') or d.get('due_time') or '').strip()
-    color = d.get('color') or '#4CAF50'
-    icon = d.get('icon') or 'calendar'
+    title = str(d.get('title') or '').strip()[:200]
+    due_date = str(d.get('date') or d.get('due_date') or '').strip()[:50]
+    description = str(d.get('note') or d.get('description') or '').strip()[:2000]
+    due_time = str(d.get('time') or d.get('due_time') or '').strip()[:50]
+    raw_color = str(d.get('color') or '#4CAF50').strip()
+    color = raw_color if re.match(r'^#[0-9a-fA-F]{3,8}$', raw_color) else '#4CAF50'
+    raw_icon = str(d.get('icon') or 'calendar').strip()
+    icon = ''.join(c for c in raw_icon if c.isalnum() or c in '-_')[:30] or 'calendar'
     farm_id = d.get('farm_id')
     assigned_to = d.get('assigned_to_user_id')
 
     if not title:
-        return jsonify({'error': 'Title is required'}), 400
+        return jsonify({'error': 'Title is required (maximum 200 characters)'}), 400
     if not due_date:
         return jsonify({'error': 'Due date is required'}), 400
 
@@ -340,13 +343,17 @@ def update_task(task_id):
             if int(task['owner_id']) != int(request.user_id) and (not task['created_by_user_id'] or int(task['created_by_user_id']) != int(request.user_id)):
                 return jsonify({'error': 'Only the farm owner or creator can edit this task'}), 403
 
-            title = d.get('title', task['title'])
-            description = d.get('note', d.get('description', task['description']))
-            due_date = d.get('date', d.get('due_date', task['due_date']))
-            due_time = d.get('time', d.get('due_time', task['due_time']))
-            color = d.get('color', task['color'])
-            icon = d.get('icon', task['icon'])
-            assigned_to = d.get('assigned_to_user_id', task['assigned_to_user_id'])
+            title = str(d.get('title', task['title']) or '').strip()[:200]
+            if not title:
+                return jsonify({'error': 'Title is required'}), 400
+            description = str(d.get('note', d.get('description', task['description'])) or '').strip()[:2000]
+            due_date = str(d.get('date', d.get('due_date', task['due_date'])) or '').strip()[:50]
+            due_time = str(d.get('time', d.get('due_time', task['due_time'])) or '').strip()[:50]
+            raw_c = str(d.get('color', task['color']) or '#4CAF50').strip()
+            color = raw_c if re.match(r'^#[0-9a-fA-F]{3,8}$', raw_c) else task['color']
+            raw_i = str(d.get('icon', task['icon']) or 'calendar').strip()
+            icon = ''.join(c for c in raw_i if c.isalnum() or c in '-_')[:30] or task['icon']
+            assigned_to = int(d['assigned_to_user_id']) if d.get('assigned_to_user_id') is not None else task['assigned_to_user_id']
 
             cur.execute('''
                 UPDATE tasks

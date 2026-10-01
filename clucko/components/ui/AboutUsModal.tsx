@@ -177,10 +177,32 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
                   </Text>
                 </View>
 
+                {/* Privacy & Data Protection Compliance (RA 10173) */}
+                <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
+                  <Text style={[styles.sectionTitle, { color: primaryBrand }]}>
+                    <Ionicons name="lock-closed-outline" size={16} color={primaryBrand} /> Data Privacy &amp; Governance (RA 10173)
+                  </Text>
+                  <Text style={[styles.bodyText, { color: textSecondary, marginBottom: 8 }]}>
+                    Clucko processes personal and agricultural data in strict accordance with the Philippine Data Privacy Act of 2012 (Republic Act No. 10173).
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Data Controller:</Text> Clucko Operations
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Postal Address:</Text> Davao City, Philippines
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Data Protection Contact:</Text> jasphertadlan@gmail.com
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Right to Erasure:</Text> You can permanently erase your account and all flock records at any time in Profile → Preferences → Danger Zone.
+                  </Text>
+                </View>
+
                 {/* Footer Copyright */}
                 <View style={styles.footerWrap}>
                   <Text style={[styles.copyrightText, { color: textMuted }]}>
-                    Clucko · AI Gamefowl Health System © 2026
+                    Clucko · AI Gamefowl Health System © 2026 · Davao City, PH
                   </Text>
                 </View>
               </ScrollView>

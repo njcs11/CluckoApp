@@ -81,15 +81,25 @@ def get_notifications():
 @token_required
 def create_notification():
     d = request.json or {}
-    farm_id = d.get('farm_id')
-    title = d.get('title')
-    message = d.get('message')
-    notif_type = d.get('type', 'info')
-    chicken_id = d.get('chicken_id')
-    chicken_name = d.get('chicken_name')
+    title = str(d.get('title') or '').strip()[:200]
+    message = str(d.get('message') or '').strip()[:2000]
+    raw_type = str(d.get('type') or 'info').strip().lower()
+    notif_type = raw_type if raw_type in ('info', 'alert', 'warning', 'success') else 'info'
+    chicken_name = str(d.get('chicken_name') or '').strip()[:100] if d.get('chicken_name') else None
+    
+    chicken_id = None
+    if d.get('chicken_id'):
+        try:
+            c_val = int(d['chicken_id'])
+            if c_val > 0:
+                chicken_id = c_val
+        except (ValueError, TypeError):
+            chicken_id = None
 
     if not title or not message:
         return jsonify({'error': 'title and message required'}), 400
+
+    farm_id = d.get('farm_id')
 
     db = get_db()
     try:
@@ -132,8 +142,9 @@ def mark_notification_read(nid):
     try:
         with db.cursor() as cur:
             cur.execute('''
-                INSERT IGNORE INTO notification_reads (notification_id, user_id)
+                INSERT INTO notification_reads (notification_id, user_id)
                 VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
             ''', (nid, request.user_id))
             db.commit()
             return jsonify({'success': True})
@@ -154,9 +165,10 @@ def mark_all_notifications_read():
 
             placeholders = ', '.join(['%s'] * len(farm_ids))
             cur.execute(f'''
-                INSERT IGNORE INTO notification_reads (notification_id, user_id)
+                INSERT INTO notification_reads (notification_id, user_id)
                 SELECT n.id, %s FROM notifications n
                 WHERE n.farm_id IN ({placeholders})
+                ON CONFLICT DO NOTHING
             ''', (request.user_id, *farm_ids))
             db.commit()
             return jsonify({'success': True})

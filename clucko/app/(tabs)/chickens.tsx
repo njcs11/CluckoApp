@@ -6,6 +6,7 @@ import { getUserRole, apiGetFarms, apiGetQrScans } from '../../lib/api';
 import { apiGetReports } from '../../lib/api';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
 import { Feather, FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
 import { File as ExpoFile, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -307,6 +308,7 @@ const loadScanHistory = async () => {
     refreshFarms();
     loadScanHistory();
     loadRecentScans();
+    AsyncStorage.removeItem('active_chicken_profile_id');
   }, [])
 );
 

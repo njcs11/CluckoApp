@@ -6,10 +6,49 @@ from db import get_db, token_required
 @app.route('/api/scans', methods=['POST'])
 @token_required
 def save_scan():
-    d = request.json
+    d = request.json or {}
     required = ['chicken_id','image_type','predicted_condition','confidence_score','severity_level']
     if not all(d.get(k) is not None for k in required):
-        return jsonify({'error': 'Missing fields'}), 400
+        return jsonify({'error': 'Missing required scan fields'}), 400
+
+    try:
+        chicken_id = int(d['chicken_id'])
+        if chicken_id <= 0:
+            return jsonify({'error': 'Invalid chicken_id'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'chicken_id must be a valid integer'}), 400
+
+    try:
+        conf_score = float(d['confidence_score'])
+        if not (0.0 <= conf_score <= 100.0):
+            return jsonify({'error': 'confidence_score must be between 0.0 and 100.0'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'confidence_score must be a numeric value'}), 400
+
+    severity = str(d['severity_level']).strip().lower()
+    if severity not in ('none', 'moderate', 'high', 'critical'):
+        return jsonify({'error': "severity_level must be one of: 'none', 'moderate', 'high', 'critical'"}), 400
+
+    raw_img_type = str(d.get('image_type', 'other')).strip().lower()
+    if raw_img_type in ('eye', 'head'):
+        img_type = 'eye'
+    elif raw_img_type in ('wing',):
+        img_type = 'wing'
+    elif raw_img_type in ('posture', 'body', 'full', 'auto'):
+        img_type = 'posture'
+    elif raw_img_type in ('feces', 'droppings'):
+        img_type = 'feces'
+    elif raw_img_type in ('other',):
+        img_type = 'other'
+    else:
+        return jsonify({'error': "image_type must be one of: 'eye', 'wing', 'posture', 'feces', 'other'"}), 400
+
+    pred_cond = str(d['predicted_condition']).strip()[:100]
+    raw_img_url = d.get('image_url') or d.get('photo_url')
+    if raw_img_url and str(raw_img_url).strip().lower().startswith('javascript:'):
+        return jsonify({'error': 'Invalid image URL protocol'}), 400
+    image_url = str(raw_img_url).strip() if raw_img_url else None
+
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -18,7 +57,7 @@ def save_scan():
                 LEFT JOIN farm_members fm ON fm.farm_id = c.farm_id AND fm.user_id = %s
                 LEFT JOIN farms f ON f.id = c.farm_id
                 WHERE c.id = %s AND (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
-            ''', (request.user_id, d['chicken_id'], request.user_id, request.user_id, request.user_id))
+            ''', (request.user_id, chicken_id, request.user_id, request.user_id, request.user_id))
             chicken_row = cur.fetchone()
             if not chicken_row:
                 return jsonify({'error': 'Chicken not found or no access'}), 404
@@ -29,9 +68,9 @@ def save_scan():
                 JOIN image_captures ic ON ic.id = dr.image_id
                 WHERE ic.chicken_id = %s AND ic.user_id = %s
                   AND dr.predicted_condition = %s
-                  AND ic.capture_datetime >= NOW() - INTERVAL 4 SECOND
+                  AND ic.capture_datetime >= NOW() - INTERVAL '4 SECOND'
                 ORDER BY ic.capture_datetime DESC LIMIT 1
-            ''', (d['chicken_id'], request.user_id, d['predicted_condition']))
+            ''', (chicken_id, request.user_id, pred_cond))
             dup_scan = cur.fetchone()
             if dup_scan:
                 return jsonify({
@@ -65,41 +104,48 @@ def save_scan():
                         'plan_name': sub['plan_name']
                     }), 403
 
-            image_url = d.get('image_url') or d.get('photo_url')
             cur.execute('INSERT INTO image_captures (chicken_id,user_id,image_type,image_url) VALUES (%s,%s,%s,%s)',
-                        (d['chicken_id'],request.user_id,d['image_type'],image_url))
+                        (chicken_id, request.user_id, img_type, image_url))
             image_id = cur.lastrowid
+
+            # Monotonically increment captures_used on owner's subscription
+            # Deleting a chicken later will cascade delete image_captures, but will NOT undo used scan credits.
+            cur.execute('''
+                UPDATE subscriptions
+                SET captures_used = COALESCE(captures_used, 0) + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s
+            ''', (owner_id,))
             cur.execute('''
                 INSERT INTO detection_results
                 (image_id,predicted_condition,confidence_score,severity_level,all_predictions,detected_symptoms)
                 VALUES (%s,%s,%s,%s,%s,%s)
-            ''', (image_id,d['predicted_condition'],d['confidence_score'],d['severity_level'],
-                  json.dumps(d.get('all_predictions',[])),json.dumps(d.get('symptoms',[]))))
+            ''', (image_id, pred_cond, conf_score, severity,
+                  json.dumps(d.get('all_predictions',[])), json.dumps(d.get('symptoms',[]))))
             detection_id = cur.lastrowid
-            cur.execute('SELECT id FROM diseases WHERE disease_name=%s', (d['predicted_condition'],))
+            cur.execute('SELECT id FROM diseases WHERE disease_name=%s', (pred_cond,))
             disease = cur.fetchone()
-            symptoms_str = ', '.join(d.get('symptoms',[]))
+            symptoms_str = ', '.join(str(s)[:50] for s in d.get('symptoms',[]))
             cur.execute('''
                 INSERT INTO health_history (chicken_id,user_id,image_id,disease_id,observation,confidence_score,scan_type,image_url)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            ''', (d['chicken_id'],request.user_id,image_id,disease['id'] if disease else None,
-                  f"{d['predicted_condition']} detected. Symptoms: {symptoms_str}",
-                  d['confidence_score'],d['image_type'],image_url))
+            ''', (chicken_id, request.user_id, image_id, disease['id'] if disease else None,
+                  f"{pred_cond} detected. Symptoms: {symptoms_str}"[:500],
+                  conf_score, img_type, image_url))
             high_conf = bool(d.get('high_confidence_alert', False))
-            if d['severity_level'] != 'none' or high_conf:
+            if severity != 'none' or high_conf:
                 alert_msgs = {
-                    'critical': f"🚨 EMERGENCY: {d['predicted_condition']} detected! Isolate immediately.",
-                    'high':     f"⚠️ WARNING: {d['predicted_condition']} detected. See vet today.",
-                    'moderate': f"⚠️ NOTICE: Early signs of {d['predicted_condition']} detected.",
+                    'critical': f"🚨 EMERGENCY: {pred_cond} detected! Isolate immediately.",
+                    'high':     f"⚠️ WARNING: {pred_cond} detected. See vet today.",
+                    'moderate': f"⚠️ NOTICE: Early signs of {pred_cond} detected.",
                 }
-                alert_level = 'critical' if (high_conf or d['severity_level'] == 'critical') else 'warning'
-                default_msg = f"🚨 EMERGENCY: {d['predicted_condition']} detected! Isolate immediately." if high_conf else f"{d['predicted_condition']} detected"
-                alert_msg = alert_msgs.get('critical' if high_conf else d['severity_level'], default_msg)
+                alert_level = 'critical' if (high_conf or severity == 'critical') else 'warning'
+                default_msg = f"🚨 EMERGENCY: {pred_cond} detected! Isolate immediately." if high_conf else f"{pred_cond} detected"
+                alert_msg = alert_msgs.get('critical' if high_conf else severity, default_msg)
 
                 cur.execute('''
                     INSERT INTO alerts (chicken_id,detection_id,alert_message,alert_level)
                     VALUES (%s,%s,%s,%s)
-                ''', (d['chicken_id'],detection_id, alert_msg, alert_level))
+                ''', (chicken_id, detection_id, alert_msg, alert_level))
             
             # Fetch user info to include in farm-scoped notification
             cur.execute('SELECT first_name, last_name, role FROM users WHERE id=%s', (request.user_id,))
@@ -115,9 +161,9 @@ def save_scan():
                     farm_id = f_row['id']
 
             if farm_id:
-                cond = d['predicted_condition']
-                conf = round(float(d['confidence_score']), 1)
-                sev = d['severity_level']
+                cond = pred_cond
+                conf = round(conf_score, 1)
+                sev = severity
                 chicken_name = chicken_row['chicken_name']
 
                 if cond.lower() == 'healthy':
@@ -136,14 +182,14 @@ def save_scan():
                 cur.execute('''
                     INSERT INTO notifications (farm_id, user_id, title, message, type, chicken_id, chicken_name)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ''', (farm_id, request.user_id, notif_title, notif_msg, notif_type, d['chicken_id'], chicken_name))
+                ''', (farm_id, request.user_id, notif_title, notif_msg, notif_type, chicken_id, chicken_name))
 
             status_map = {'none':'HEALTHY','moderate':'WARNING','high':'WARNING','critical':'CRITICAL'}
             color_map  = {'none':'#4CAF50','moderate':'#FF9800','high':'#FF9800','critical':'#f44336'}
-            final_status = 'CRITICAL' if high_conf else status_map.get(d['severity_level'], 'HEALTHY')
-            final_color  = '#f44336' if high_conf else color_map.get(d['severity_level'], '#4CAF50')
+            final_status = 'CRITICAL' if high_conf else status_map.get(severity, 'HEALTHY')
+            final_color  = '#f44336' if high_conf else color_map.get(severity, '#4CAF50')
             cur.execute('UPDATE chickens SET status=%s,status_color=%s,updated_at=NOW() WHERE id=%s',
-                        (final_status, final_color, d['chicken_id']))
+                        (final_status, final_color, chicken_id))
             db.commit()
         return jsonify({'success':True,'image_id':image_id,'detection_id':detection_id})
     except Exception as e:

@@ -17,6 +17,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
 
   const activeModule = trainStatus.eye.status === 'running' ? 'eye' : (trainStatus.wing.status === 'running' ? 'wing' : null);
   const activeProgress = activeModule ? trainStatus[activeModule]?.progress || 0 : 0;
@@ -141,6 +142,30 @@ function AppLayout() {
             <span className="footer-badge">v2.1 MobileNetV2</span>
             <span className="footer-sub-text">Autonomous Suite</span>
           </div>
+
+          <button
+            type="button"
+            className="sidebar-legal-btn"
+            onClick={() => setShowLegalModal(true)}
+            style={{
+              marginTop: 10,
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              background: 'transparent',
+              border: '1px solid #323640',
+              borderRadius: 6,
+              padding: '6px 8px',
+              color: '#9ca3af',
+              fontSize: '11px',
+              cursor: 'pointer',
+            }}
+          >
+            <ShieldCheck size={13} color="#22c55e" />
+            <span>Legal &amp; Privacy (RA 10173)</span>
+          </button>
         </div>
       </aside>
 
@@ -191,6 +216,85 @@ function AppLayout() {
           </Routes>
         </main>
       </div>
+
+      {showLegalModal && (
+        <div
+          className="modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 20,
+          }}
+          onClick={() => setShowLegalModal(false)}
+        >
+          <div
+            className="card legal-modal-box"
+            style={{
+              maxWidth: 580,
+              width: '100%',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: '#181b21',
+              border: '1px solid #323640',
+              borderRadius: 14,
+              padding: 24,
+              color: '#e5e7eb',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShieldCheck size={22} color="#22c55e" />
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Legal &amp; Data Privacy Disclosures</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowLegalModal(false)}
+                style={{ background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#9ca3af' }}>
+              <p style={{ marginBottom: 12 }}>
+                <strong style={{ color: '#fff' }}>Philippine Data Privacy Act of 2012 (RA 10173):</strong> Clucko complies with statutory privacy requirements governing the collection and processing of agricultural, user, and imagery data.
+              </p>
+
+              <div style={{ background: '#20242c', padding: 12, borderRadius: 8, marginBottom: 12 }}>
+                <div><strong>Business Entity:</strong> Clucko AI Operations</div>
+                <div><strong>Jurisdiction:</strong> Davao City, Philippines</div>
+                <div><strong>Data Protection Officer (DPO):</strong> jasphertadlan@gmail.com</div>
+                <div><strong>Minimum Age:</strong> 18 years old</div>
+              </div>
+
+              <p style={{ marginBottom: 12 }}>
+                <strong style={{ color: '#fbbf24' }}>Veterinary Medical Disclaimer (RA 9286):</strong> Clucko AI models provide automated computer-vision estimations for poultry health monitoring and research purposes only. The platform does not provide licensed veterinary diagnoses or medical prescriptions. Consult a licensed avian veterinarian for clinical diagnosis.
+              </p>
+
+              <p style={{ marginBottom: 16 }}>
+                <strong style={{ color: '#fff' }}>Data Subject Rights:</strong> You have the right to access, rectify, or request erasure of your data under RA 10173 §16. Account deletion can be performed in the mobile app or by writing to the DPO email above.
+              </p>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '10px 0' }}
+                onClick={() => setShowLegalModal(false)}
+              >
+                Acknowledge &amp; Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

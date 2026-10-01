@@ -1,5 +1,6 @@
 import os
 import re
+import hmac
 import psycopg2
 import psycopg2.extras
 import jwt
@@ -31,7 +32,16 @@ SUPABASE_CONFIG = {
 
 # Backward compatibility alias
 DB_CONFIG = SUPABASE_CONFIG
-SECRET_KEY = 'clucko_secret_key_2026'
+SECRET_KEY = os.environ.get('JWT_SECRET', 'clucko_secret_key_2026')
+
+_REVOKED_TOKENS = set()
+
+def revoke_token(token: str):
+    if token:
+        _REVOKED_TOKENS.add(token.strip())
+
+def is_token_revoked(token: str) -> bool:
+    return bool(token and token.strip() in _REVOKED_TOKENS)
 
 class PostgresCursorWrapper:
     """
@@ -48,7 +58,13 @@ class PostgresCursorWrapper:
         # 1. Translate MySQL-specific INTERVAL syntax to PostgreSQL
         query = re.sub(r'\bINTERVAL\s+(\d+)\s+([A-Za-z]+)\b', r"INTERVAL '\1 \2'", query, flags=re.IGNORECASE)
 
-        # 2. Check for INSERT without RETURNING
+        # 2. Translate MySQL-specific INSERT IGNORE to PostgreSQL ON CONFLICT DO NOTHING
+        if re.search(r'\bINSERT\s+IGNORE\s+INTO\b', query, re.IGNORECASE):
+            query = re.sub(r'\bINSERT\s+IGNORE\s+INTO\b', 'INSERT INTO', query, flags=re.IGNORECASE)
+            if not re.search(r'\bON\s+CONFLICT\b', query, re.IGNORECASE):
+                query = query.rstrip().rstrip(';') + ' ON CONFLICT DO NOTHING'
+
+        # 3. Check for INSERT without RETURNING
         is_insert = bool(re.match(r'^\s*INSERT\s+INTO\s+', query, re.IGNORECASE))
         has_returning = bool(re.search(r'\bRETURNING\b', query, re.IGNORECASE))
         is_notif_reads = bool(re.search(r'INSERT\s+INTO\s+notification_reads\b', query, re.IGNORECASE))
@@ -194,14 +210,17 @@ def record_user_activity(user_id):
     last = _LAST_ACTIVE_MAP.get(user_id, 0)
     if now - last > 60:
         _LAST_ACTIVE_MAP[user_id] = now
+        db = None
         try:
             db = get_db()
             with db.cursor() as cur:
                 cur.execute('UPDATE users SET last_active_at = NOW() WHERE id = %s', (user_id,))
                 db.commit()
-            db.close()
         except Exception:
             pass
+        finally:
+            if db:
+                db.close()
 
 def token_required(f):
     @wraps(f)
@@ -214,17 +233,57 @@ def token_required(f):
         if not token or token.lower() in ('null', 'undefined', 'none'):
             return jsonify({'error': 'Token missing'}), 401
 
+        if is_token_revoked(token):
+            return jsonify({'error': 'Token has been revoked'}), 401
+
         try:
             data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
             user_id = data.get('user_id')
             if not user_id:
                 return jsonify({'error': 'Invalid token'}), 401
             request.user_id = user_id
+            request.user_role = data.get('role', 'caretaker')
             record_user_activity(user_id)
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token expired'}), 401
         except Exception:
             return jsonify({'error': 'Invalid token'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        admin_key = os.environ.get('ADMIN_API_KEY')
+        req_key = request.headers.get('X-Admin-Key')
+        if admin_key and req_key and hmac.compare_digest(admin_key, req_key):
+            request.user_id = 0
+            request.user_role = 'admin'
+            return f(*args, **kwargs)
+
+        is_dev = os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG', '').lower() in ('1', 'true')
+        if is_dev and not admin_key:
+            return f(*args, **kwargs)
+
+        auth_header = request.headers.get('Authorization', '').strip()
+        if not auth_header:
+            return jsonify({'error': 'Admin authorization required'}), 401
+
+        token = auth_header.replace('Bearer ', '').strip()
+        if not token or is_token_revoked(token):
+            return jsonify({'error': 'Token invalid or revoked'}), 401
+
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            if payload.get('role') != 'admin':
+                return jsonify({'error': 'Administrator access required'}), 403
+            request.user_id = payload['user_id']
+            request.user_role = payload.get('role', 'admin')
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except Exception:
+            return jsonify({'error': 'Invalid or expired token'}), 401
 
         return f(*args, **kwargs)
     return decorated

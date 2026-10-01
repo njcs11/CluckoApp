@@ -227,7 +227,10 @@ export default function ChickenDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       AsyncStorage.getItem('isGuestMode').then((v) => setIsGuestMode(v === 'true'));
-    }, [])
+      if (id) {
+        AsyncStorage.setItem('active_chicken_profile_id', String(id));
+      }
+    }, [id])
   );
 
   // Loads this chicken straight from the backend (via
@@ -320,9 +323,11 @@ export default function ChickenDetailScreen() {
       setChicken((prev: any) => ({ ...prev, photo: newPhotoUri }));
       await updateChickenForCurrentUser(String(id), { photo: newPhotoUri });
       await notify({
-        title: 'Photo Updated',
-        message: 'Profile photo has been successfully updated.',
+        title: 'Chicken Photo Updated',
+        message: `${chicken?.name || 'Chicken'}'s profile photo has been successfully updated.`,
         type: 'success',
+        chickenId: String(id),
+        chickenName: chicken?.name,
       });
     } catch (error: any) {
       console.error('Error updating profile photo:', error);
@@ -430,9 +435,11 @@ export default function ChickenDetailScreen() {
       setChicken((prev: any) => ({ ...prev, ...updated }));
       setShowEditModal(false);
       await notify({
-        title: 'Chicken Updated',
-        message: `${updated.name}'s profile has been updated.`,
+        title: 'Chicken Profile Updated',
+        message: `${updated.name}'s chicken profile has been updated.`,
         type: 'success',
+        chickenId: String(id),
+        chickenName: updated.name,
       });
     } catch (error: any) {
       console.error('Error saving chicken edits:', error);
@@ -774,7 +781,30 @@ export default function ChickenDetailScreen() {
                     activeOpacity={0.75}
                   >
                     <View style={styles.scanItemLeft}>
-                      <View style={[styles.scanDot, { backgroundColor: scanColor }]} />
+                      {scan.image_url ? (
+                        <View style={{ position: 'relative' }}>
+                          <Image
+                            source={{ uri: scan.image_url }}
+                            style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: colors.divider }}
+                            resizeMode="cover"
+                          />
+                          <View
+                            style={{
+                              position: 'absolute',
+                              bottom: -2,
+                              right: -2,
+                              width: 12,
+                              height: 12,
+                              borderRadius: 6,
+                              backgroundColor: scanColor,
+                              borderWidth: 2,
+                              borderColor: colors.card,
+                            }}
+                          />
+                        </View>
+                      ) : (
+                        <View style={[styles.scanDot, { backgroundColor: scanColor }]} />
+                      )}
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={[styles.scanDate, { color: colors.text }]}>
                           {scan.date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
@@ -871,7 +901,7 @@ export default function ChickenDetailScreen() {
             }
             router.push({
               pathname: '/(tabs)/capture',
-              params: { chickenId: chicken.chickenId || String(chicken.id) },
+              params: { chickenId: String(chicken?.id || chicken?.chickenId || id) },
             });
           }}>
             <Ionicons name="camera-outline" size={18} color="#fff" />

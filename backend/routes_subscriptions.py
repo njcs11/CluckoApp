@@ -1,6 +1,9 @@
 import os
 import json
+import math
 import base64
+import hmac
+import hashlib
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
@@ -154,13 +157,15 @@ def get_effective_subscription(user_id, cur, db):
     if stored_plan in ('pro', 'premium', 'free_trial'):
         if now <= end_date:
             effective_status = 'active'
-            days_remaining = max(0, (end_date - now).days)
+            total_seconds_left = max(0.0, (end_date - now).total_seconds())
+            days_remaining = max(1, math.ceil(total_seconds_left / 86400.0))
         elif now <= grace_period_end:
             # 1. ⚠️ THE GRACE PERIOD (0 to 7 Days After Expiration)
             # Premium features remain fully active for a few days while user can renew
             effective_status = 'grace_period'
             is_in_grace_period = True
-            grace_days_remaining = max(1, (grace_period_end - now).days)
+            total_grace_seconds = max(0.0, (grace_period_end - now).total_seconds())
+            grace_days_remaining = max(1, math.ceil(total_grace_seconds / 86400.0))
         else:
             # 2. ⬇️ THE DOWNGRADE TO FREE TIER
             # System confirms expiration past grace: automatically switched to regular Free Plan.
@@ -191,12 +196,28 @@ def get_effective_subscription(user_id, cur, db):
     ''', (target_user_id,))
     total_chickens_count = cur.fetchone()['cnt']
 
-    # Count captures performed by the owner + their farm caretakers
+    # Count captures: To guarantee that deleting a chicken NEVER un-does or resets
+    # used scan credits, we track consumption via subscriptions.captures_used.
+    persisted_captures = int(sub.get('captures_used') or 0)
+
+    # Check live count across chickens on owner's farms
     cur.execute('''
         SELECT COUNT(*) as cnt FROM image_captures ic
-        WHERE ic.user_id = %s
+        JOIN chickens c ON c.id = ic.chicken_id
+        JOIN farms f ON f.id = c.farm_id
+        WHERE f.owner_id = %s
     ''', (target_user_id,))
-    captures_count = cur.fetchone()['cnt']
+    live_row = cur.fetchone()
+    live_count = int(live_row['cnt'] if live_row else 0)
+
+    # If live_count exceeds persisted (e.g. from historical data before counter migration), sync upward
+    if live_count > persisted_captures:
+        persisted_captures = live_count
+        cur.execute('UPDATE subscriptions SET captures_used = %s WHERE id = %s', (persisted_captures, sub['id']))
+        db.commit()
+
+    captures_count = persisted_captures
+    scans_remaining = max(0, max_captures - captures_count) if max_captures < 999999 else 999999
 
     return {
         'subscription_id': sub['id'],
@@ -210,7 +231,10 @@ def get_effective_subscription(user_id, cur, db):
         'is_in_grace_period': is_in_grace_period,
         'is_expired': is_expired,
         'days_remaining': days_remaining,
+        'days_left': days_remaining,
         'grace_days_remaining': grace_days_remaining,
+        'scans_remaining': scans_remaining,
+        'scans_left': scans_remaining,
         'start_date': sub['start_date'].isoformat() if sub['start_date'] else None,
         'end_date': sub['end_date'].isoformat() if sub['end_date'] else None,
         'grace_period_end': sub['grace_period_end'].isoformat() if sub['grace_period_end'] else None,
@@ -224,8 +248,12 @@ def get_effective_subscription(user_id, cur, db):
             'farms_count': farms_count,
             'total_chickens_count': total_chickens_count,
             'captures_count': captures_count,
+            'captures_used': captures_count,
+            'scans_used': captures_count,
             'farms_remaining': max(0, max_farms - farms_count) if max_farms < 999999 else 999999,
-            'captures_remaining': max(0, max_captures - captures_count) if max_captures < 999999 else 999999,
+            'captures_remaining': scans_remaining,
+            'scans_remaining': scans_remaining,
+            'scans_left': scans_remaining,
         },
         'features': plan_config['features'],
         'badge': plan_config['badge'],
@@ -427,18 +455,19 @@ def verify_payment():
     Enforces Rule 1 (Don't Double-Charge): If renewing same plan, extends existing end date!
     """
     d = request.json or {}
-    session_id = d.get('session_id')
+    session_id = str(d.get('session_id') or '').strip()
+    if not session_id or len(session_id) > 128:
+        return jsonify({'error': 'Valid session_id is required'}), 400
     plan_key = d.get('plan')
 
     db = get_db()
     try:
         with db.cursor() as cur:
             # Look up transaction
-            if session_id:
-                cur.execute('SELECT plan, payment_gateway, amount FROM subscription_transactions WHERE checkout_session_id=%s', (session_id,))
-                tx = cur.fetchone()
-                if tx and tx.get('plan'):
-                    plan_key = tx['plan']
+            cur.execute('SELECT plan, payment_gateway, amount FROM subscription_transactions WHERE checkout_session_id=%s', (session_id,))
+            tx = cur.fetchone()
+            if tx and tx.get('plan'):
+                plan_key = tx['plan']
 
             if not plan_key or plan_key not in PLANS_CONFIG:
                 plan_key = 'pro'
@@ -464,8 +493,10 @@ def verify_payment():
 
             if existing and existing.get('plan') == plan_key and existing.get('end_date') and existing['end_date'] > now:
                 new_end_date = existing['end_date'] + timedelta(days=duration_days)
+                new_start_date = existing.get('start_date') or now
             else:
                 new_end_date = now + timedelta(days=duration_days)
+                new_start_date = now
 
             new_grace_date = new_end_date + timedelta(days=7)
 
@@ -492,7 +523,7 @@ def verify_payment():
                     plan_info['max_farms'],
                     plan_info['max_chickens_per_farm'],
                     plan_info['max_captures'],
-                    now,
+                    new_start_date,
                     new_end_date,
                     new_grace_date,
                     now,
@@ -513,7 +544,7 @@ def verify_payment():
                     plan_info['max_farms'],
                     plan_info['max_chickens_per_farm'],
                     plan_info['max_captures'],
-                    now,
+                    new_start_date,
                     new_end_date,
                     new_grace_date
                 ))
@@ -523,7 +554,7 @@ def verify_payment():
                 cur.execute('''
                     UPDATE subscription_transactions
                     SET status = 'paid', updated_at = %s
-                    WHERE checkout_session_id = %s OR user_id = %s
+                    WHERE checkout_session_id = %s AND user_id = %s
                 ''', (now, session_id, request.user_id))
 
             # Insert in-app notification
@@ -559,8 +590,34 @@ def paymongo_webhook():
     """
     Real-time webhook listener for PayMongo.
     Synchronizes backend state when a GCash payment succeeds.
+    Verifies Paymongo-Signature when PAYMONGO_WEBHOOK_SECRET is set.
     """
+    webhook_secret = os.environ.get('PAYMONGO_WEBHOOK_SECRET')
+    if webhook_secret:
+        sig_header = request.headers.get('Paymongo-Signature', '')
+        if not sig_header:
+            return jsonify({'error': 'Missing Paymongo-Signature header'}), 400
+
+        parts = {}
+        for item in sig_header.split(','):
+            if '=' in item:
+                k, v = item.strip().split('=', 1)
+                parts[k] = v
+
+        timestamp = parts.get('t')
+        signature = parts.get('te') or parts.get('li')
+        if not timestamp or not signature:
+            return jsonify({'error': 'Malformed Paymongo-Signature header'}), 400
+
+        raw_body = request.get_data(as_text=True)
+        payload_to_sign = f"{timestamp}.{raw_body}".encode('utf-8')
+        expected_sig = hmac.new(webhook_secret.encode('utf-8'), payload_to_sign, hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(expected_sig, signature):
+            return jsonify({'error': 'Invalid webhook signature'}), 401
+
     event = request.json or {}
+    db = None
     try:
         event_type = event.get('data', {}).get('attributes', {}).get('type')
         if event_type in ('checkout_session.payment.paid', 'payment.paid'):
@@ -582,20 +639,33 @@ def paymongo_webhook():
                     
                     if existing and existing.get('plan') == plan_key and existing.get('end_date') and existing['end_date'] > now:
                         new_end_date = existing['end_date'] + timedelta(days=plan_info['duration_days'])
+                        new_start_date = existing.get('start_date') or now
                     else:
                         new_end_date = now + timedelta(days=plan_info['duration_days'])
+                        new_start_date = now
                     
                     new_grace = new_end_date + timedelta(days=7)
                     
-                    cur.execute('''
-                        UPDATE subscriptions
-                        SET plan = %s, status = 'active', price_paid = %s, payment_gateway = 'paymongo',
-                            payment_reference = %s, max_farms = %s, max_chickens_per_farm = %s,
-                            max_captures = %s, end_date = %s, grace_period_end = %s, updated_at = %s
-                        WHERE user_id = %s
-                    ''', (plan_key, plan_info['price'], session_id, plan_info['max_farms'],
-                          plan_info['max_chickens_per_farm'], plan_info['max_captures'],
-                          new_end_date, new_grace, now, user_id))
+                    if existing:
+                        cur.execute('''
+                            UPDATE subscriptions
+                            SET plan = %s, status = 'active', price_paid = %s, payment_gateway = 'paymongo',
+                                payment_reference = %s, max_farms = %s, max_chickens_per_farm = %s,
+                                max_captures = %s, start_date = %s, end_date = %s, grace_period_end = %s, updated_at = %s
+                            WHERE user_id = %s
+                        ''', (plan_key, plan_info['price'], session_id, plan_info['max_farms'],
+                              plan_info['max_chickens_per_farm'], plan_info['max_captures'],
+                              new_start_date, new_end_date, new_grace, now, user_id))
+                    else:
+                        cur.execute('''
+                            INSERT INTO subscriptions
+                            (user_id, plan, status, price_paid, currency, payment_gateway,
+                             payment_reference, max_farms, max_chickens_per_farm, max_captures,
+                             start_date, end_date, grace_period_end)
+                            VALUES (%s, %s, 'active', %s, 'PHP', 'paymongo', %s, %s, %s, %s, %s, %s, %s)
+                        ''', (user_id, plan_key, plan_info['price'], session_id,
+                              plan_info['max_farms'], plan_info['max_chickens_per_farm'], plan_info['max_captures'],
+                              new_start_date, new_end_date, new_grace))
                     
                     cur.execute("UPDATE subscription_transactions SET status='paid', updated_at=%s WHERE checkout_session_id=%s", (now, session_id))
                     db.commit()
@@ -603,6 +673,9 @@ def paymongo_webhook():
         return jsonify({'success': True, 'message': 'Event ignored'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
 
 
 # ─── POST /api/subscriptions/dev-toggle ──────────────────────────────────────
@@ -618,6 +691,11 @@ def dev_toggle_subscription():
     - 'grace_period': Sets end_date to yesterday so account enters the 7-day grace period!
     - 'expired_free': Sets grace_period_end to yesterday so account downgrades to Standard Free!
     """
+    is_dev = os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG', '').lower() in ('1', 'true')
+    user_role = getattr(request, 'user_role', '')
+    if not is_dev or user_role != 'admin':
+        return jsonify({'error': 'Subscription dev-toggle is disabled in production and restricted to administrators'}), 403
+
     d = request.json or {}
     target_state = d.get('state') or d.get('plan') or 'pro'
     now = datetime.utcnow()

@@ -127,7 +127,7 @@ export default function SubscriptionScreen() {
 
   const capturesText = isPremiumTier || isProTier || (subData?.limits?.max_captures >= 999999)
     ? 'Unlimited'
-    : `${subData?.limits?.max_captures || 30} Scans`;
+    : `${subData?.usage?.captures_remaining ?? (subData?.limits?.max_captures || 30)} Scans Left (${subData?.usage?.captures_count || 0}/${subData?.limits?.max_captures || 30} used)`;
 
   // Selected plan calculation
   const isSelectedPro = selectedPlan === 'pro';
@@ -624,6 +624,21 @@ export default function SubscriptionScreen() {
               <Text style={[styles.trialNoticeText, { color: colors.textLight }]}>
                 No double charge guarantee: If you renew early, remaining days are automatically added to your new validity period.
               </Text>
+            </View>
+
+            {/* Legal Disclosures & Support Footer (Google Play Compliance) */}
+            <View style={styles.legalFooterRow}>
+              <TouchableOpacity onPress={() => router.push('/signup')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[styles.legalFooterLink, { color: colors.primary }]}>Terms of Service</Text>
+              </TouchableOpacity>
+              <Text style={{ color: colors.textLight, fontSize: 12 }}>•</Text>
+              <TouchableOpacity onPress={() => router.push('/signup')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[styles.legalFooterLink, { color: colors.primary }]}>Privacy Policy</Text>
+              </TouchableOpacity>
+              <Text style={{ color: colors.textLight, fontSize: 12 }}>•</Text>
+              <TouchableOpacity onPress={() => Linking.openURL('mailto:jasphertadlan@gmail.com')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[styles.legalFooterLink, { color: colors.primary }]}>Support</Text>
+              </TouchableOpacity>
             </View>
           </>
         )}
@@ -1290,6 +1305,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 16,
     flex: 1,
+  },
+  legalFooterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingHorizontal: 16,
+  },
+  legalFooterLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   // Modal Styles
   modalBackdrop: {
