@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   apiCreateChicken,
   apiDeleteChicken,
@@ -5,13 +6,14 @@ import {
   apiUpdateChicken,
 } from "../lib/api";
 
+const CACHE_KEY = "cached_chickens_list";
+
 // Safely parses whatever date format the backend returns (ISO string,
 // "Wed, 02 Sep 2026 06:35:00 GMT", MySQL timestamp, etc.) into a plain
 // YYYY-MM-DD string without timezone day-shift artifacts.
 const parseDateSafe = (raw: any): string => {
   if (!raw) return "";
   if (typeof raw === "string") {
-    // If it starts with YYYY-MM-DD, extract it directly to avoid any timezone shifting
     const match = raw.match(/^\d{4}-\d{2}-\d{2}/);
     if (match) return match[0];
     const cleaned = raw.replace(/\s*GMT$/i, "").replace(/Z$/i, "");
@@ -31,9 +33,7 @@ const parseDateSafe = (raw: any): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Converts a backend chicken row (chicken_name, qr_code, farm_id, photo_url,
-// status, created_at, ...) into the shape every screen in this app already
-// expects (name, chickenId, farmId, photo, status, healthStatus, lastScan).
+// Converts a backend chicken row into the shape every screen in this app expects.
 const mapChickenFromApi = (c: any) => {
   const rawStatus = (c.status || "HEALTHY").toUpperCase();
   const statusColor =
@@ -55,13 +55,6 @@ const mapChickenFromApi = (c: any) => {
     status: rawStatus,
     statusColor,
     healthStatus,
-    // NOTE: lastScan/dateAdded here are both derived from the chicken
-    // record's created_at — this is "when the chicken profile was added",
-    // NOT "when it was last scanned". The chicken detail screen
-    // (app/chicken/[id].tsx) overrides the displayed "Last Check" value
-    // using the real scan history from apiGetChickenHistory() instead of
-    // this field, since a chicken can be created without ever being
-    // scanned, or scanned again well after creation.
     lastScan: dateStr,
     dateAdded: dateStr,
     addedByName: c.added_by_name || c.addedByName || null,
@@ -70,18 +63,42 @@ const mapChickenFromApi = (c: any) => {
   };
 };
 
+export const getCachedChickens = async (): Promise<any[] | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn("Error reading cached chickens:", e);
+  }
+  return null;
+};
+
 // Every screen (Home, Chickens, Reports, chicken detail) reads through
-// this — it now always reflects exactly what the backend returns for the
-// logged-in account's role: owner sees every chicken across their farms,
-// caretaker sees only chickens in the farm(s) they're assigned to. No
-// per-account local caching, no hardcoded data, nothing to go stale.
+// this — loads fresh from backend, persists to local cache, and falls back
+// to the cache instantly if the network fails or times out.
 export const loadChickensForCurrentUser = async (): Promise<any[] | null> => {
   try {
     const data = await apiGetChickens();
-    return (data || []).map(mapChickenFromApi);
+    if (Array.isArray(data)) {
+      const mapped = data.map(mapChickenFromApi);
+      try {
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(mapped));
+      } catch (err) {
+        console.warn("Error saving chickens to cache:", err);
+      }
+      return mapped;
+    }
+    const cached = await getCachedChickens();
+    return cached;
   } catch (error) {
-    console.error("Error loading chickens:", error);
-    return null;
+    console.warn("Network error loading chickens, falling back to local cache:", error);
+    const cached = await getCachedChickens();
+    return cached;
   }
 };
 
@@ -154,7 +171,13 @@ export const addChickenForCurrentUser = async (chicken: {
     farm_id: chicken.farmId ? Number(chicken.farmId) : undefined,
     photo_url: chicken.photo || "",
   });
-  return mapChickenFromApi(created);
+  const mapped = mapChickenFromApi(created);
+  try {
+    const cached = await getCachedChickens();
+    const nextList = [mapped, ...(cached || []).filter((c: any) => String(c.id) !== String(mapped.id))];
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(nextList));
+  } catch (e) {}
+  return mapped;
 };
 
 // Updates a single chicken by id. Pass only the fields that changed —
@@ -170,11 +193,26 @@ export const updateChickenForCurrentUser = async (
     payload.farm_id = updates.farmId ? Number(updates.farmId) : null;
 
   const updated = await apiUpdateChicken(id, payload);
-  return mapChickenFromApi(updated);
+  const mapped = mapChickenFromApi(updated);
+  try {
+    const cached = await getCachedChickens();
+    if (cached) {
+      const nextList = cached.map((c: any) => (String(c.id) === String(mapped.id) ? { ...c, ...mapped } : c));
+      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(nextList));
+    }
+  } catch (e) {}
+  return mapped;
 };
 
 export const deleteChickenForCurrentUser = async (
   id: string,
 ): Promise<void> => {
   await apiDeleteChicken(String(id));
+  try {
+    const cached = await getCachedChickens();
+    if (cached) {
+      const nextList = cached.filter((c: any) => String(c.id) !== String(id));
+      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(nextList));
+    }
+  } catch (e) {}
 };

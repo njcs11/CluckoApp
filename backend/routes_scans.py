@@ -350,7 +350,14 @@ def record_qr_scan():
 @app.route('/api/scans/qr', methods=['GET'])
 @token_required
 def get_qr_scans():
-    farm_id = request.args.get('farm_id')
+    raw_farm_id = request.args.get('farm_id')
+    farm_id = None
+    if raw_farm_id and str(raw_farm_id).strip().lower() not in ('', 'all', 'undefined', 'null', 'none'):
+        try:
+            farm_id = int(raw_farm_id)
+        except (ValueError, TypeError):
+            farm_id = None
+
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -378,7 +385,7 @@ def get_qr_scans():
                 WHERE (c.user_id = %s OR fm.user_id = %s OR f.owner_id = %s)
             '''
             params = [request.user_id, request.user_id, request.user_id, request.user_id]
-            if farm_id and str(farm_id).lower() != 'all':
+            if farm_id is not None:
                 query += ' AND qs.farm_id = %s'
                 params.append(farm_id)
 
@@ -407,5 +414,8 @@ def get_qr_scans():
                     'scanner_label': f"{s_name} ({s_role})",
                 })
             return jsonify(results)
+    except Exception as e:
+        print(f"[ERROR in get_qr_scans]: {e}")
+        return jsonify({'error': 'Failed to retrieve qr scans', 'details': str(e)}), 500
     finally:
         db.close()

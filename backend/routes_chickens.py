@@ -6,7 +6,14 @@ from db import get_db, token_required
 @app.route('/api/chickens', methods=['GET'])
 @token_required
 def get_chickens():
-    farm_id = request.args.get('farm_id')
+    raw_farm_id = request.args.get('farm_id')
+    farm_id = None
+    if raw_farm_id and str(raw_farm_id).strip().lower() not in ('', 'all', 'undefined', 'null', 'none'):
+        try:
+            farm_id = int(raw_farm_id)
+        except (ValueError, TypeError):
+            farm_id = None
+
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -23,12 +30,12 @@ def get_chickens():
                            c.status, c.status_color, c.created_at, c.updated_at,
                            COALESCE(
                                NULLIF(c.photo_url, ''),
-                               (SELECT hh.image_url FROM health_history hh 
-                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL AND LENGTH(hh.image_url) > 100 
-                                ORDER BY hh.recorded_at DESC LIMIT 1),
                                (SELECT ic.image_url FROM image_captures ic 
-                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL AND LENGTH(ic.image_url) > 100 
-                                ORDER BY ic.capture_datetime DESC LIMIT 1)
+                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL 
+                                ORDER BY ic.capture_datetime DESC LIMIT 1),
+                               (SELECT hh.image_url FROM health_history hh 
+                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL 
+                                ORDER BY hh.recorded_at DESC LIMIT 1)
                            ) AS photo_url,
                            f.farm_name,
                            TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
@@ -44,12 +51,12 @@ def get_chickens():
                            c.status, c.status_color, c.created_at, c.updated_at,
                            COALESCE(
                                NULLIF(c.photo_url, ''),
-                               (SELECT hh.image_url FROM health_history hh 
-                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL AND LENGTH(hh.image_url) > 100 
-                                ORDER BY hh.recorded_at DESC LIMIT 1),
                                (SELECT ic.image_url FROM image_captures ic 
-                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL AND LENGTH(ic.image_url) > 100 
-                                ORDER BY ic.capture_datetime DESC LIMIT 1)
+                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL 
+                                ORDER BY ic.capture_datetime DESC LIMIT 1),
+                               (SELECT hh.image_url FROM health_history hh 
+                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL 
+                                ORDER BY hh.recorded_at DESC LIMIT 1)
                            ) AS photo_url,
                            f.farm_name,
                            TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
@@ -67,6 +74,9 @@ def get_chickens():
                 ''', (request.user_id, request.user_id, request.user_id))
             chickens = cur.fetchall()
         return jsonify(chickens)
+    except Exception as e:
+        print(f"[ERROR in get_chickens]: {e}")
+        return jsonify({'error': 'Failed to retrieve chickens', 'details': str(e)}), 500
     finally:
         db.close()
 

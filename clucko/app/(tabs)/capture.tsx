@@ -38,7 +38,7 @@ import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChicken
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
 import FlockLimitModal from '../../components/ui/FlockLimitModal';
-import { apiCreateChicken, apiGetChickens, apiGetFarms, apiGetGradcam, apiGetModules, apiGetMyPlan, apiRecordQrScan, apiSaveScan, getApiUrl } from '../../lib/api';
+import { apiCreateChicken, apiGetChickens, apiGetFarms, apiGetGradcam, apiGetModules, apiGetMyPlan, apiRecordQrScan, apiSaveScan, getApiUrl, getUserRole } from '../../lib/api';
 
 // This screen doesn't use DarkModeContext (the camera viewfinder is always
 // dark), but the Add Chicken sheet itself is a plain light form — this is
@@ -248,6 +248,7 @@ export default function CaptureScreen() {
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
   const [showFlockLimitModal, setShowFlockLimitModal] = useState(false);
   const [userSubscription, setUserSubscription] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string>('owner');
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -398,13 +399,15 @@ export default function CaptureScreen() {
         return;
       }
 
-      const [farmList, chickenList, planRes] = await Promise.all([
+      const [farmList, chickenList, planRes, role] = await Promise.all([
         apiGetFarms(),
         apiGetChickens(),
         apiGetMyPlan().catch(() => null),
+        getUserRole().catch(() => 'owner'),
       ]);
       setFarms(farmList || []);
       setChickens(chickenList || []);
+      setUserRole(role || 'owner');
       if (planRes && planRes.subscription) {
         setUserSubscription(planRes.subscription);
       }
@@ -2031,6 +2034,7 @@ export default function CaptureScreen() {
         visible={showFlockLimitModal}
         onClose={() => setShowFlockLimitModal(false)}
         onDontShowAgain={handleDontShowFlockLimitAgain}
+        isCaretaker={Boolean(userSubscription?.is_caretaker || userRole === 'caretaker')}
         scansRemaining={userSubscription?.scans_remaining ?? userSubscription?.usage?.scans_remaining ?? 9}
         currentChickens={
           pendingChicken?.farmId

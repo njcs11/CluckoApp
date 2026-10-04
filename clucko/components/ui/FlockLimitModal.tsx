@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Animated,
   Platform,
+  Alert,
 } from 'react-native';
 import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDarkMode } from '@/context/DarkModeContext';
@@ -21,6 +22,7 @@ interface FlockLimitModalProps {
   maxChickens?: number;
   farmName?: string;
   planName?: string;
+  isCaretaker?: boolean;
 }
 
 export default function FlockLimitModal({
@@ -32,6 +34,7 @@ export default function FlockLimitModal({
   maxChickens = 20,
   farmName = 'this farm',
   planName = 'Free Trial',
+  isCaretaker = false,
 }: FlockLimitModalProps) {
   const { colors, isDarkMode } = useDarkMode();
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -60,6 +63,14 @@ export default function FlockLimitModal({
   const handleUpgrade = () => {
     onClose();
     router.push('/subscription');
+  };
+
+  const handleContactOwner = () => {
+    Alert.alert(
+      'Contact Farm Owner',
+      `Please contact your Farm Owner to upgrade the subscription for "${farmName}" in Clucko to register more chickens.`,
+      [{ text: 'Understood', onPress: onClose }]
+    );
   };
 
   if (!visible) return null;
@@ -106,15 +117,32 @@ export default function FlockLimitModal({
           </Text>
 
           <Text style={[styles.subDescription, { color: colors.textSecondary }]}>
-            Upgrade to Pro (60 chickens) or Premium (unlimited) to register more gamefowl and expand your farm.
+            {isCaretaker
+              ? "As a caretaker, your account is managed by your Farm Owner. Please contact your Farm Owner to upgrade the farm's subscription plan to register more chickens."
+              : "Upgrade to Pro (60 chickens) or Premium (unlimited) to register more gamefowl and expand your farm."}
           </Text>
 
           {/* Action Buttons */}
           <View style={styles.actions}>
-            <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.primary }]} onPress={handleUpgrade} activeOpacity={0.85}>
-              <MaterialCommunityIcons name="lightning-bolt" size={17} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.primaryBtnText}>View Plans & Upgrade</Text>
-            </TouchableOpacity>
+            {isCaretaker ? (
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+                onPress={handleContactOwner}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="people-outline" size={17} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.primaryBtnText}>Contact Farm Owner</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+                onPress={handleUpgrade}
+                activeOpacity={0.85}
+              >
+                <MaterialCommunityIcons name="lightning-bolt" size={17} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.primaryBtnText}>View Plans & Upgrade</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
               <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>

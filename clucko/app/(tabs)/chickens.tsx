@@ -1,7 +1,7 @@
 import { useDarkMode } from '@/context/DarkModeContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { getHealthStatus, getStatusColor } from '@/utils/birdStatus';
-import { addChickenForCurrentUser, generateNextChickenCode, loadChickensForCurrentUser } from '@/utils/chickenStorage';
+import { addChickenForCurrentUser, generateNextChickenCode, loadChickensForCurrentUser, getCachedChickens } from '@/utils/chickenStorage';
 import { getUserRole, apiGetFarms, apiGetQrScans, apiGetReports, apiGetMyPlan } from '../../lib/api';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
 import { Feather, FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -261,11 +261,24 @@ const [loadingRecentScans, setLoadingRecentScans] = useState(false);
 
 const loadRecentScans = async () => {
   try {
+    const cachedRaw = await AsyncStorage.getItem('cached_recent_scans');
+    if (cachedRaw) {
+      try {
+        const cached = JSON.parse(cachedRaw);
+        if (Array.isArray(cached) && cached.length > 0) {
+          setRecentScans((prev) => (prev.length === 0 ? cached : prev));
+        }
+      } catch (e) {}
+    }
+
     setLoadingRecentScans(true);
     const farmParam = selectedFarmFilter !== 'all' ? selectedFarmFilter : undefined;
     const data = await apiGetQrScans(farmParam);
     if (Array.isArray(data)) {
       setRecentScans(data);
+      if (selectedFarmFilter === 'all') {
+        await AsyncStorage.setItem('cached_recent_scans', JSON.stringify(data)).catch(() => {});
+      }
     }
   } catch (error) {
     console.error('Error loading recent scans:', error);
@@ -442,12 +455,23 @@ useEffect(() => {
         return;
       }
 
+      const cached = await getCachedChickens();
+      if (cached && cached.length > 0) {
+        setAllBirds(cached as Bird[]);
+        setHealthAlerts(buildHealthAlerts(cached as Bird[]));
+      }
+
       const chickensData = await loadChickensForCurrentUser();
-      if (chickensData) {
+      if (chickensData && chickensData.length > 0) {
         setAllBirds(chickensData as Bird[]);
         setHealthAlerts(buildHealthAlerts(chickensData as Bird[]));
-      } else {
-        loadDefaultData();
+      } else if (!cached || cached.length === 0) {
+        if (chickensData) {
+          setAllBirds([]);
+          setHealthAlerts([]);
+        } else {
+          loadDefaultData();
+        }
       }
 
       apiGetMyPlan()
@@ -459,7 +483,6 @@ useEffect(() => {
         .catch(() => null);
     } catch (error) {
       console.error('Error loading chickens:', error);
-      loadDefaultData();
     }
   };
 
@@ -1540,6 +1563,7 @@ useEffect(() => {
       <FlockLimitModal
         visible={showFlockLimitModal}
         onClose={() => setShowFlockLimitModal(false)}
+        isCaretaker={Boolean(userSubscription?.is_caretaker || userRole === 'caretaker')}
         scansRemaining={userSubscription?.scans_remaining ?? userSubscription?.usage?.scans_remaining ?? 9}
         currentChickens={
           generatedQR?.farmId

@@ -358,13 +358,21 @@ export const apiResetPassword = async (email: string, newPassword: string, code?
 };
 
 // ─── CHICKENS ─────────────────────────────────────────────────
-export const apiGetChickens = async (farm_id?: number) => {
-  return deduplicatedFetch(`chickens:${farm_id || 'all'}`, async () => {
+export const apiGetChickens = async (farm_id?: number | string) => {
+  const cleanFarmId =
+    farm_id &&
+    String(farm_id).trim().toLowerCase() !== 'all' &&
+    String(farm_id).trim().toLowerCase() !== 'undefined' &&
+    String(farm_id).trim().toLowerCase() !== 'null'
+      ? farm_id
+      : undefined;
+
+  return deduplicatedFetch(`chickens:${cleanFarmId || 'all'}`, async () => {
     const token = await getToken();
     if (!token) return [];
     const API_URL = await getApiUrl();
-    const url = farm_id
-      ? `${API_URL}/api/chickens?farm_id=${farm_id}`
+    const url = cleanFarmId
+      ? `${API_URL}/api/chickens?farm_id=${cleanFarmId}`
       : `${API_URL}/api/chickens`;
     try {
       const res = await fetch(url, { headers: await headers() });
