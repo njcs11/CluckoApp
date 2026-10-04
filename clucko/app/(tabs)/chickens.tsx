@@ -1002,6 +1002,26 @@ useEffect(() => {
       guestAlert('adding a chicken');
       return;
     }
+
+    const maxPerFarm = userSubscription?.limits?.max_chickens_per_farm ?? 20;
+    const targetFarm = selectedFarmFilter !== 'all' ? selectedFarmFilter : (farms.length > 0 ? farms[0].id : null);
+
+    if (targetFarm) {
+      const currentFarmChickens = allBirds.filter((b) => String(b.farmId) === String(targetFarm)).length;
+      if (currentFarmChickens >= maxPerFarm) {
+        setNewChicken({
+          name: '',
+          photo: null,
+          farmId: String(targetFarm),
+        });
+        setShowFlockLimitModal(true);
+        return;
+      }
+    } else if (allBirds.length >= maxPerFarm) {
+      setShowFlockLimitModal(true);
+      return;
+    }
+
     setNewChicken({
       name: '',
       photo: null,
@@ -1570,7 +1590,9 @@ useEffect(() => {
             ? allBirds.filter((b) => String(b.farmId) === String(generatedQR.farmId)).length
             : newChicken.farmId
             ? allBirds.filter((b) => String(b.farmId) === String(newChicken.farmId)).length
-            : farms.length === 1
+            : selectedFarmFilter !== 'all'
+            ? allBirds.filter((b) => String(b.farmId) === String(selectedFarmFilter)).length
+            : farms.length > 0
             ? allBirds.filter((b) => String(b.farmId) === String(farms[0].id)).length
             : allBirds.length
         }
@@ -1580,7 +1602,9 @@ useEffect(() => {
             ? getFarmName(farms, generatedQR.farmId)
             : newChicken.farmId
             ? getFarmName(farms, newChicken.farmId)
-            : farms.length === 1
+            : selectedFarmFilter !== 'all'
+            ? getFarmName(farms, selectedFarmFilter)
+            : farms.length > 0
             ? farms[0]?.name || farms[0]?.farm_name || 'Your Farm'
             : 'Your Farm'
         }

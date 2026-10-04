@@ -65,14 +65,6 @@ export default function FlockLimitModal({
     router.push('/subscription');
   };
 
-  const handleContactOwner = () => {
-    Alert.alert(
-      'Contact Farm Owner',
-      `Please contact your Farm Owner to upgrade the subscription for "${farmName}" in Clucko to register more chickens.`,
-      [{ text: 'Understood', onPress: onClose }]
-    );
-  };
-
   if (!visible) return null;
 
   return (
@@ -127,30 +119,30 @@ export default function FlockLimitModal({
             {isCaretaker ? (
               <TouchableOpacity
                 style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                onPress={handleContactOwner}
+                onPress={onClose}
                 activeOpacity={0.85}
               >
-                <Ionicons name="people-outline" size={17} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>Contact Farm Owner</Text>
+                <Text style={styles.primaryBtnText}>I Understand</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                onPress={handleUpgrade}
-                activeOpacity={0.85}
-              >
-                <MaterialCommunityIcons name="lightning-bolt" size={17} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>View Plans & Upgrade</Text>
-              </TouchableOpacity>
-            )}
+              <>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+                  onPress={handleUpgrade}
+                  activeOpacity={0.85}
+                >
+                  <MaterialCommunityIcons name="lightning-bolt" size={17} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.primaryBtnText}>View Plans & Upgrade</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-              <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+                  <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
             {onDontShowAgain && (
               <TouchableOpacity style={styles.dontShowAgainBtn} onPress={onDontShowAgain} activeOpacity={0.7}>
-                <Ionicons name="eye-off-outline" size={14} color={colors.textLight} style={{ marginRight: 5 }} />
                 <Text style={[styles.dontShowAgainText, { color: colors.textLight }]}>
                   Don't show this reminder again
                 </Text>

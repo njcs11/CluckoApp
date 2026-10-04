@@ -63,6 +63,20 @@ const mapChickenFromApi = (c: any) => {
   };
 };
 
+// Strip massive base64 images from AsyncStorage cache to protect SQLite storage limit
+const toCacheableChicken = (c: any) => {
+  const isLargeBase64 =
+    c.photo &&
+    typeof c.photo === "string" &&
+    c.photo.startsWith("data:image") &&
+    c.photo.length > 512;
+
+  return {
+    ...c,
+    photo: isLargeBase64 ? null : c.photo,
+  };
+};
+
 export const getCachedChickens = async (): Promise<any[] | null> => {
   try {
     const raw = await AsyncStorage.getItem(CACHE_KEY);
@@ -87,9 +101,11 @@ export const loadChickensForCurrentUser = async (): Promise<any[] | null> => {
     if (Array.isArray(data)) {
       const mapped = data.map(mapChickenFromApi);
       try {
-        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(mapped));
+        const lightweight = mapped.map(toCacheableChicken);
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(lightweight));
       } catch (err) {
-        console.warn("Error saving chickens to cache:", err);
+        // Silently purge any oversized temp keys if quota is hit
+        AsyncStorage.removeItem("pending_capture_b64").catch(() => {});
       }
       return mapped;
     }
@@ -174,7 +190,8 @@ export const addChickenForCurrentUser = async (chicken: {
   const mapped = mapChickenFromApi(created);
   try {
     const cached = await getCachedChickens();
-    const nextList = [mapped, ...(cached || []).filter((c: any) => String(c.id) !== String(mapped.id))];
+    const cacheable = toCacheableChicken(mapped);
+    const nextList = [cacheable, ...(cached || []).filter((c: any) => String(c.id) !== String(mapped.id))];
     await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(nextList));
   } catch (e) {}
   return mapped;
@@ -197,7 +214,8 @@ export const updateChickenForCurrentUser = async (
   try {
     const cached = await getCachedChickens();
     if (cached) {
-      const nextList = cached.map((c: any) => (String(c.id) === String(mapped.id) ? { ...c, ...mapped } : c));
+      const cacheable = toCacheableChicken(mapped);
+      const nextList = cached.map((c: any) => (String(c.id) === String(mapped.id) ? { ...c, ...cacheable } : c));
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(nextList));
     }
   } catch (e) {}
