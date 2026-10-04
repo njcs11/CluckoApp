@@ -382,12 +382,13 @@ export default function CaptureScreen() {
       // Restore any previous captured photo and scan result if user navigated away
       try {
         const savedUri = await AsyncStorage.getItem('pending_capture_uri');
+        const savedB64 = await AsyncStorage.getItem('pending_capture_b64');
         const savedScan = await AsyncStorage.getItem('pending_scan_result');
         if (savedUri && savedScan) {
           setLastPhotoUri(savedUri);
+          setLastPhotoBase64(savedB64 || null);
           setScanResult(JSON.parse(savedScan));
         }
-        AsyncStorage.removeItem('pending_capture_b64').catch(() => {});
       } catch (e) {
         console.warn('Error restoring pending capture:', e);
       }
@@ -399,8 +400,8 @@ export default function CaptureScreen() {
       }
 
       const [farmList, chickenList, planRes, role] = await Promise.all([
-        apiGetFarms().catch(() => []),
-        apiGetChickens().catch(() => []),
+        apiGetFarms(),
+        apiGetChickens(),
         apiGetMyPlan().catch(() => null),
         getUserRole().catch(() => 'owner'),
       ]);
@@ -561,6 +562,9 @@ export default function CaptureScreen() {
 
     if (lastPhotoUri) {
       AsyncStorage.setItem('pending_capture_uri', lastPhotoUri).catch(() => {});
+    }
+    if (base64Image || lastPhotoBase64) {
+      AsyncStorage.setItem('pending_capture_b64', base64Image || lastPhotoBase64 || '').catch(() => {});
     }
     AsyncStorage.setItem('pending_scan_result', JSON.stringify(scan)).catch(() => {});
   };

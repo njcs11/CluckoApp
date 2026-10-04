@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Animated,
   Platform,
-  Alert,
 } from 'react-native';
 import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDarkMode } from '@/context/DarkModeContext';
