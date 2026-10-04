@@ -18,9 +18,9 @@ if os.path.exists(_env_path):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 SUPABASE_CONFIG = {
-    'host': os.environ.get('SUPABASE_DB_HOST', 'db.kznfilwdruljcqnfqtfx.supabase.co'),
+    'host': os.environ.get('SUPABASE_DB_HOST', 'aws-0-ap-southeast-1.pooler.supabase.com'),
     'port': int(os.environ.get('SUPABASE_DB_PORT', 5432)),
-    'user': os.environ.get('SUPABASE_DB_USER', 'postgres'),
+    'user': os.environ.get('SUPABASE_DB_USER', 'postgres.kznfilwdruljcqnfqtfx'),
     'password': os.environ.get('SUPABASE_DB_PASSWORD', ''),
     'dbname': os.environ.get('SUPABASE_DB_NAME', 'postgres'),
     'sslmode': os.environ.get('SUPABASE_DB_SSLMODE', 'require'),
@@ -262,28 +262,50 @@ def admin_required(f):
             request.user_role = 'admin'
             return f(*args, **kwargs)
 
-        is_dev = os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG', '').lower() in ('1', 'true')
+        auth_header = request.headers.get('Authorization', '').strip()
+
+        # If an Authorization token is explicitly provided, validate it strictly
+        if auth_header:
+            token = auth_header.replace('Bearer ', '').strip()
+            if not token or is_token_revoked(token):
+                return jsonify({'error': 'Token invalid or revoked'}), 401
+
+            try:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+                if payload.get('role') != 'admin':
+                    return jsonify({'error': 'Administrator access required'}), 403
+                request.user_id = payload['user_id']
+                request.user_role = payload.get('role', 'admin')
+                return f(*args, **kwargs)
+            except jwt.ExpiredSignatureError:
+                return jsonify({'error': 'Token expired'}), 401
+            except Exception:
+                return jsonify({'error': 'Invalid or expired token'}), 401
+
+        # If no auth header was provided, check whether we are running in local/development mode
+        # or if the request is from a local development environment with no admin key enforced
+        try:
+            from flask import current_app
+            app_debug = bool(current_app and current_app.debug)
+        except Exception:
+            app_debug = False
+
+        env_val = os.environ.get('FLASK_ENV', '').lower()
+        debug_val = os.environ.get('DEBUG', '').lower()
+        is_testing = env_val == 'testing'
+        is_prod = env_val == 'production'
+
+        is_dev = (
+            app_debug or
+            (env_val in ('development', 'dev')) or
+            (debug_val in ('1', 'true', 'yes')) or
+            (not is_prod and not is_testing and not admin_key)
+        )
+
         if is_dev and not admin_key:
+            request.user_id = 0
+            request.user_role = 'admin'
             return f(*args, **kwargs)
 
-        auth_header = request.headers.get('Authorization', '').strip()
-        if not auth_header:
-            return jsonify({'error': 'Admin authorization required'}), 401
-
-        token = auth_header.replace('Bearer ', '').strip()
-        if not token or is_token_revoked(token):
-            return jsonify({'error': 'Token invalid or revoked'}), 401
-
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            if payload.get('role') != 'admin':
-                return jsonify({'error': 'Administrator access required'}), 403
-            request.user_id = payload['user_id']
-            request.user_role = payload.get('role', 'admin')
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token expired'}), 401
-        except Exception:
-            return jsonify({'error': 'Invalid or expired token'}), 401
-
-        return f(*args, **kwargs)
+        return jsonify({'error': 'Admin authorization required'}), 401
     return decorated

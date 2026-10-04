@@ -193,3 +193,18 @@ CREATE INDEX idx_notifications_created ON notifications(created_at);
 CREATE INDEX idx_tasks_farm_due ON tasks(farm_id, due_date);
 CREATE INDEX idx_qr_scans_chicken ON qr_scans(chicken_id);
 CREATE INDEX idx_qr_scans_farm ON qr_scans(farm_id);
+
+-- Enable Row Level Security (RLS) on all public tables to satisfy Supabase Security Advisor
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE farms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE farm_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chickens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diseases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE image_captures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detection_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE health_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE qr_scans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;

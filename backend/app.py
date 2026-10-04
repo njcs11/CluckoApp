@@ -41,7 +41,7 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 @app.after_request
 def after_request(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Admin-Key'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -52,6 +52,7 @@ def after_request(response):
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), 'datasets')
 MODELS_DIR   = os.path.join(os.path.dirname(__file__), 'models')
 DISEASES_CONFIG = os.path.join(os.path.dirname(__file__), 'diseases.json')
+MODULES_CONFIG  = os.path.join(os.path.dirname(__file__), 'modules.json')
 
 os.makedirs(DATASETS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,   exist_ok=True)
@@ -86,6 +87,48 @@ def health_check():
     return jsonify({'status': 'ok', 'message': 'Clucko backend is running'})
 
 
+def load_modules():
+    if os.path.exists(MODULES_CONFIG):
+        try:
+            with open(MODULES_CONFIG, 'r') as f:
+                data = json.load(f)
+                if isinstance(data, dict) and 'modules' in data:
+                    return data
+        except Exception as e:
+            print(f"Error reading modules config: {e}")
+    default = {
+        "modules": [
+            {
+                "id": "eye",
+                "name": "Eye",
+                "display_name": "Eye & Head Module",
+                "description": "Ocular and upper respiratory conditions (e.g. Infectious Coryza, Fowl Pox, Cloudiness)",
+                "icon": "eye",
+                "color": "#22c55e",
+                "is_default": True
+            },
+            {
+                "id": "wing",
+                "name": "Wing",
+                "display_name": "Wing & Posture Module",
+                "description": "Wing droop, posture anomalies, and neuromuscular paralysis (e.g. Newcastle Disease, Marek's)",
+                "icon": "wing",
+                "color": "#3b82f6",
+                "is_default": True
+            }
+        ]
+    }
+    save_modules(default)
+    return default
+
+def save_modules(data):
+    with open(MODULES_CONFIG, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def get_valid_module_ids():
+    mods = load_modules().get('modules', [])
+    return [m['id'] for m in mods]
+
 def load_diseases():
     if os.path.exists(DISEASES_CONFIG):
         with open(DISEASES_CONFIG, 'r') as f:
@@ -104,10 +147,11 @@ def save_diseases(data):
         json.dump(data, f, indent=2)
 
 def sync_labels_with_diseases():
-    """Keeps labels_eye.json and labels_wing.json in sync with active diseases in diseases.json."""
+    """Keeps labels_<module>.json in sync with active diseases in diseases.json for all registered modules."""
     try:
         diseases_data = load_diseases()
-        for module in ('eye', 'wing'):
+        modules = get_valid_module_ids()
+        for module in modules:
             lp = os.path.join(MODELS_DIR, f'labels_{module}.json')
             mod_diseases = [d['id'] for d in diseases_data.get('diseases', []) if d.get('module') == module]
             existing = {}
@@ -130,6 +174,99 @@ def sync_labels_with_diseases():
     except Exception as e:
         print(f"Error syncing labels with diseases: {e}")
 
+@app.route('/api/modules', methods=['GET'])
+def get_modules():
+    return jsonify(load_modules())
+
+@app.route('/api/modules', methods=['POST'])
+@admin_required
+def add_module():
+    data = request.json or {}
+    raw_name = (data.get('name') or '').strip()
+    if not raw_name:
+        return jsonify({"error": "Module name is required"}), 400
+
+    raw_id = data.get('id') or raw_name.lower().replace(' ', '_').replace('-', '_')
+    module_id = ''.join(c for c in raw_id if c.isalnum() or c == '_').lower()
+    if not module_id:
+        module_id = f"mod_{int(time.time())}"
+
+    modules_data = load_modules()
+    for m in modules_data.get('modules', []):
+        if m['id'] == module_id:
+            return jsonify({"error": f"Module with ID '{module_id}' already exists."}), 400
+
+    display_name = (data.get('display_name') or f"{raw_name.title()} Module").strip()
+    description = (data.get('description') or f"Inspection module for {raw_name.lower()} conditions and symptoms").strip()
+    icon = (data.get('icon') or 'sparkles').strip()
+    color = (data.get('color') or '#8b5cf6').strip()
+
+    new_mod = {
+        "id": module_id,
+        "name": raw_name.title(),
+        "display_name": display_name,
+        "description": description,
+        "icon": icon,
+        "color": color,
+        "is_default": False
+    }
+
+    modules_data['modules'].append(new_mod)
+    save_modules(modules_data)
+
+    # Automatically create the module dataset root directory
+    mod_dir = os.path.join(DATASETS_DIR, module_id)
+    os.makedirs(mod_dir, exist_ok=True)
+
+    # Create a default "Healthy <Module>" class so the module is ready for classification
+    healthy_id = f"healthy_{module_id}"
+    healthy_dir = os.path.join(mod_dir, healthy_id)
+    os.makedirs(healthy_dir, exist_ok=True)
+
+    # Register healthy class in diseases.json if not present
+    diseases_data = load_diseases()
+    if not any(d['id'] == healthy_id for d in diseases_data.get('diseases', [])):
+        diseases_data['diseases'].append({
+            "id": healthy_id,
+            "name": f"Healthy {raw_name.title()}",
+            "description": f"Normal, healthy appearance of the {raw_name.lower()}",
+            "symptoms": [f"normal_{module_id}"],
+            "affected_parts": [module_id],
+            "module": module_id,
+            "severity": "none",
+            "color": "#10b981"
+        })
+        save_diseases(diseases_data)
+
+    sync_labels_with_diseases()
+    _ensure_training_state(module_id)
+
+    return jsonify({"success": True, "module": new_mod})
+
+@app.route('/api/modules/<module_id>', methods=['DELETE'])
+@admin_required
+def delete_module(module_id):
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(module_id)):
+        return jsonify({"error": "Invalid module_id"}), 400
+
+    modules_data = load_modules()
+    mod_to_delete = next((m for m in modules_data.get('modules', []) if m['id'] == module_id), None)
+    if not mod_to_delete:
+        return jsonify({"error": "Module not found"}), 404
+
+    if mod_to_delete.get('is_default'):
+        return jsonify({"error": f"Default module '{module_id}' cannot be deleted"}), 400
+
+    modules_data['modules'] = [m for m in modules_data['modules'] if m['id'] != module_id]
+    save_modules(modules_data)
+
+    diseases_data = load_diseases()
+    diseases_data['diseases'] = [d for d in diseases_data['diseases'] if d.get('module') != module_id]
+    save_diseases(diseases_data)
+
+    sync_labels_with_diseases()
+    return jsonify({"success": True, "deleted": module_id})
+
 @app.route('/api/diseases', methods=['GET'])
 def get_diseases():
     return jsonify(load_diseases())
@@ -149,16 +286,14 @@ def add_disease():
     if not disease_id:
         disease_id = f"disease_{int(time.time())}"
 
-    # Explicit module: 'eye' or 'wing'
+    valid_modules = get_valid_module_ids()
     module = data.get('module')
     if not module:
         affected = [p.lower() for p in data.get('affected_parts', [])]
-        if any(p in affected for p in ('wing', 'posture')):
-            module = 'wing'
-        else:
-            module = 'eye'
-    if module not in ('eye', 'wing'):
-        module = 'eye'
+        matched = next((p for p in affected if p in valid_modules), None)
+        module = matched or (valid_modules[0] if valid_modules else 'eye')
+    if module not in valid_modules:
+        module = valid_modules[0] if valid_modules else 'eye'
 
     new_disease = {
         "id": disease_id,
@@ -244,8 +379,9 @@ def upload_dataset():
     frame_interval = float(request.form.get('frame_interval', 0.5))
     max_video_frames = min(max(1, int(request.form.get('max_video_frames', 50))), 100)
 
-    if not disease_id or module not in ('eye', 'wing') or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
-        return jsonify({"error": "Valid disease_id and module ('eye' or 'wing') are required"}), 400
+    valid_modules = get_valid_module_ids()
+    if not disease_id or module not in valid_modules or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
+        return jsonify({"error": f"Valid disease_id and module ({', '.join(valid_modules)}) are required"}), 400
     disease_dir = os.path.join(DATASETS_DIR, module, disease_id)
     os.makedirs(disease_dir, exist_ok=True)
 
@@ -321,7 +457,8 @@ def get_safe_file_path(base_dir, module, disease_id, filename):
     if not filename or not module or not disease_id:
         return None
     # Strictly validate module
-    if module not in ('eye', 'wing'):
+    valid_modules = get_valid_module_ids()
+    if module not in valid_modules:
         return None
     # Strictly validate disease_id (alphanumeric and underscores only)
     if not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
@@ -344,10 +481,11 @@ def get_safe_file_path(base_dir, module, disease_id, filename):
 # ─── Dataset Explorer & Deletion Endpoints ────────────────────────────────────
 @app.route('/api/dataset/images', methods=['GET'])
 def get_dataset_images():
+    valid_modules = get_valid_module_ids()
     module = request.args.get('module', 'eye')
     disease_id = request.args.get('disease_id')
-    if not disease_id or module not in ('eye', 'wing') or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
-        return jsonify({"error": "Valid disease_id and module ('eye' or 'wing') are required"}), 400
+    if not disease_id or module not in valid_modules or not re.match(r'^[a-zA-Z0-9_]+$', str(disease_id)):
+        return jsonify({"error": f"Valid disease_id and module ({', '.join(valid_modules)}) are required"}), 400
 
     disease_dir = os.path.join(DATASETS_DIR, module, disease_id)
     if not os.path.exists(disease_dir):
@@ -444,17 +582,8 @@ def delete_bulk_dataset_images():
 
 
 # ─── Background Model Training Architecture ──────────────────────────────────
-training_state = {
-    "eye": {
-        "status": "idle",
-        "progress": 0,
-        "stage": "Idle",
-        "message": "",
-        "logs": [],
-        "result": None,
-        "error": None
-    },
-    "wing": {
+def _make_training_state():
+    return {
         "status": "idle",
         "progress": 0,
         "stage": "Idle",
@@ -463,10 +592,18 @@ training_state = {
         "result": None,
         "error": None
     }
+
+training_state = {
+    mod_id: _make_training_state() for mod_id in get_valid_module_ids()
 }
 
+def _ensure_training_state(module):
+    if module not in training_state:
+        training_state[module] = _make_training_state()
+    return training_state[module]
+
 def execute_training(module, epochs, batch_size, learning_rate):
-    state = training_state[module]
+    state = _ensure_training_state(module)
     state["status"] = "running"
     state["progress"] = 0
     state["stage"] = "Initializing"
@@ -522,10 +659,12 @@ def execute_training(module, epochs, batch_size, learning_rate):
 def train_model():
     data = request.json or {}
     module = data.get('module') or request.args.get('module')
-    if module not in ('eye', 'wing'):
-        return jsonify({"error": "module must be 'eye' or 'wing'"}), 400
+    valid_modules = get_valid_module_ids()
+    if module not in valid_modules:
+        return jsonify({"error": f"module must be one of {valid_modules}"}), 400
 
-    if training_state[module]["status"] == "running":
+    state = _ensure_training_state(module)
+    if state["status"] == "running":
         return jsonify({"error": f"{module.title()} model training is already in progress.", "status": "running"}), 400
 
     epochs = int(data.get('epochs', 10))
@@ -545,9 +684,12 @@ def train_model():
 
 @app.route('/api/train/status', methods=['GET'])
 def get_train_status():
+    valid_modules = get_valid_module_ids()
     module = request.args.get('module')
-    if module and module in training_state:
-        return jsonify(training_state[module])
+    if module:
+        return jsonify(_ensure_training_state(module))
+    for m in valid_modules:
+        _ensure_training_state(m)
     return jsonify(training_state)
 
 
@@ -556,27 +698,29 @@ def get_train_status():
 def reset_train_status():
     data = request.json or {}
     module = data.get('module')
-    if module and module in training_state:
-        if training_state[module]["status"] != "running":
-            training_state[module]["status"] = "idle"
-            training_state[module]["progress"] = 0
-            training_state[module]["stage"] = "Idle"
-            training_state[module]["message"] = ""
-            training_state[module]["result"] = None
-            training_state[module]["error"] = None
+    if module:
+        state = _ensure_training_state(module)
+        if state["status"] != "running":
+            training_state[module] = _make_training_state()
     return jsonify({"success": True, "state": training_state})
 
 
-# ─── Model status (both modules) ───────────────────────────────────────────────
+# ─── Model status (all registered modules) ──────────────────────────────────
 @app.route('/api/model/status', methods=['GET'])
 def model_status():
     sync_labels_with_diseases()
     result = {}
-    for module in ('eye', 'wing'):
+    valid_modules = get_valid_module_ids()
+    for module in valid_modules:
         mp = os.path.join(MODELS_DIR, f'gamefowl_model_{module}.h5')
         lp = os.path.join(MODELS_DIR, f'labels_{module}.json')
         if os.path.exists(mp) and os.path.exists(lp):
-            result[module] = {"trained": True, "classes": json.load(open(lp))}
+            try:
+                with open(lp, 'r') as f:
+                    classes_data = json.load(f)
+            except Exception:
+                classes_data = {}
+            result[module] = {"trained": True, "classes": classes_data}
         else:
             result[module] = {"trained": False}
     return jsonify(result)
@@ -587,7 +731,7 @@ def model_status():
 def detect():
     data = request.json or {}
     image_b64 = data.get('image')
-    module    = data.get('module', 'auto')  # 'auto' checks both eye + wing models
+    module    = data.get('module', 'auto')
 
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
@@ -600,8 +744,9 @@ def detect():
     except Exception:
         return jsonify({"error": "Invalid base64 encoding or corrupted image data"}), 400
 
-    if module not in ('eye', 'wing', 'auto'):
-        return jsonify({"error": "module must be 'eye', 'wing', or 'auto'"}), 400
+    valid_modules = get_valid_module_ids()
+    if module not in valid_modules and module != 'auto':
+        return jsonify({"error": f"module must be one of {valid_modules} or 'auto'"}), 400
 
     try:
         from model_trainer import predict, predict_auto
@@ -630,8 +775,9 @@ def gradcam():
 
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
-    if module not in ('eye', 'wing'):
-        return jsonify({"error": "module must be 'eye' or 'wing'"}), 400
+    valid_modules = get_valid_module_ids()
+    if module not in valid_modules:
+        return jsonify({"error": f"module must be one of {valid_modules}"}), 400
 
     model_path = os.path.join(MODELS_DIR, f'gamefowl_model_{module}.h5')
     label_path = os.path.join(MODELS_DIR, f'labels_{module}.json')

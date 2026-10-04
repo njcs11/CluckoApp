@@ -172,12 +172,12 @@
   box-shadow: 0 0 12px rgba(34, 197, 94, 0.18);
 }
 
-/* Module Choice Cards in Form */
+/* Module Choice Grid in Add Disease Form */
 .module-choice-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 12px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 @media (max-width: 640px) {
@@ -190,7 +190,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 13px 15px;
   border-radius: 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -198,6 +198,7 @@
   text-align: left;
   transition: all 0.2s ease;
   color: var(--text-primary);
+  width: 100%;
 }
 
 .module-choice-card:hover {
@@ -222,19 +223,26 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
 }
 
 .choice-title {
   font-family: var(--font-display);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .choice-sub {
   font-size: 11px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Target Folder Feedback */
@@ -281,4 +289,93 @@
   font-family: var(--font-mono);
   color: var(--text-muted);
   margin-top: 3px;
+}
+
+/* Modal Overlay for Add Anatomy Module */
+.module-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.module-modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.module-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.module-modal-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-white);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.modal-close-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-white);
+}
+
+.delete-mod-btn {
+  background: transparent;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: all 0.15s;
+}
+
+.delete-mod-btn:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.15);
 }

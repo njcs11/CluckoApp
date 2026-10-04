@@ -2,10 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    BackHandler,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -56,6 +57,25 @@ export default function ForgotPasswordScreen() {
     setEmail(text);
     if (emailError) setEmailError('');
   };
+
+  const handleBack = useCallback(() => {
+    if (step === 'reset') {
+      setStep('email');
+    } else if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/login');
+    }
+  }, [step]);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBack]);
 
   // Generates a code, stores it locally (so we can verify it later), and
   // emails it via EmailJS / backend directly to the user's Gmail inbox.
@@ -256,7 +276,7 @@ export default function ForgotPasswordScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <TouchableOpacity onPress={() => (step === 'reset' ? setStep('email') : router.back())} style={styles.backButton}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.primary} />
             <Text style={[styles.backButtonText, { color: colors.primary }]}>Back</Text>
           </TouchableOpacity>

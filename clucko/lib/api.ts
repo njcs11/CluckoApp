@@ -402,7 +402,15 @@ export const apiCreateChicken = async (data: {
     body: JSON.stringify(data),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error);
+  if (!res.ok) {
+    const error: any = new Error(json.error || "Failed to create chicken");
+    error.code = json.code;
+    error.max_chickens = json.max_chickens;
+    error.current_chickens = json.current_chickens;
+    error.plan = json.plan;
+    error.plan_name = json.plan_name;
+    throw error;
+  }
   return json;
 };
 
@@ -1017,5 +1025,33 @@ export const apiDevToggleSubscription = async (
   if (!res.ok) throw new Error(json.error || "State toggle failed");
   return json;
 };
+
+export interface AnatomicalModule {
+  id: string;
+  name: string;
+  display_name?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  is_default?: boolean;
+}
+
+export const apiGetModules = async (): Promise<AnatomicalModule[]> => {
+  try {
+    const API_URL = await getApiUrl();
+    const res = await fetch(`${API_URL}/api/modules`, {
+      headers: await headers(),
+    });
+    if (!res.ok) throw new Error("Failed to load modules");
+    const json = await res.json();
+    return json?.modules || [];
+  } catch (err) {
+    return [
+      { id: 'eye', name: 'Eye', display_name: 'Eye & Head Module', icon: 'eye', color: '#22c55e', is_default: true },
+      { id: 'wing', name: 'Wing', display_name: 'Wing & Posture Module', icon: 'wing', color: '#3b82f6', is_default: true }
+    ];
+  }
+};
+
 
 

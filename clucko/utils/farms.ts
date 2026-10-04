@@ -4,6 +4,7 @@ import { checkIsGuestMode, GUEST_SAMPLE_FARMS } from "./guestMode";
 export interface Farm {
   id: string;
   name: string;
+  farm_name?: string;
   location?: string;
   dateCreated: string;
   capacity?: string;
@@ -29,8 +30,9 @@ export const loadFarms = async (): Promise<Farm[]> => {
     const data = await apiGetFarms();
     return (data || []).map((f: any) => ({
       id: String(f.id),
-      name: f.farm_name,
-      location: f.farm_location || "",
+      name: f.name || f.farm_name || "Gamefarm",
+      farm_name: f.farm_name || f.name || "Gamefarm",
+      location: f.farm_location || f.location || "",
       dateCreated: f.created_at ? String(f.created_at).split("T")[0] : "",
       description: f.description || "",
       latitude: f.latitude,
@@ -52,16 +54,17 @@ export const addFarm = async (
   });
   return {
     id: String(created.id),
-    name: created.farm_name,
-    location: created.farm_location || "",
+    name: created.farm_name || created.name || name.trim(),
+    farm_name: created.farm_name || created.name || name.trim(),
+    location: created.farm_location || created.location || location?.trim() || "",
     dateCreated: created.created_at
       ? String(created.created_at).split("T")[0]
       : "",
   };
 };
 
-export const getFarmName = (farms: Farm[], farmId?: string | null): string => {
+export const getFarmName = (farms: Farm[], farmId?: string | number | null): string => {
   if (!farmId) return "Unassigned";
-  const farm = farms.find((f) => f.id === farmId);
-  return farm ? farm.name : "Unassigned";
+  const farm = (farms || []).find((f) => String(f.id) === String(farmId));
+  return farm ? (farm.name || farm.farm_name || "Gamefarm") : "Unassigned";
 };

@@ -19,9 +19,10 @@ import { useFocusEffect } from "expo-router/react-navigation";
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -158,6 +159,23 @@ export default function TasksScreen() {
       refresh();
     }, [refresh])
   );
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/home');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBack]);
 
   const todayKey = formatDateKey(new Date());
   const year = visibleMonth.getFullYear();
@@ -374,7 +392,7 @@ export default function TasksScreen() {
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.header}>
             <View pointerEvents="none" style={styles.headerDecoRing} />
             <View style={styles.headerTopRow}>
-              <TouchableOpacity style={styles.headerBackBtn} onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <TouchableOpacity style={styles.headerBackBtn} onPress={handleBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="chevron-back" size={22} color="#fff" />
               </TouchableOpacity>
               <View style={{ flex: 1 }}>

@@ -37,7 +37,8 @@ import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
-import { apiCreateChicken, apiGetChickens, apiGetFarms, apiRecordQrScan, apiSaveScan, getApiUrl } from '../../lib/api';
+import FlockLimitModal from '../../components/ui/FlockLimitModal';
+import { apiCreateChicken, apiGetChickens, apiGetFarms, apiGetGradcam, apiGetModules, apiGetMyPlan, apiRecordQrScan, apiSaveScan, getApiUrl } from '../../lib/api';
 
 // This screen doesn't use DarkModeContext (the camera viewfinder is always
 // dark), but the Add Chicken sheet itself is a plain light form — this is
@@ -69,8 +70,9 @@ const BARCODE_SCANNER_SETTINGS = {
 // ---------------------------------------------------------------------------
 interface Farm {
   id: number;
-  farm_name: string;
-  farm_location: string;
+  name?: string;
+  farm_name?: string;
+  farm_location?: string;
 }
 
 interface Chicken {
@@ -79,14 +81,20 @@ interface Chicken {
   farm_id: number | null;
   qr_code: string;
   photo_url?: string;
+  photo?: string;
   status?: string;
   status_color?: string;
 }
 
 const getFarmName = (farms: Farm[], farmId?: number | string | null): string => {
-  if (!farmId) return 'Unassigned';
-  const farm = farms.find((f) => String(f.id) === String(farmId));
-  return farm ? farm.farm_name : 'Unassigned';
+  if (farmId) {
+    const farm = farms.find((f) => String(f.id) === String(farmId));
+    if (farm) return farm.name || farm.farm_name || 'PRIME GAMEFARM';
+  }
+  if (farms.length > 0) {
+    return farms[0].name || farms[0].farm_name || 'PRIME GAMEFARM';
+  }
+  return 'PRIME GAMEFARM';
 };
 
 // A chicken newly filled out in the Add Chicken sheet, not yet created on
@@ -211,6 +219,7 @@ export default function CaptureScreen() {
     symptoms: string[];
     highConfidenceAlert?: boolean;
     base64Image?: string | null;
+    gradcamImage?: string | null;
   } | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
   const [lastPhotoUri, setLastPhotoUri] = useState<string | null>(null);
@@ -237,6 +246,8 @@ export default function CaptureScreen() {
   const [isSavingScan, setIsSavingScan] = useState(false);
   const [isCreatingChicken, setIsCreatingChicken] = useState(false);
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
+  const [showFlockLimitModal, setShowFlockLimitModal] = useState(false);
+  const [userSubscription, setUserSubscription] = useState<any>(null);
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -252,15 +263,15 @@ export default function CaptureScreen() {
     { id: 'scan', label: 'SCAN' },
   ];
 
-  const PART_MODULES = [
-    { id: 'auto' as const, label: 'Auto', iconFamily: 'Ionicons' as const, iconName: 'sparkles' },
-    { id: 'eye' as const, label: 'Eye & Head', iconFamily: 'Ionicons' as const, iconName: 'eye-outline' },
-    { id: 'wing' as const, label: 'Wing & Body', iconFamily: 'MaterialCommunityIcons' as const, iconName: 'feather' },
+  const DEFAULT_PART_MODULES = [
+    { id: 'eye', label: 'Eye', iconFamily: 'Ionicons' as const, iconName: 'eye-outline' },
+    { id: 'wing', label: 'Wing', iconFamily: 'MaterialCommunityIcons' as const, iconName: 'feather' },
   ];
-  type PartModuleId = 'auto' | 'eye' | 'wing';
-  const [selectedPart, setSelectedPart] = useState<PartModuleId>('auto');
+  const [partModules, setPartModules] = useState<Array<{ id: string; label: string; iconFamily: 'Ionicons' | 'MaterialCommunityIcons'; iconName: string }>>(DEFAULT_PART_MODULES);
+  const [selectedPart, setSelectedPart] = useState<string>('eye');
 
   const handleTopBack = async () => {
+    setTorchOn(false);
     try {
       if (chickenIdParam) {
         await AsyncStorage.removeItem('active_chicken_profile_id');
@@ -276,11 +287,7 @@ export default function CaptureScreen() {
     } catch (err) {
       console.warn('Error reading active_chicken_profile_id:', err);
     }
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(tabs)/home');
-    }
+    router.replace('/(tabs)/home');
   };
 
   useEffect(() => {
@@ -316,13 +323,45 @@ export default function CaptureScreen() {
     };
   }, [selectedMode]);
 
+  const checkFlockCapacityNotice = async (currentFarms?: Farm[], currentChickensList?: Chicken[], currentSub?: any) => {
+    try {
+      const dismissed = await AsyncStorage.getItem('flock_limit_dont_show_again');
+      if (dismissed === 'true') return;
+
+      const fList = currentFarms || farms;
+      const cList = currentChickensList || chickens;
+      const sub = currentSub || userSubscription;
+
+      const maxPerFarm = sub?.limits?.max_chickens_per_farm ?? 20;
+      const targetFarmId = fList && fList.length > 0 ? fList[0].id : null;
+      if (targetFarmId && cList && cList.length > 0) {
+        const count = cList.filter((c: any) => String(c.farm_id) === String(targetFarmId)).length;
+        if (count >= maxPerFarm) {
+          setShowFlockLimitModal(true);
+        }
+      }
+    } catch (e) {
+      console.warn('Error checking flock capacity notice:', e);
+    }
+  };
+
+  const handleDontShowFlockLimitAgain = async () => {
+    try {
+      await AsyncStorage.setItem('flock_limit_dont_show_again', 'true');
+    } catch (e) {
+      console.warn('Error saving flock limit preference:', e);
+    }
+    setShowFlockLimitModal(false);
+  };
+
   // Turn the torch off automatically whenever this screen loses focus
   // (navigating away, switching tabs) so it never stays on in the
-  // background after leaving Capture.
+  // background after leaving Capture. Also re-check flock capacity notice.
   useFocusEffect(
     useCallback(() => {
+      checkFlockCapacityNotice();
       return () => setTorchOn(false);
-    }, [])
+    }, [farms, chickens, userSubscription])
   );
 
   const clearPendingCapture = async () => {
@@ -359,9 +398,47 @@ export default function CaptureScreen() {
         return;
       }
 
-      const [farmList, chickenList] = await Promise.all([apiGetFarms(), apiGetChickens()]);
+      const [farmList, chickenList, planRes] = await Promise.all([
+        apiGetFarms(),
+        apiGetChickens(),
+        apiGetMyPlan().catch(() => null),
+      ]);
       setFarms(farmList || []);
       setChickens(chickenList || []);
+      if (planRes && planRes.subscription) {
+        setUserSubscription(planRes.subscription);
+      }
+
+      // Check if farm has reached capacity and alert user on entering Capture unless opted out
+      if (farmList && chickenList && planRes?.subscription) {
+        checkFlockCapacityNotice(farmList, chickenList, planRes.subscription);
+      }
+
+      // Dynamically load active modules from backend (e.g. Eye, Wing, Comb & Wattle, Feet)
+      try {
+        const serverMods = await apiGetModules();
+        if (serverMods && serverMods.length > 0) {
+          const mapped = serverMods.map((m) => {
+            const id = (m.id || '').toLowerCase();
+            if (id === 'eye' || m.icon === 'eye') {
+              return { id: m.id, label: m.name || 'Eye', iconFamily: 'Ionicons' as const, iconName: 'eye-outline' };
+            }
+            if (id === 'wing' || m.icon === 'wing') {
+              return { id: m.id, label: m.name || 'Wing', iconFamily: 'MaterialCommunityIcons' as const, iconName: 'feather' };
+            }
+            if (id.includes('comb') || m.icon === 'comb') {
+              return { id: m.id, label: m.name || 'Comb', iconFamily: 'MaterialCommunityIcons' as const, iconName: 'crown-outline' };
+            }
+            if (id === 'feet' || id.includes('foot') || id.includes('leg') || m.icon === 'feet') {
+              return { id: m.id, label: m.name || 'Feet', iconFamily: 'MaterialCommunityIcons' as const, iconName: 'paw' };
+            }
+            return { id: m.id, label: m.name || m.id, iconFamily: 'MaterialCommunityIcons' as const, iconName: 'cube-scan' };
+          });
+          setPartModules(mapped);
+        }
+      } catch (err) {
+        console.warn('Error loading dynamic modules in mobile:', err);
+      }
 
       // If we were navigated here from a chicken profile ("New Capture" /
       // "Capture Again"), auto-select that chicken so the person doesn't
@@ -468,13 +545,15 @@ export default function CaptureScreen() {
       confidence: top ? top.confidence : 0,
       confidenceLevel: result.confidence_level || (top?.confidence >= 70 ? 'High' : 'Moderate'),
       severity: top?.severity || 'none',
-      module: result.module || 'eye',
+      module: result.module || selectedPart || 'eye',
       modulesChecked: result.modules_checked || {},
       symptoms: symptomLabels.length > 0 ? symptomLabels : ['No abnormalities detected'],
       highConfidenceAlert: Boolean(result.high_confidence_alert),
       base64Image: base64Image || lastPhotoBase64,
+      gradcamImage: result.gradcam_image || null,
     };
 
+    setTorchOn(false);
     setScanResult(scan);
     setShowResultModal(true);
 
@@ -642,10 +721,12 @@ export default function CaptureScreen() {
 
   const handleCapture = () => {
     if (checkingCapture || scanning || isCapturing) return;
+    setTorchOn(false);
     setIsCapturing(true);
     setSelectedMode('photo');
     pressShutter(async () => {
       try {
+        setTorchOn(false);
         if (!cameraRef.current || !cameraReady) {
           setIsCapturing(false);
           return;
@@ -753,21 +834,44 @@ export default function CaptureScreen() {
       return;
     }
 
+    const maxPerFarm = userSubscription?.limits?.max_chickens_per_farm ?? 20;
+    const currentFlockCount = farms.length > 0
+      ? chickens.filter((c) => String(c.farm_id) === String(farms[0].id)).length
+      : chickens.length;
+
+    // If the farm has reached its chicken capacity, the user can only scan
+    // existing chickens. Route directly to picking their existing chicken!
+    if (currentFlockCount >= maxPerFarm && chickens.length > 0) {
+      setShowResultModal(false);
+      setPickerPurpose('postcapture');
+      setShowChickenPicker(true);
+      return;
+    }
+
     // No chicken was preselected — ask whether this is a new or existing bird.
     setShowResultModal(false);
     setShowNewOrExistingModal(true);
   };
 
   const handleChooseNewChicken = () => {
+    // If the active farm is already full, show the FlockLimitModal right away
+    const maxPerFarm = userSubscription?.limits?.max_chickens_per_farm ?? 20;
+    const currentFarmChickens = farms.length > 0
+      ? chickens.filter((c) => String(c.farm_id) === String(farms[0].id)).length
+      : chickens.length;
+
+    if (currentFarmChickens >= maxPerFarm) {
+      setShowNewOrExistingModal(false);
+      setShowFlockLimitModal(true);
+      return;
+    }
+
     setShowNewOrExistingModal(false);
-    // Deliberately NOT pre-filling with the just-captured photo — the user
-    // picks a separate profile photo manually via the Add Chicken sheet's
-    // own photo picker (see handlePickChickenPhoto below). The captured
-    // photo stays purely as the scan/analysis subject.
+    // Pre-fill with the captured photo so the new chicken has its photo immediately
     setNewChicken({
       name: '',
-      photo: null,
-      farmId: null,
+      photo: lastPhotoUri || null,
+      farmId: farms[0]?.id ? String(farms[0].id) : null,
     });
     setShowAddForm(true);
   };
@@ -821,6 +925,7 @@ export default function CaptureScreen() {
         severity_level: mapSeverity(scanResult.disease, scanResult.confidence),
         symptoms: scanResult.symptoms,
         image_url: imageUrl,
+        gradcam_image: scanResult.gradcamImage || null,
       });
 
       setShowResultModal(false);
@@ -888,6 +993,17 @@ export default function CaptureScreen() {
       return;
     }
 
+    const targetFarmId = newChicken.farmId ? Number(newChicken.farmId) : (farms.length > 0 ? farms[0].id : null);
+    const maxPerFarm = userSubscription?.limits?.max_chickens_per_farm ?? 20;
+    if (targetFarmId) {
+      const currentFarmChickens = chickens.filter((c) => String(c.farm_id) === String(targetFarmId)).length;
+      if (currentFarmChickens >= maxPerFarm) {
+        setShowAddForm(false);
+        setShowFlockLimitModal(true);
+        return;
+      }
+    }
+
     const chickenCode = generateNextChickenCode(chickens, newChicken.farmId);
 
     setPendingChicken({
@@ -911,6 +1027,10 @@ export default function CaptureScreen() {
       let photoBase64: string | undefined;
       if (pendingChicken.photo) {
         photoBase64 = await photoUriToBase64(pendingChicken.photo);
+      } else if (lastPhotoUri) {
+        photoBase64 = await photoUriToBase64(lastPhotoUri);
+      } else if (lastPhotoBase64) {
+        photoBase64 = lastPhotoBase64.startsWith('data:') ? lastPhotoBase64 : `data:image/jpeg;base64,${lastPhotoBase64}`;
       }
 
       const created: Chicken = await apiCreateChicken({
@@ -941,24 +1061,27 @@ export default function CaptureScreen() {
         router.replace(`/chicken/${savedId}`);
       }
     } catch (error: any) {
-      console.error('Error creating chicken:', error);
-      const msg = error.message || '';
-      if (msg.includes('Chicken limit reached') || msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED')) {
-        Alert.alert(
-          'Flock Limit Reached',
-          'This farm has reached its chicken quota for your current plan. Upgrade to Pro (70 chickens) or Premium (unlimited chickens) to add more.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'View Plans & Upgrade', onPress: () => router.push('/subscription') }
-          ]
-        );
-      } else {
-        await notify({
-          title: 'Save Failed',
-          message: msg || 'Failed to save chicken.',
-          type: 'alert',
-        });
+      const msg = error?.message || '';
+      if (
+        msg.includes('Chicken limit reached') ||
+        msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED') ||
+        error?.code === 'PLAN_CHICKEN_LIMIT_EXCEEDED'
+      ) {
+        setShowQRModal(false);
+        apiGetMyPlan()
+          .then((p) => {
+            if (p?.subscription) setUserSubscription(p.subscription);
+          })
+          .catch(() => {});
+        setShowFlockLimitModal(true);
+        return;
       }
+      console.error('Error creating chicken:', error);
+      await notify({
+        title: 'Save Failed',
+        message: msg || 'Failed to save chicken.',
+        type: 'alert',
+      });
     } finally {
       setIsCreatingChicken(false);
     }
@@ -1398,7 +1521,7 @@ export default function CaptureScreen() {
                 {selectedMode === 'photo' && !isBusyCapturing && !lastPhotoUri && (
                   <View style={styles.partSelectorContainer}>
                     <View style={styles.partSelectorPill}>
-                      {PART_MODULES.map((part) => {
+                      {partModules.map((part) => {
                         const active = selectedPart === part.id;
                         return (
                           <TouchableOpacity
@@ -1723,6 +1846,7 @@ export default function CaptureScreen() {
                 onSave={handleSaveScanResult}
                 onClose={() => setShowResultModal(false)}
                 isSaving={isSavingScan}
+                canViewHeatmaps={userSubscription?.has_heatmaps || userSubscription?.plan === 'pro' || userSubscription?.plan === 'premium'}
               />
             )}
           </View>
@@ -1781,24 +1905,47 @@ export default function CaptureScreen() {
               </View>
             ) : (
               <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ padding: 12 }}>
-                {chickens.map((c) => (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[styles.chickenPickRow, { borderBottomColor: CAPTURE_FORM_COLORS.divider }]}
-                    onPress={() => handleChickenPicked(c)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: CAPTURE_FORM_COLORS.text, fontWeight: '700', fontSize: 14 }}>
-                        {c.chicken_name}
-                      </Text>
-                      <Text style={{ color: CAPTURE_FORM_COLORS.textLight, fontSize: 11, marginTop: 2 }}>
-                        {c.qr_code} · {getFarmName(farms, c.farm_id)}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={CAPTURE_FORM_COLORS.textLight} />
-                  </TouchableOpacity>
-                ))}
+                {chickens.map((c) => {
+                  const avatarUri = c.photo || c.photo_url;
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.chickenPickRow, { borderBottomColor: CAPTURE_FORM_COLORS.divider }]}
+                      onPress={() => handleChickenPicked(c)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={styles.chickenPickAvatarWrap}>
+                        {avatarUri ? (
+                          <Image
+                            source={{
+                              uri: avatarUri.startsWith('data:')
+                                ? avatarUri
+                                : avatarUri.startsWith('http') || avatarUri.startsWith('file:')
+                                ? avatarUri
+                                : `data:image/jpeg;base64,${avatarUri}`,
+                            }}
+                            style={styles.chickenPickAvatar}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.chickenPickAvatarPlaceholder}>
+                            <ChickenIcon size={24} color={CAPTURE_FORM_COLORS.primary} />
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: CAPTURE_FORM_COLORS.text, fontWeight: '700', fontSize: 14 }}>
+                          {c.chicken_name}
+                        </Text>
+                        <Text style={{ color: CAPTURE_FORM_COLORS.textLight, fontSize: 11, marginTop: 2 }}>
+                          {c.qr_code} · {getFarmName(farms, c.farm_id)}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={CAPTURE_FORM_COLORS.textLight} />
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             )}
           </View>
@@ -1879,12 +2026,42 @@ export default function CaptureScreen() {
           </View>
         </View>
       </Modal>
+
+      <FlockLimitModal
+        visible={showFlockLimitModal}
+        onClose={() => setShowFlockLimitModal(false)}
+        onDontShowAgain={handleDontShowFlockLimitAgain}
+        scansRemaining={userSubscription?.scans_remaining ?? userSubscription?.usage?.scans_remaining ?? 9}
+        currentChickens={
+          pendingChicken?.farmId
+            ? chickens.filter((c) => String(c.farm_id) === String(pendingChicken.farmId)).length
+            : farms.length > 0
+            ? chickens.filter((c) => String(c.farm_id) === String(farms[0].id)).length
+            : chickens.length
+        }
+        maxChickens={userSubscription?.limits?.max_chickens_per_farm ?? 20}
+        farmName={
+          pendingChicken?.farmId
+            ? getFarmName(farms, pendingChicken.farmId)
+            : getFarmName(farms, farms[0]?.id)
+        }
+        planName={userSubscription?.plan_name || 'Free Trial'}
+      />
     </SafeAreaView>
   );
 }
 
-function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any) {
+function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canViewHeatmaps }: any) {
   const isHealthy = !scanResult.disease;
+  const [activeTab, setActiveTab] = useState<'photo' | 'gradcam'>('photo');
+  const [gradcamImg, setGradcamImg] = useState<string | null>(scanResult.gradcamImage || null);
+  const [loadingGradcam, setLoadingGradcam] = useState(false);
+
+  useEffect(() => {
+    if (scanResult.gradcamImage) {
+      setGradcamImg(scanResult.gradcamImage);
+    }
+  }, [scanResult.gradcamImage]);
 
   const recommendations = isHealthy
     ? ['Continue regular monitoring', 'Optimal health markers observed', 'Next scan recommended in 7 days']
@@ -1899,7 +2076,40 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any)
   };
 
   const badge = getSeverityBadge(scanResult.severity || 'none');
-  const moduleLabel = scanResult.module === 'wing' ? '🪶 Wing & Body Region' : '👁️ Head & Eye Region';
+  const targetModule = scanResult.module === 'wing' ? 'wing' : 'eye';
+  const moduleLabel = targetModule === 'wing' ? '🪶 Wing Region' : '👁️ Eye Region';
+
+  const handleTabChange = async (tab: 'photo' | 'gradcam') => {
+    setActiveTab(tab);
+    if (tab === 'gradcam' && canViewHeatmaps && !gradcamImg) {
+      const rawImg = scanResult.base64Image;
+      if (rawImg) {
+        setLoadingGradcam(true);
+        try {
+          const res = await apiGetGradcam(rawImg, targetModule);
+          if (res?.gradcam_image) {
+            setGradcamImg(res.gradcam_image);
+          }
+        } catch (e) {
+          console.warn('Could not generate visual heatmap on demand:', e);
+        } finally {
+          setLoadingGradcam(false);
+        }
+      }
+    }
+  };
+
+  const displayPhotoUri = scanResult.base64Image
+    ? scanResult.base64Image.startsWith('data:')
+      ? scanResult.base64Image
+      : `data:image/jpeg;base64,${scanResult.base64Image}`
+    : null;
+
+  const displayGradcamUri = gradcamImg
+    ? gradcamImg.startsWith('data:')
+      ? gradcamImg
+      : `data:image/jpeg;base64,${gradcamImg}`
+    : null;
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} style={styles.verifyBody} contentContainerStyle={{ paddingBottom: 16 }}>
@@ -1910,11 +2120,164 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving }: any)
         </Text>
       </View>
 
-      {/* Auto-focused region indicator */}
+      {/* Region indicator */}
       <View style={styles.autoFocusPill}>
         <Ionicons name="scan-circle-outline" size={15} color="#1565C0" />
-        <Text style={styles.autoFocusText}>AI Auto-Focused: {moduleLabel}</Text>
+        <Text style={styles.autoFocusText}>AI Analyzed: {moduleLabel}</Text>
       </View>
+
+      {/* Visual attention & photo toggle */}
+      {(displayPhotoUri || displayGradcamUri || !canViewHeatmaps) && (
+        <View style={{ marginTop: 8, marginBottom: 14 }}>
+          <View style={{
+            flexDirection: 'row',
+            backgroundColor: '#EDF2EE',
+            borderRadius: 10,
+            padding: 3,
+            marginBottom: 8,
+          }}>
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                paddingVertical: 7,
+                alignItems: 'center',
+                borderRadius: 8,
+                backgroundColor: activeTab === 'photo' ? '#fff' : 'transparent',
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 5,
+                elevation: activeTab === 'photo' ? 1 : 0,
+              }}
+              onPress={() => handleTabChange('photo')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="camera-outline" size={14} color={activeTab === 'photo' ? '#2D5541' : '#666'} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: activeTab === 'photo' ? '#2D5541' : '#666' }}>
+                Original Photo
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                paddingVertical: 7,
+                alignItems: 'center',
+                borderRadius: 8,
+                backgroundColor: activeTab === 'gradcam' ? '#fff' : 'transparent',
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 5,
+                elevation: activeTab === 'gradcam' ? 1 : 0,
+              }}
+              onPress={() => handleTabChange('gradcam')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="flame-outline" size={14} color={activeTab === 'gradcam' ? '#E65100' : '#666'} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: activeTab === 'gradcam' ? '#E65100' : '#666' }}>
+                AI Visual Focus
+              </Text>
+              {!canViewHeatmaps && (
+                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, marginLeft: 2 }}>
+                  <Text style={{ fontSize: 9, fontWeight: '800', color: '#D97706' }}>PRO</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={{
+            width: '100%',
+            height: 195,
+            borderRadius: 12,
+            overflow: 'hidden',
+            backgroundColor: '#111A15',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: activeTab === 'gradcam' ? 'rgba(230,81,0,0.35)' : '#DCE3DD',
+          }}>
+            {activeTab === 'gradcam' ? (
+              !canViewHeatmaps ? (
+                <View style={{ alignItems: 'center', padding: 18, justifyContent: 'center' }}>
+                  <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(245, 158, 11, 0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                    <Ionicons name="lock-closed" size={20} color="#f59e0b" />
+                  </View>
+                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 4 }}>
+                    AI Visual Focus Heatmap
+                  </Text>
+                  <Text style={{ color: '#aaa', fontSize: 11.5, lineHeight: 16, textAlign: 'center', marginBottom: 12, paddingHorizontal: 10 }}>
+                    Visual attention heatmaps highlighting exactly where the AI detected symptoms are unlocked on Pro accounts.
+                  </Text>
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#2D5541', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+                    onPress={() => {
+                      onClose();
+                      router.push('/subscription');
+                    }}
+                  >
+                    <Ionicons name="sparkles" size={13} color="#FFD54F" />
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Upgrade to Pro</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : loadingGradcam ? (
+                <View style={{ alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator size="small" color="#FFB74D" />
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                    Computing AI visual attention heatmap...
+                  </Text>
+                </View>
+              ) : displayGradcamUri ? (
+                <Image
+                  source={{ uri: displayGradcamUri }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              ) : (
+                <View style={{ alignItems: 'center', padding: 16 }}>
+                  <Ionicons name="eye-off-outline" size={24} color="#888" />
+                  <Text style={{ color: '#aaa', fontSize: 11, marginTop: 4, textAlign: 'center' }}>
+                    Visual heatmap not available for this capture
+                  </Text>
+                </View>
+              )
+            ) : displayPhotoUri ? (
+              <Image
+                source={{ uri: displayPhotoUri }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="contain"
+              />
+            ) : null}
+
+            {activeTab !== 'gradcam' || canViewHeatmaps ? (
+              <View style={{
+                position: 'absolute',
+                bottom: 8,
+                left: 8,
+                right: 8,
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                borderRadius: 8,
+                paddingVertical: 4,
+                paddingHorizontal: 10,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>
+                  {activeTab === 'gradcam' ? `AI Focus: ${moduleLabel}` : `Captured: ${moduleLabel}`}
+                </Text>
+                <Text style={{ color: activeTab === 'gradcam' ? '#FFB74D' : '#81C784', fontSize: 10, fontWeight: '700' }}>
+                  {activeTab === 'gradcam' ? 'Visual Heatmap' : 'Raw Image'}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {activeTab === 'gradcam' && canViewHeatmaps && (
+            <Text style={{ fontSize: 11, color: '#666', marginTop: 5, textAlign: 'center' }}>
+              Red & yellow areas highlight the exact {targetModule === 'wing' ? 'Wing' : 'Eye'} features the AI evaluated.
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Critical alert banner */}
       {scanResult.highConfidenceAlert && (
@@ -2568,6 +2931,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
+  },
+  chickenPickAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#EAF2EC',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#E0E7E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chickenPickAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  chickenPickAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EAF2EC',
   },
 
   verifySheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '90%' },

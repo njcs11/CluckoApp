@@ -57,6 +57,9 @@ def migrate():
             cur.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);')
             cur.execute('CREATE INDEX IF NOT EXISTS idx_sub_tx_user ON subscription_transactions(user_id);')
             
+            cur.execute('ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;')
+            cur.execute('ALTER TABLE subscription_transactions ENABLE ROW LEVEL SECURITY;')
+            
             db.commit()
             print("Tables created successfully.")
             

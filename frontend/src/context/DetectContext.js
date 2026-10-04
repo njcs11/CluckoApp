@@ -9,7 +9,7 @@ export function DetectProvider({ children }) {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [camError, setCamError] = useState(false);
-  const [scanModule, setScanModule] = useState('auto');
+  const [scanModule, setScanModule] = useState('eye');
   const [gradcamLoading, setGradcamLoading] = useState(false);
   const [gradcamData, setGradcamData] = useState(null);
 

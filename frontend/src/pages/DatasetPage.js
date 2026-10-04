@@ -23,14 +23,26 @@ import {
   Film,
   Sparkles
 } from 'lucide-react';
-import { EyeModuleIcon, WingModuleIcon } from '../components/icons';
+import { DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, FeetModuleIcon, CombModuleIcon } from '../components/icons';
+import ConfirmModal from '../components/ConfirmModal';
 import './DatasetPage.css';
 
 export default function DatasetPage() {
   const [diseases, setDiseases] = useState([]);
+  const [modules, setModules] = useState([]);
   const [stats, setStats] = useState({});
   const [selectedModule, setSelectedModule] = useState('eye');
   const [selectedDisease, setSelectedDisease] = useState('');
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    itemName: '',
+    detail: '',
+    confirmText: 'Delete',
+    confirmVariant: 'danger',
+    onConfirm: null
+  });
 
   // Upload State
   const [files, setFiles] = useState([]);
@@ -46,19 +58,23 @@ export default function DatasetPage() {
   const [lightboxIndex, setLightboxIndex] = useState(null); // index in filteredImages
   const [failedImages, setFailedImages] = useState(new Set());
 
-  // Load basic diseases and statistics
+  // Load basic diseases, modules, and statistics
   const loadStats = async () => {
     try {
-      const [dRes, sRes] = await Promise.all([
+      const [dRes, sRes, mRes] = await Promise.all([
         axios.get('/api/diseases'),
-        axios.get('/api/dataset/stats')
+        axios.get('/api/dataset/stats'),
+        axios.get('/api/modules')
       ]);
-      setDiseases(dRes.data.diseases || []);
+      const disList = dRes.data.diseases || [];
+      const modsList = mRes.data.modules || [];
+      setDiseases(disList);
       setStats(sRes.data || {});
+      setModules(modsList);
 
       // Auto-select first disease if none selected
-      if (!selectedDisease && dRes.data.diseases?.length > 0) {
-        const first = dRes.data.diseases.find(d => d.module === selectedModule) || dRes.data.diseases[0];
+      if (!selectedDisease && disList.length > 0) {
+        const first = disList.find(d => d.module === selectedModule) || disList[0];
         setSelectedDisease(first.id);
       }
     } catch (err) {
@@ -66,26 +82,36 @@ export default function DatasetPage() {
     }
   };
 
-  const handleDeleteBroken = async () => {
+  const handleDeleteBroken = () => {
     const filenames = Array.from(failedImages);
     if (filenames.length === 0) return;
-    if (!window.confirm(`Delete ${filenames.length} corrupt / unreadable file(s)?`)) return;
-
-    try {
-      const { data } = await axios.post('/api/dataset/delete-bulk', {
-        module: selectedModule,
-        disease_id: selectedDisease,
-        filenames
-      });
-      if (data.success) {
-        toast.success(`Deleted ${data.deleted_count} corrupt file(s)`);
-        setGalleryImages(prev => prev.filter(img => !failedImages.has(img.filename)));
-        setFailedImages(new Set());
-        loadStats();
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Corrupt Files?',
+      message: 'Are you sure you want to remove corrupt or unreadable image file(s)?',
+      itemName: `${filenames.length} file(s)`,
+      detail: 'Corrupt files will be deleted from the dataset folder to prevent model training crashes.',
+      confirmText: 'Delete Corrupt Files',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        try {
+          const { data } = await axios.post('/api/dataset/delete-bulk', {
+            module: selectedModule,
+            disease_id: selectedDisease,
+            filenames
+          });
+          if (data.success) {
+            toast.success(`Deleted ${data.deleted_count} corrupt file(s)`);
+            setGalleryImages(prev => prev.filter(img => !failedImages.has(img.filename)));
+            setFailedImages(new Set());
+            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            loadStats();
+          }
+        } catch (err) {
+          toast.error('Failed to delete corrupt files');
+        }
       }
-    } catch (err) {
-      toast.error('Failed to delete corrupt files');
-    }
+    });
   };
 
   // Load images for current selected disease
@@ -180,64 +206,80 @@ export default function DatasetPage() {
   };
 
   // Delete single image
-  const handleDeleteSingle = async (filename, e) => {
+  const handleDeleteSingle = (filename, e) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Are you sure you want to delete "${filename}" from this dataset?`)) {
-      return;
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Image Sample?',
+      message: 'Are you sure you want to remove image sample',
+      itemName: filename,
+      detail: 'This sample will be permanently deleted from the model dataset on disk.',
+      confirmText: 'Delete Image',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        try {
+          const { data } = await axios.delete('/api/dataset/image', {
+            data: {
+              module: selectedModule,
+              disease_id: selectedDisease,
+              filename
+            }
+          });
+          if (data.success) {
+            toast.success(`Deleted ${filename}`);
+            setGalleryImages(prev => prev.filter(img => img.filename !== filename));
+            setSelectedImageKeys(prev => {
+              const next = new Set(prev);
+              next.delete(filename);
+              return next;
+            });
+            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            loadStats();
 
-    try {
-      const { data } = await axios.delete('/api/dataset/image', {
-        data: {
-          module: selectedModule,
-          disease_id: selectedDisease,
-          filename
-        }
-      });
-      if (data.success) {
-        toast.success(`Deleted ${filename}`);
-        setGalleryImages(prev => prev.filter(img => img.filename !== filename));
-        setSelectedImageKeys(prev => {
-          const next = new Set(prev);
-          next.delete(filename);
-          return next;
-        });
-        loadStats();
-
-        // Close lightbox if current image was deleted
-        if (lightboxIndex !== null) {
-          setLightboxIndex(null);
+            // Close lightbox if current image was deleted
+            if (lightboxIndex !== null) {
+              setLightboxIndex(null);
+            }
+          }
+        } catch (err) {
+          toast.error('Failed to delete image');
         }
       }
-    } catch (err) {
-      toast.error('Failed to delete image');
-    }
+    });
   };
 
   // Delete multiple selected images
-  const handleDeleteBulk = async () => {
+  const handleDeleteBulk = () => {
     const filenames = Array.from(selectedImageKeys);
     if (filenames.length === 0) return;
 
-    if (!window.confirm(`Are you sure you want to permanently delete ${filenames.length} selected images?`)) {
-      return;
-    }
-
-    try {
-      const { data } = await axios.post('/api/dataset/delete-bulk', {
-        module: selectedModule,
-        disease_id: selectedDisease,
-        filenames
-      });
-      if (data.success) {
-        toast.success(`Deleted ${data.deleted_count} image(s)`);
-        setGalleryImages(prev => prev.filter(img => !selectedImageKeys.has(img.filename)));
-        setSelectedImageKeys(new Set());
-        loadStats();
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Selected Images?',
+      message: 'Are you sure you want to permanently delete',
+      itemName: `${filenames.length} selected images`,
+      detail: 'These samples will be permanently deleted from the dataset on disk.',
+      confirmText: `Delete ${filenames.length} Images`,
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        try {
+          const { data } = await axios.post('/api/dataset/delete-bulk', {
+            module: selectedModule,
+            disease_id: selectedDisease,
+            filenames
+          });
+          if (data.success) {
+            toast.success(`Deleted ${data.deleted_count} image(s)`);
+            setGalleryImages(prev => prev.filter(img => !selectedImageKeys.has(img.filename)));
+            setSelectedImageKeys(new Set());
+            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            loadStats();
+          }
+        } catch (err) {
+          toast.error('Bulk deletion failed');
+        }
       }
-    } catch (err) {
-      toast.error('Bulk deletion failed');
-    }
+    });
   };
 
   // Toggle selection for bulk delete
@@ -311,39 +353,30 @@ export default function DatasetPage() {
       {/* Module Selector Segmented Tabs */}
       <div className="module-tabs-card card">
         <div className="module-tabs-inner">
-          <button
-            className={`module-tab-btn ${selectedModule === 'eye' ? 'active' : ''}`}
-            onClick={() => {
-              setSelectedModule('eye');
-              const first = diseases.find(d => d.module === 'eye');
-              if (first) setSelectedDisease(first.id);
-            }}
-          >
-            <span className="module-tab-icon-wrap">
-              <EyeModuleIcon size={20} color={selectedModule === 'eye' ? '#22c55e' : '#8f949a'} />
-            </span>
-            <div className="module-tab-text">
-              <span className="module-tab-title">Eye & Head Module</span>
-              <span className="module-tab-subtitle">Infectious Coryza, Fowl Pox, Healthy Eye</span>
-            </div>
-          </button>
-
-          <button
-            className={`module-tab-btn ${selectedModule === 'wing' ? 'active' : ''}`}
-            onClick={() => {
-              setSelectedModule('wing');
-              const first = diseases.find(d => d.module === 'wing');
-              if (first) setSelectedDisease(first.id);
-            }}
-          >
-            <span className="module-tab-icon-wrap">
-              <WingModuleIcon size={20} color={selectedModule === 'wing' ? '#22c55e' : '#8f949a'} />
-            </span>
-            <div className="module-tab-text">
-              <span className="module-tab-title">Wing & Posture Module</span>
-              <span className="module-tab-subtitle">Newcastle Disease, Wing Droop, Healthy Wing</span>
-            </div>
-          </button>
+          {modules.map(m => {
+            const mDiseases = diseases.filter(d => d.module === m.id);
+            const previewClasses = mDiseases.slice(0, 3).map(d => d.name).join(', ') || 'No registered classes';
+            const isSelected = selectedModule === m.id;
+            return (
+              <button
+                key={m.id}
+                className={`module-tab-btn ${isSelected ? 'active' : ''}`}
+                onClick={() => {
+                  setSelectedModule(m.id);
+                  const first = diseases.find(d => d.module === m.id);
+                  if (first) setSelectedDisease(first.id);
+                }}
+              >
+                <span className="module-tab-icon-wrap">
+                  <DynamicModuleIcon module={m.id} icon={m.icon} size={20} color={isSelected ? '#22c55e' : '#8f949a'} />
+                </span>
+                <div className="module-tab-text">
+                  <span className="module-tab-title">{m.display_name || `${m.name} Module`}</span>
+                  <span className="module-tab-subtitle">{previewClasses}</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -352,8 +385,8 @@ export default function DatasetPage() {
         <div className="card stats-panel">
           <div className="card-title-row">
             <span className="card-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {selectedModule === 'eye' ? <EyeModuleIcon size={18} color="#22c55e" /> : <WingModuleIcon size={18} color="#22c55e" />}
-              <span>{selectedModule === 'eye' ? 'Eye Classes' : 'Wing Classes'}</span>
+              <DynamicModuleIcon module={selectedModule} size={18} color="#22c55e" />
+              <span>{(modules.find(m => m.id === selectedModule)?.name || selectedModule.toUpperCase())} Classes</span>
             </span>
             <span className="class-count-badge">{moduleDiseases.length} Classes</span>
           </div>
@@ -362,6 +395,7 @@ export default function DatasetPage() {
             {moduleDiseases.map(d => {
               const count = stats[d.id] || 0;
               const isSelected = selectedDisease === d.id;
+              const modObj = modules.find(m => m.id === d.module) || { name: d.module };
               return (
                 <div
                   key={d.id}
@@ -373,7 +407,7 @@ export default function DatasetPage() {
                     <div className="stat-name-row">
                       <span className="stat-name">{d.name}</span>
                       <span className="stat-module-pill">
-                        {d.module === 'eye' ? 'Eye' : 'Wing'}
+                        {modObj.name || d.module}
                       </span>
                     </div>
                     <div className="stat-count" style={{ color: getStatusColor(count) }}>
@@ -779,6 +813,11 @@ export default function DatasetPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        {...confirmModal}
+        onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

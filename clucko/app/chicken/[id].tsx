@@ -4,7 +4,7 @@ import { deleteChickenForCurrentUser, loadChickensForCurrentUser, updateChickenF
 import { Farm, getFarmName, loadFarms } from '@/utils/farms';
 import { persistChickenPhoto } from '@/utils/photoStorage';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
-import { apiGetChickenHistory } from '@/lib/api';
+import { apiGetChickenHistory, apiGetGradcam, apiGetMyPlan } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Dimensions,
   Image,
   Modal,
@@ -56,6 +57,15 @@ export default function ChickenDetailScreen() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [chickenScans, setChickenScans] = useState<any[]>([]);
   const [selectedScanHistory, setSelectedScanHistory] = useState<any | null>(null);
+  const [historyModalTab, setHistoryModalTab] = useState<'photo' | 'gradcam'>('photo');
+  const [generatingGradcam, setGeneratingGradcam] = useState(false);
+  const [userSubscription, setUserSubscription] = useState<any>(null);
+
+  const canViewHeatmaps = Boolean(
+    userSubscription?.has_heatmaps ||
+    userSubscription?.plan === 'pro' ||
+    userSubscription?.plan === 'premium'
+  );
 
   // --- 3-dot dropdown menu (Edit / Delete) ---
   const [showMenu, setShowMenu] = useState(false);
@@ -203,6 +213,7 @@ export default function ChickenDetailScreen() {
           observation: h.observation,
           scan_type: h.scan_type,
           image_url: h.image_url,
+          gradcam_image: h.gradcam_image || (typeof h.all_predictions === 'object' && h.all_predictions ? h.all_predictions.gradcam_image : null) || null,
           captured_by_name: h.captured_by_name || 'Farm Member',
           captured_by_role: (h.captured_by_role || 'member').charAt(0).toUpperCase() + (h.captured_by_role || 'member').slice(1),
         };
@@ -216,7 +227,31 @@ export default function ChickenDetailScreen() {
   useEffect(() => {
     loadChickenDetails();
     loadScanHistory();
+    apiGetMyPlan()
+      .then((res) => {
+        if (res?.subscription) {
+          setUserSubscription(res.subscription);
+        }
+      })
+      .catch(() => null);
   }, [id]);
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/chickens');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBack]);
 
   useEffect(() => {
     loadFarms().then(setFarms);
@@ -309,7 +344,7 @@ export default function ChickenDetailScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -392,7 +427,7 @@ export default function ChickenDetailScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -465,7 +500,7 @@ export default function ChickenDetailScreen() {
         message: 'Chicken has been removed from flock.',
         type: 'info',
       });
-      router.back();
+      handleBack();
     } catch (error: any) {
       console.error('Error deleting chicken:', error);
       await notify({
@@ -491,7 +526,7 @@ export default function ChickenDetailScreen() {
       <SafeAreaView style={[styles.errorContainer, { backgroundColor: colors.background }]}>
         <Ionicons name="alert-circle-outline" size={64} color={colors.error} />
         <Text style={[styles.errorText, { color: colors.text }]}>Chicken not found</Text>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.errorButton, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={handleBack} style={[styles.errorButton, { backgroundColor: colors.primary }]}>
           <Text style={styles.errorButtonText}>Go Back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -513,7 +548,7 @@ export default function ChickenDetailScreen() {
 
       {/* Header - Compact */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.primary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
@@ -721,8 +756,18 @@ export default function ChickenDetailScreen() {
                 <Text style={[styles.infoCardValue, { color: colors.text, textAlign: 'center' }]} numberOfLines={1}>
                   {chicken.addedByName || 'Farm Owner'}
                 </Text>
-                <Text style={{ fontSize: 10, color: colors.textLight, marginTop: -2 }} numberOfLines={1}>
-                  ({chicken.addedByRole || 'Owner'})
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '600',
+                    color: colors.textLight,
+                    marginTop: 2,
+                    textAlign: 'center',
+                    includeFontPadding: false,
+                  }}
+                  numberOfLines={1}
+                >
+                  ({String(chicken.addedByRole || 'Owner').trim().split(/[\s-(]/)[0].charAt(0).toUpperCase() + String(chicken.addedByRole || 'Owner').trim().split(/[\s-(]/)[0].slice(1).toLowerCase()})
                 </Text>
               </View>
             </View>
@@ -969,25 +1014,142 @@ export default function ChickenDetailScreen() {
             </View>
 
             <ScrollView style={styles.scanModalBody} showsVerticalScrollIndicator={false}>
-              {/* Scan Image */}
+              {/* Photo vs Grad-CAM Segmented Switcher */}
+              <View style={{ flexDirection: 'row', backgroundColor: isDarkMode ? '#1E1E1E' : '#EAF2EC', borderRadius: 10, padding: 3, marginBottom: 12 }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 7,
+                    borderRadius: 8,
+                    backgroundColor: historyModalTab === 'photo' ? colors.card : 'transparent',
+                  }}
+                  onPress={() => setHistoryModalTab('photo')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="camera-outline" size={15} color={historyModalTab === 'photo' ? colors.primary : colors.textLight} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: historyModalTab === 'photo' ? colors.text : colors.textLight }}>
+                    Original Photo
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 7,
+                    borderRadius: 8,
+                    backgroundColor: historyModalTab === 'gradcam' ? colors.card : 'transparent',
+                  }}
+                  onPress={async () => {
+                    setHistoryModalTab('gradcam');
+                    if (canViewHeatmaps && !selectedScanHistory?.gradcam_image && selectedScanHistory?.image_url) {
+                      setGeneratingGradcam(true);
+                      try {
+                        const targetModule = selectedScanHistory?.scan_type === 'wing' ? 'wing' : 'eye';
+                        const res = await apiGetGradcam(selectedScanHistory.image_url, targetModule);
+                        if (res?.gradcam_image) {
+                          setSelectedScanHistory((prev: any) => ({ ...prev, gradcam_image: res.gradcam_image }));
+                        }
+                      } catch (err) {
+                        console.error('Visual heatmap fetch error:', err);
+                      } finally {
+                        setGeneratingGradcam(false);
+                      }
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="flame-outline" size={15} color={historyModalTab === 'gradcam' ? '#FF9800' : colors.textLight} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: historyModalTab === 'gradcam' ? colors.text : colors.textLight }}>
+                    AI Visual Focus
+                  </Text>
+                  {!canViewHeatmaps && (
+                    <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, marginLeft: 2 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#D97706' }}>PRO</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* Scan / Heatmap Image */}
               <View style={styles.scanModalImageWrap}>
-                {selectedScanHistory?.image_url || chicken?.photo ? (
-                  <Image
-                    source={{ uri: selectedScanHistory?.image_url || chicken?.photo }}
-                    style={styles.scanModalImage}
-                    resizeMode="cover"
-                  />
+                {historyModalTab === 'gradcam' ? (
+                  !canViewHeatmaps ? (
+                    <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#111A15', justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+                      <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(245, 158, 11, 0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                        <Ionicons name="lock-closed" size={20} color="#f59e0b" />
+                      </View>
+                      <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 4 }}>
+                        AI Visual Focus Heatmap
+                      </Text>
+                      <Text style={{ color: '#aaa', fontSize: 11.5, lineHeight: 16, textAlign: 'center', marginBottom: 12, paddingHorizontal: 10 }}>
+                        Visual attention heatmaps highlighting exactly where the AI detected symptoms are unlocked on Pro accounts.
+                      </Text>
+                      <TouchableOpacity
+                        style={{ backgroundColor: '#2D5541', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+                        onPress={() => {
+                          setSelectedScanHistory(null);
+                          router.push('/subscription');
+                        }}
+                      >
+                        <Ionicons name="sparkles" size={13} color="#FFD54F" />
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Upgrade to Pro</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : generatingGradcam ? (
+                    <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+                      <ActivityIndicator size="large" color="#FF9800" />
+                      <Text style={{ marginTop: 12, fontSize: 12, fontWeight: '600', color: colors.textSecondary, textAlign: 'center' }}>
+                        Generating AI Visual Attention Heatmap for {selectedScanHistory?.scan_type === 'wing' ? 'Wing' : 'Eye'}...
+                      </Text>
+                    </View>
+                  ) : selectedScanHistory?.gradcam_image ? (
+                    <Image
+                      source={{
+                        uri: selectedScanHistory.gradcam_image.startsWith('data:')
+                          ? selectedScanHistory.gradcam_image
+                          : `data:image/jpeg;base64,${selectedScanHistory.gradcam_image}`,
+                      }}
+                      style={styles.scanModalImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+                      <Ionicons name="flame-outline" size={40} color="#FF9800" />
+                      <Text style={{ marginTop: 8, fontSize: 12, color: colors.textLight, textAlign: 'center' }}>
+                        Visual heatmap not available for this record.
+                      </Text>
+                    </View>
+                  )
                 ) : (
-                  <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center' }]}>
-                    <ChickenIcon size={72} color={colors.primary} />
-                  </View>
+                  selectedScanHistory?.image_url || chicken?.photo ? (
+                    <Image
+                      source={{ uri: selectedScanHistory?.image_url || chicken?.photo }}
+                      style={styles.scanModalImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.scanModalImage, { backgroundColor: isDarkMode ? '#1E2621' : '#EAF2EC', justifyContent: 'center', alignItems: 'center' }]}>
+                      <ChickenIcon size={72} color={colors.primary} />
+                    </View>
+                  )
                 )}
+
                 <View
                   style={[
                     styles.scanModalSeverityBadge,
                     {
                       backgroundColor:
-                        selectedScanHistory?.status === 'critical'
+                        historyModalTab === 'gradcam'
+                          ? '#FF9800'
+                          : selectedScanHistory?.status === 'critical'
                           ? '#f44336'
                           : selectedScanHistory?.status === 'warning'
                           ? '#FF9800'
@@ -996,10 +1158,20 @@ export default function ChickenDetailScreen() {
                   ]}
                 >
                   <Text style={styles.scanModalSeverityText}>
-                    {(selectedScanHistory?.status || 'HEALTHY').toUpperCase()}
+                    {historyModalTab === 'gradcam'
+                      ? `AI FOCUS: ${selectedScanHistory?.scan_type === 'wing' ? 'WING' : 'EYE'}`
+                      : (selectedScanHistory?.status || 'HEALTHY').toUpperCase()}
                   </Text>
                 </View>
               </View>
+
+              {historyModalTab === 'gradcam' && canViewHeatmaps && (
+                <View style={{ marginTop: -8, marginBottom: 12, paddingHorizontal: 4 }}>
+                  <Text style={{ fontSize: 11, color: colors.textLight, fontStyle: 'italic', textAlign: 'center' }}>
+                    Red & yellow areas highlight the exact {selectedScanHistory?.scan_type === 'wing' ? 'wing' : 'eye'} features evaluated by the AI.
+                  </Text>
+                </View>
+              )}
 
               {/* Condition & Confidence Section */}
               <View style={[styles.scanModalSection, { backgroundColor: isDarkMode ? '#1E1E1E' : '#F9FBF9', borderColor: colors.border }]}>

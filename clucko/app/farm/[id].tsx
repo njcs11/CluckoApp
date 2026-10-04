@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  BackHandler,
   Platform,
   ScrollView,
   StyleSheet,
@@ -51,6 +52,23 @@ export default function FarmDetailScreen() {
       setActiveTab(tab);
     }
   }, [tab]);
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/home');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBack]);
 
   const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
   const [farm, setFarm] = useState<any>(null);
@@ -311,7 +329,7 @@ export default function FarmDetailScreen() {
       {/* Header */}
       <LinearGradient colors={isDarkMode ? ['#18231E', '#0E1210'] : ['#2D5541', '#1E3D2D']} style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+          <TouchableOpacity onPress={handleBack} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           {userRole === 'owner' && (

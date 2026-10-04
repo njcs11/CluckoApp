@@ -18,7 +18,8 @@ import {
   View,
 } from 'react-native';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+// In React Native New Architecture (Fabric), setLayoutAnimationEnabledExperimental is a no-op
+if (Platform.OS === 'android' && !(globalThis as any).nativeFabricUIManager && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
@@ -61,7 +62,7 @@ export default function FarmOnboardingModal({
           setSecondsRemaining(count);
           if (count <= 0) {
             if (timer) clearInterval(timer);
-            if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+            if (Platform.OS === 'android' && !(globalThis as any).nativeFabricUIManager && UIManager.setLayoutAnimationEnabledExperimental) {
               UIManager.setLayoutAnimationEnabledExperimental(true);
             }
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);

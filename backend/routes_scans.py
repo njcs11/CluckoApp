@@ -41,7 +41,15 @@ def save_scan():
     elif raw_img_type in ('other',):
         img_type = 'other'
     else:
-        return jsonify({'error': "image_type must be one of: 'eye', 'wing', 'posture', 'feces', 'other'"}), 400
+        try:
+            from app import get_valid_module_ids
+            valid_mods = get_valid_module_ids()
+        except Exception:
+            valid_mods = ['eye', 'wing']
+        if raw_img_type in valid_mods:
+            img_type = raw_img_type
+        else:
+            return jsonify({'error': f"image_type must be one of: 'eye', 'wing', 'posture', 'feces', 'other' or registered module: {', '.join(valid_mods)}"}), 400
 
     pred_cond = str(d['predicted_condition']).strip()[:100]
     raw_img_url = d.get('image_url') or d.get('photo_url')
@@ -115,12 +123,20 @@ def save_scan():
                 SET captures_used = COALESCE(captures_used, 0) + 1, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = %s
             ''', (owner_id,))
+            all_preds_data = d.get('all_predictions') or []
+            gradcam_img = d.get('gradcam_image')
+            if gradcam_img:
+                if isinstance(all_preds_data, dict):
+                    all_preds_data['gradcam_image'] = gradcam_img
+                else:
+                    all_preds_data = {'predictions': all_preds_data, 'gradcam_image': gradcam_img}
+
             cur.execute('''
                 INSERT INTO detection_results
                 (image_id,predicted_condition,confidence_score,severity_level,all_predictions,detected_symptoms)
                 VALUES (%s,%s,%s,%s,%s,%s)
             ''', (image_id, pred_cond, conf_score, severity,
-                  json.dumps(d.get('all_predictions',[])), json.dumps(d.get('symptoms',[]))))
+                  json.dumps(all_preds_data), json.dumps(d.get('symptoms',[]))))
             detection_id = cur.lastrowid
             cur.execute('SELECT id FROM diseases WHERE disease_name=%s', (pred_cond,))
             disease = cur.fetchone()
@@ -131,6 +147,14 @@ def save_scan():
             ''', (chicken_id, request.user_id, image_id, disease['id'] if disease else None,
                   f"{pred_cond} detected. Symptoms: {symptoms_str}"[:500],
                   conf_score, img_type, image_url))
+            # If the chicken does not have a photo yet (or only has a truncated one), set its photo from this scan
+            if image_url and len(image_url) > 100:
+                cur.execute('''
+                    UPDATE chickens 
+                    SET photo_url = %s 
+                    WHERE id = %s AND (photo_url IS NULL OR photo_url = '' OR LENGTH(photo_url) <= 1000)
+                ''', (image_url, chicken_id))
+
             high_conf = bool(d.get('high_confidence_alert', False))
             if severity != 'none' or high_conf:
                 alert_msgs = {

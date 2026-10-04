@@ -1,4 +1,5 @@
 from flask import request, jsonify
+import json
 from app import app
 from db import get_db, token_required
 
@@ -18,7 +19,18 @@ def get_chickens():
                 if not cur.fetchone():
                     return jsonify({'error': 'No access to this farm'}), 403
                 cur.execute('''
-                    SELECT c.*, f.farm_name,
+                    SELECT c.id, c.user_id, c.farm_id, c.qr_code, c.chicken_name, c.location,
+                           c.status, c.status_color, c.created_at, c.updated_at,
+                           COALESCE(
+                               NULLIF(c.photo_url, ''),
+                               (SELECT hh.image_url FROM health_history hh 
+                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL AND LENGTH(hh.image_url) > 100 
+                                ORDER BY hh.recorded_at DESC LIMIT 1),
+                               (SELECT ic.image_url FROM image_captures ic 
+                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL AND LENGTH(ic.image_url) > 100 
+                                ORDER BY ic.capture_datetime DESC LIMIT 1)
+                           ) AS photo_url,
+                           f.farm_name,
                            TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
                            u.role as added_by_role
                     FROM chickens c
@@ -28,7 +40,18 @@ def get_chickens():
                 ''', (farm_id,))
             else:
                 cur.execute('''
-                    SELECT c.*, f.farm_name,
+                    SELECT c.id, c.user_id, c.farm_id, c.qr_code, c.chicken_name, c.location,
+                           c.status, c.status_color, c.created_at, c.updated_at,
+                           COALESCE(
+                               NULLIF(c.photo_url, ''),
+                               (SELECT hh.image_url FROM health_history hh 
+                                WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL AND LENGTH(hh.image_url) > 100 
+                                ORDER BY hh.recorded_at DESC LIMIT 1),
+                               (SELECT ic.image_url FROM image_captures ic 
+                                WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL AND LENGTH(ic.image_url) > 100 
+                                ORDER BY ic.capture_datetime DESC LIMIT 1)
+                           ) AS photo_url,
+                           f.farm_name,
                            TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
                            u.role as added_by_role
                     FROM chickens c
@@ -63,7 +86,7 @@ def create_chicken():
     raw_photo = d.get('photo_url')
     if raw_photo and str(raw_photo).strip().lower().startswith('javascript:'):
         return jsonify({'error': 'Invalid photo URL protocol'}), 400
-    photo_url = str(raw_photo).strip()[:1000] if raw_photo else ''
+    photo_url = str(raw_photo).strip() if raw_photo else None
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -117,6 +140,20 @@ def create_chicken():
                 ''', (request.user_id, qr_code))
             if cur.fetchone():
                 return jsonify({'error': 'QR code already exists in this farm'}), 400
+
+            # Unique gamefowl name check per farm (case-insensitive)
+            if farm_id:
+                cur.execute('''
+                    SELECT id FROM chickens
+                    WHERE farm_id = %s AND LOWER(TRIM(chicken_name)) = LOWER(TRIM(%s))
+                ''', (farm_id, chicken_name))
+            else:
+                cur.execute('''
+                    SELECT id FROM chickens
+                    WHERE farm_id IS NULL AND user_id = %s AND LOWER(TRIM(chicken_name)) = LOWER(TRIM(%s))
+                ''', (request.user_id, chicken_name))
+            if cur.fetchone():
+                return jsonify({'error': f'A gamefowl named "{chicken_name}" already exists in this farm'}), 400
 
             # Idempotency check: prevent duplicate chicken creation within 4 seconds by same user
             cur.execute('''
@@ -204,7 +241,18 @@ def _resolve_chicken(cur, user_id, cid, farm_id=None):
         farm_id = request.args.get('farm_id')
 
     select_fields = '''
-        c.*, f.farm_name,
+        c.id, c.user_id, c.farm_id, c.qr_code, c.chicken_name, c.location,
+        c.status, c.status_color, c.created_at, c.updated_at,
+        COALESCE(
+            NULLIF(c.photo_url, ''),
+            (SELECT hh.image_url FROM health_history hh 
+             WHERE hh.chicken_id = c.id AND hh.image_url IS NOT NULL AND LENGTH(hh.image_url) > 100 
+             ORDER BY hh.recorded_at DESC LIMIT 1),
+            (SELECT ic.image_url FROM image_captures ic 
+             WHERE ic.chicken_id = c.id AND ic.image_url IS NOT NULL AND LENGTH(ic.image_url) > 100 
+             ORDER BY ic.capture_datetime DESC LIMIT 1)
+        ) AS photo_url,
+        f.farm_name,
         TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as added_by_name,
         u.role as added_by_role
     '''
@@ -301,15 +349,29 @@ def get_chicken_history(cid):
                        d.disease_name, d.severity, d.color,
                        CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) AS captured_by_name,
                        u.role AS captured_by_role,
-                       u.email AS captured_by_email
+                       u.email AS captured_by_email,
+                       dr.all_predictions
                 FROM health_history hh
                 LEFT JOIN image_captures ic ON hh.image_id = ic.id
+                LEFT JOIN detection_results dr ON dr.image_id = hh.image_id
                 LEFT JOIN diseases d ON hh.disease_id = d.id
                 LEFT JOIN users u ON hh.user_id = u.id
                 WHERE hh.chicken_id=%s
                 ORDER BY hh.recorded_at DESC
             ''', (real_id,))
-            return jsonify(cur.fetchall())
+            rows = cur.fetchall()
+            for r in rows:
+                ap = r.get('all_predictions')
+                if isinstance(ap, str):
+                    try:
+                        ap = json.loads(ap)
+                    except Exception:
+                        ap = {}
+                if isinstance(ap, dict):
+                    r['gradcam_image'] = ap.get('gradcam_image')
+                else:
+                    r['gradcam_image'] = None
+            return jsonify(rows)
     finally:
         db.close()
 
@@ -336,7 +398,7 @@ def update_chicken(cid):
                 p_url = str(d.get('photo_url') or '').strip()
                 if p_url.lower().startswith('javascript:'):
                     return jsonify({'error': 'Invalid photo URL protocol'}), 400
-                updates['photo_url'] = p_url[:1000]
+                updates['photo_url'] = p_url
             if 'farm_id' in d:
                 updates['farm_id'] = int(d['farm_id']) if d['farm_id'] is not None else None
 
@@ -367,6 +429,24 @@ def update_chicken(cid):
                             'error': f"Destination farm chicken limit reached ({current_chickens}/{max_chickens}). Upgrade required.",
                             'code': 'PLAN_CHICKEN_LIMIT_EXCEEDED'
                         }), 403
+
+            # If chicken_name or farm_id is being updated, verify unique name in destination farm
+            if 'chicken_name' in updates or 'farm_id' in updates:
+                target_farm_id = updates.get('farm_id', chicken.get('farm_id') if isinstance(chicken, dict) else None)
+                new_name = updates.get('chicken_name', chicken.get('chicken_name') if isinstance(chicken, dict) else None)
+                if new_name:
+                    if target_farm_id:
+                        cur.execute('''
+                            SELECT id FROM chickens
+                            WHERE farm_id = %s AND LOWER(TRIM(chicken_name)) = LOWER(TRIM(%s)) AND id != %s
+                        ''', (target_farm_id, new_name, real_id))
+                    else:
+                        cur.execute('''
+                            SELECT id FROM chickens
+                            WHERE farm_id IS NULL AND user_id = %s AND LOWER(TRIM(chicken_name)) = LOWER(TRIM(%s)) AND id != %s
+                        ''', (request.user_id, new_name, real_id))
+                    if cur.fetchone():
+                        return jsonify({'error': f'A gamefowl named "{new_name}" already exists in this farm'}), 400
 
             set_clause = ', '.join(f'{k}=%s' for k in updates)
             cur.execute(f'UPDATE chickens SET {set_clause} WHERE id=%s', (*updates.values(), real_id))

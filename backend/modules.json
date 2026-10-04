@@ -1,0 +1,22 @@
+{
+  "modules": [
+    {
+      "id": "eye",
+      "name": "Eye",
+      "display_name": "Eye & Head Module",
+      "description": "Ocular and upper respiratory conditions (e.g. Infectious Coryza, Fowl Pox, Cloudiness)",
+      "icon": "eye",
+      "color": "#22c55e",
+      "is_default": true
+    },
+    {
+      "id": "wing",
+      "name": "Wing",
+      "display_name": "Wing & Posture Module",
+      "description": "Wing droop, posture anomalies, and neuromuscular paralysis (e.g. Newcastle Disease, Marek's)",
+      "icon": "wing",
+      "color": "#3b82f6",
+      "is_default": true
+    }
+  ]
+}

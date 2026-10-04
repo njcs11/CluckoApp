@@ -1,15 +1,22 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X, ShieldAlert } from 'lucide-react';
-import { CluckoBrandBadge, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
+import { CluckoBrandBadge, DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
 import { useDetect } from '../context/DetectContext';
 import './DetectPage.css';
 
 export default function DetectPage() {
   const webcamRef = useRef(null);
   const fileRef = useRef(null);
+  const [modules, setModules] = useState([]);
+
+  useEffect(() => {
+    axios.get('/api/modules')
+      .then(res => setModules(res.data.modules || []))
+      .catch(() => {});
+  }, []);
 
   const {
     capturedImage,
@@ -68,30 +75,17 @@ export default function DetectPage() {
           <div className="card-title camera-title-row">
             <span>Camera / Image Input</span>
             <div className="module-pill-group">
-              <button
-                type="button"
-                className={`mod-pill ${scanModule === 'auto' ? 'active' : ''}`}
-                onClick={() => setScanModule('auto')}
-                title="Automatically check both Eye and Wing models"
-              >
-                Auto
-              </button>
-              <button
-                type="button"
-                className={`mod-pill ${scanModule === 'eye' ? 'active' : ''}`}
-                onClick={() => setScanModule('eye')}
-                title="Target Eye diseases (Coryza, Fowl Pox)"
-              >
-                <EyeModuleIcon size={13} style={{ marginRight: 4 }} /> Eye
-              </button>
-              <button
-                type="button"
-                className={`mod-pill ${scanModule === 'wing' ? 'active' : ''}`}
-                onClick={() => setScanModule('wing')}
-                title="Target Wing diseases (Newcastle)"
-              >
-                <WingModuleIcon size={13} style={{ marginRight: 4 }} /> Wing
-              </button>
+              {modules.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`mod-pill ${scanModule === m.id ? 'active' : ''}`}
+                  onClick={() => setScanModule(m.id)}
+                  title={`Target ${m.name} diseases`}
+                >
+                  <DynamicModuleIcon module={m.id} icon={m.icon} size={13} style={{ marginRight: 4 }} /> {m.name}
+                </button>
+              ))}
             </div>
           </div>
 

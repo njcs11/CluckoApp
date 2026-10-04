@@ -18,12 +18,13 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useTrain } from '../context/TrainContext';
-import { PipelineActivityIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
+import { PipelineActivityIcon, DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
 import './TrainPage.css';
 
 export default function TrainPage() {
   const { trainStatus, activeModule, setActiveModule, startTraining, resetTraining, refreshStatus } = useTrain();
   const [modelStatus, setModelStatus] = useState(null);
+  const [modules, setModules] = useState([]);
   const [stats, setStats] = useState({});
   const [diseases, setDiseases] = useState([]);
   
@@ -34,14 +35,16 @@ export default function TrainPage() {
 
   const loadData = async () => {
     try {
-      const [sRes, dsRes, dRes] = await Promise.all([
+      const [sRes, dsRes, dRes, mRes] = await Promise.all([
         axios.get('/api/model/status'),
         axios.get('/api/dataset/stats'),
-        axios.get('/api/diseases')
+        axios.get('/api/diseases'),
+        axios.get('/api/modules')
       ]);
       setModelStatus(sRes.data);
       setStats(dsRes.data);
       setDiseases(dRes.data.diseases || []);
+      setModules(mRes.data.modules || []);
     } catch (err) {
       console.error('Error loading training info:', err);
     }
@@ -124,37 +127,34 @@ export default function TrainPage() {
       {/* Module Selector Segmented Tabs */}
       <div className="module-tabs-card card">
         <div className="module-tabs-inner">
-          <button
-            className={`module-tab-btn ${activeModule === 'eye' ? 'active' : ''}`}
-            onClick={() => setActiveModule('eye')}
-          >
-            <span className="module-tab-icon-wrap">
-              <EyeModuleIcon size={20} color={activeModule === 'eye' ? '#22c55e' : '#8f949a'} />
-            </span>
-            <div className="module-tab-text">
-              <span className="module-tab-title">Eye Classification Model</span>
-              <span className="module-tab-subtitle">
-                {trainStatus.eye.status === 'running' ? `⚡ Training in progress (${trainStatus.eye.progress}%)` : modelStatus?.eye?.trained ? '✓ Trained & Ready' : 'Untrained'}
-              </span>
-            </div>
-            {trainStatus.eye.status === 'running' && <span className="tab-pulsing-badge">{trainStatus.eye.progress}%</span>}
-          </button>
+          {modules.map(m => {
+            const mStatus = trainStatus?.[m.id] || {};
+            const isRunning = mStatus.status === 'running';
+            const isTrained = modelStatus?.[m.id]?.trained;
+            const subtitle = isRunning
+              ? `⚡ Training in progress (${mStatus.progress || 0}%)`
+              : isTrained
+              ? '✓ Trained & Ready'
+              : 'Untrained';
+            const isActive = activeModule === m.id;
 
-          <button
-            className={`module-tab-btn ${activeModule === 'wing' ? 'active' : ''}`}
-            onClick={() => setActiveModule('wing')}
-          >
-            <span className="module-tab-icon-wrap">
-              <WingModuleIcon size={20} color={activeModule === 'wing' ? '#22c55e' : '#8f949a'} />
-            </span>
-            <div className="module-tab-text">
-              <span className="module-tab-title">Wing & Posture Model</span>
-              <span className="module-tab-subtitle">
-                {trainStatus.wing.status === 'running' ? `⚡ Training in progress (${trainStatus.wing.progress}%)` : modelStatus?.wing?.trained ? '✓ Trained & Ready' : 'Untrained'}
-              </span>
-            </div>
-            {trainStatus.wing.status === 'running' && <span className="tab-pulsing-badge">{trainStatus.wing.progress}%</span>}
-          </button>
+            return (
+              <button
+                key={m.id}
+                className={`module-tab-btn ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveModule(m.id)}
+              >
+                <span className="module-tab-icon-wrap">
+                  <DynamicModuleIcon module={m.id} icon={m.icon} size={20} color={isActive ? '#22c55e' : '#8f949a'} />
+                </span>
+                <div className="module-tab-text">
+                  <span className="module-tab-title">{m.display_name || `${m.name} Model`}</span>
+                  <span className="module-tab-subtitle">{subtitle}</span>
+                </div>
+                {isRunning && <span className="tab-pulsing-badge">{mStatus.progress}%</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -165,7 +165,7 @@ export default function TrainPage() {
           <div className="card model-status-card">
             <div className="card-title-row">
               <span className="card-title">
-                {activeModule === 'eye' ? 'Eye Model Status' : 'Wing Model Status'}
+                {(modules.find(m => m.id === activeModule)?.name || activeModule.toUpperCase())} Model Status
               </span>
               <button className="btn btn-secondary icon-btn-sm" onClick={loadData} title="Refresh status">
                 <RefreshCw size={13} />

@@ -1,10 +1,11 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  BackHandler,
   Dimensions,
   Image,
   Keyboard,
@@ -77,6 +78,23 @@ export default function SignupScreen() {
   const errorFadeAnim = useRef(new Animated.Value(0)).current;
   const errorSlideAnim = useRef(new Animated.Value(25)).current;
   const errorToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleBackToLogin = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/login');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBackToLogin();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBackToLogin]);
 
   useEffect(() => {
     const onShow = (e: any) => {
@@ -354,7 +372,7 @@ export default function SignupScreen() {
         >
           {/* Top Bar Navigation */}
           <View style={styles.topNavRow}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
+            <TouchableOpacity onPress={handleBackToLogin} style={styles.backBtn} activeOpacity={0.7}>
               <Ionicons name="arrow-back" size={22} color={colors.primary} />
               <Text style={[styles.backText, { color: colors.primary }]}>Back to Login</Text>
             </TouchableOpacity>
@@ -736,7 +754,13 @@ export default function SignupScreen() {
               {/* Terms and Privacy Policy (RA 10173) */}
               <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}
-                onPress={() => setAgreeTerms(!agreeTerms)}
+                onPress={() => {
+                  if (agreeTerms) {
+                    setAgreeTerms(false);
+                  } else {
+                    setShowTermsModal(true);
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons
@@ -749,20 +773,14 @@ export default function SignupScreen() {
                   I agree to Clucko&apos;s{' '}
                   <Text
                     style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
-                    onPress={() => {
-                      setAgreeTerms(true);
-                      setShowTermsModal(true);
-                    }}
+                    onPress={() => setShowTermsModal(true)}
                   >
                     Terms of Service
                   </Text>{' '}
                   and{' '}
                   <Text
                     style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
-                    onPress={() => {
-                      setAgreeTerms(true);
-                      setShowPrivacyModal(true);
-                    }}
+                    onPress={() => setShowPrivacyModal(true)}
                   >
                     Privacy Policy
                   </Text>{' '}
@@ -799,7 +817,7 @@ export default function SignupScreen() {
           {/* Footer - Switch to Login */}
           <View style={styles.footerRow}>
             <Text style={[styles.footerText, { color: colors.textSecondary }]}>Already have an account? </Text>
-            <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <TouchableOpacity onPress={handleBackToLogin} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={[styles.loginLinkText, { color: colors.primary }]}>Sign In</Text>
             </TouchableOpacity>
           </View>
@@ -1005,13 +1023,10 @@ export default function SignupScreen() {
 
             <TouchableOpacity
               style={[styles.legalPrimaryBtn, { backgroundColor: colors.primary }]}
-              onPress={() => {
-                setAgreeTerms(true);
-                setShowPrivacyModal(false);
-              }}
+              onPress={() => setShowPrivacyModal(false)}
               activeOpacity={0.85}
             >
-              <Text style={styles.legalPrimaryBtnText}>I Agree & Accept Policy</Text>
+              <Text style={styles.legalPrimaryBtnText}>Close Privacy Policy</Text>
             </TouchableOpacity>
           </View>
         </View>

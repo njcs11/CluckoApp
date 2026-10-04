@@ -22,32 +22,22 @@ export function TrainProvider({ children }) {
 
   const [activeModule, setActiveModule] = useState('eye');
   const pollingRef = useRef(null);
-  const prevStatusRef = useRef({ eye: 'idle', wing: 'idle' });
+  const prevStatusRef = useRef({});
 
   const fetchStatus = useCallback(async () => {
     try {
       const { data } = await axios.get('/api/train/status');
-      if (data && data.eye && data.wing) {
-        // Check transitions
-        const prevEye = prevStatusRef.current.eye;
-        const prevWing = prevStatusRef.current.wing;
-
-        if (prevEye === 'running' && data.eye.status === 'completed') {
-          toast.success(`Eye model training completed! (${data.eye.result?.train_accuracy || 0}%)`);
-        } else if (prevEye === 'running' && data.eye.status === 'failed') {
-          toast.error(`Eye model training failed: ${data.eye.error || 'Unknown error'}`);
-        }
-
-        if (prevWing === 'running' && data.wing.status === 'completed') {
-          toast.success(`Wing model training completed! (${data.wing.result?.train_accuracy || 0}%)`);
-        } else if (prevWing === 'running' && data.wing.status === 'failed') {
-          toast.error(`Wing model training failed: ${data.wing.error || 'Unknown error'}`);
-        }
-
-        prevStatusRef.current = {
-          eye: data.eye.status,
-          wing: data.wing.status
-        };
+      if (data && typeof data === 'object') {
+        Object.entries(data).forEach(([modKey, modState]) => {
+          if (!modState || typeof modState !== 'object') return;
+          const prev = prevStatusRef.current[modKey] || 'idle';
+          if (prev === 'running' && modState.status === 'completed') {
+            toast.success(`${modKey.toUpperCase()} model training completed! (${modState.result?.train_accuracy || 0}%)`);
+          } else if (prev === 'running' && modState.status === 'failed') {
+            toast.error(`${modKey.toUpperCase()} model training failed: ${modState.error || 'Unknown error'}`);
+          }
+          prevStatusRef.current[modKey] = modState.status;
+        });
 
         setTrainStatus(data);
       }
@@ -61,7 +51,7 @@ export function TrainProvider({ children }) {
     fetchStatus();
   }, [fetchStatus]);
 
-  const isAnyTrainingRunning = trainStatus.eye.status === 'running' || trainStatus.wing.status === 'running';
+  const isAnyTrainingRunning = Object.values(trainStatus).some(s => s && s.status === 'running');
 
   // User controls activeModule freely; startTraining automatically sets activeModule when started
 

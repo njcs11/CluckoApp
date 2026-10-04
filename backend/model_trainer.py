@@ -737,28 +737,51 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
 
     # Test both the zoomed anatomical region and the full frame, selecting highest confidence
     candidates = []
-    roi_target = rois['head'] if module == 'eye' else rois['wing']
+    if module == 'eye':
+        roi_target = rois['head']
+    elif module == 'wing':
+        roi_target = rois['wing']
+    elif module in ('comb', 'head', 'beak', 'face'):
+        roi_target = rois.get('head', rois['full'])
+    else:
+        roi_target = rois.get(module, rois['full'])
     candidates.append(_classify(roi_target, models_dir, diseases_config, module))
     candidates.append(_classify(rois['full'], models_dir, diseases_config, module))
 
     cls = max(candidates, key=lambda c: c['top_prediction']['confidence'])
 
-    if cls['uncertainty_ratio'] > 0.92:
+    if cls['uncertainty_ratio'] > 0.88:
         return _rejection(
             f"Model too uncertain (entropy={cls['uncertainty_ratio']:.2f})", module,
-            message="Image unclear. Try better lighting or a closer angle."
+            message="Image unclear or outside diagnostic scope. Try better lighting or a closer angle focusing strictly on the " + module + "."
         )
 
     top = cls['top_prediction']
-    # Two-tier threshold: Detection threshold < 50% rejected as too uncertain
-    if top['confidence'] < 50.0:
+    preds_list = cls.get('all_predictions', [])
+    margin = (preds_list[0]['confidence'] - preds_list[1]['confidence']) if len(preds_list) > 1 else 100.0
+
+    # Detection threshold & scope validation
+    if top['confidence'] < 52.0 or (top['confidence'] < 60.0 and margin < 8.0):
         return _rejection(
             f"Confidence too low ({top['confidence']}%)", module,
-            message=f"Detection confidence too low ({top['confidence']}%). Try a clearer image of the {module}.",
+            message=f"Detection confidence too low ({top['confidence']}%). Could not reliably diagnose within our verified disease scope for {module}. Try a clearer photo focusing on the {module}.",
             all_predictions=cls['all_predictions']
         )
 
-    return _build_success(cls, module)
+    res = _build_success(cls, module)
+
+    # Attach Grad-CAM heatmap visualization
+    try:
+        model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
+        if os.path.exists(model_path):
+            tf, *_ = _load_tf()
+            loaded_model = tf.keras.models.load_model(model_path)
+            res['gradcam_image'] = generate_gradcam(img, loaded_model)
+    except Exception as e:
+        print(f"Grad-CAM generation notice: {e}")
+        res['gradcam_image'] = None
+
+    return res
 
 
 def predict_auto(img: Image.Image, models_dir: str, diseases_config: dict) -> dict:
@@ -854,6 +877,19 @@ def predict_auto(img: Image.Image, models_dir: str, diseases_config: dict) -> di
         result['modules_checked']['eye'] = best_eye['top_prediction']
     if best_wing:
         result['modules_checked']['wing'] = best_wing['top_prediction']
+
+    # Attach Grad-CAM heatmap visualization
+    try:
+        chosen_module = chosen['module']
+        model_path = os.path.join(models_dir, f'gamefowl_model_{chosen_module}.h5')
+        if os.path.exists(model_path):
+            tf, *_ = _load_tf()
+            loaded_model = tf.keras.models.load_model(model_path)
+            result['gradcam_image'] = generate_gradcam(img, loaded_model)
+    except Exception as e:
+        print(f"Grad-CAM generation notice: {e}")
+        result['gradcam_image'] = None
+
     return result
 
 
@@ -921,6 +957,16 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
         'coop', 'aviary', 'crate', 'wire_fence', 'mesh',
         'chainlink_fence', 'fence', 'barn', 'henhouse', 'birdhouse'
     }
+    NON_POULTRY_LABELS = {
+        'mouse', 'keyboard', 'space_bar', 'cellular_telephone', 'dial_telephone', 'telephone',
+        'ipod', 'modem', 'printer', 'remote_control', 'desk', 'dining_table', 'table_lamp',
+        'coffee_table', 'chair', 'folding_chair', 'rocking_chair', 'bookcase', 'binder',
+        'envelope', 'packet', 'carton', 'box', 'coffee_mug', 'cup', 'water_bottle', 'pill_bottle',
+        'car', 'automobile', 'minivan', 'truck', 'bicycle', 'motorcycle', 'wardrobe',
+        'tabby', 'tiger_cat', 'persian_cat', 'siamese_cat', 'egyptian_cat', 'cat',
+        'golden_retriever', 'labrador_retriever', 'german_shepherd', 'beagle', 'dog',
+        'horse', 'hog', 'pig', 'cow', 'ox', 'sheep', 'goat', 'rabbit'
+    }
 
     def norm(lbl): return lbl.lower().replace(' ', '_').replace('-', '_')
 
@@ -929,28 +975,28 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
     human_score  = sum(float(p) for _, lbl, p in decoded[:3] if norm(lbl) in HUMAN_LABELS)
     screen_score = sum(float(p) for _, lbl, p in decoded[:5] if norm(lbl) in SCREEN_LABELS)
     cage_score   = sum(float(p) for _, lbl, p in decoded[:5] if norm(lbl) in POULTRY_ENV_LABELS)
+    non_poultry_score = sum(float(p) for _, lbl, p in decoded[:5] if norm(lbl) in NON_POULTRY_LABELS)
 
     top_labels = ', '.join(f"{lbl}({p:.0%})" for _, lbl, p in decoded[:3])
+    top_label_norm = norm(decoded[0][1]) if decoded else ''
 
     # ── Texture & Color Analysis ──────────────────────────────────────────────
     feather_score = _feather_texture_score(img_enhanced)
     color_score   = _gamefowl_color_score(img_enhanced)
 
-    # ── Screen/laptop capture: NEVER reject! ──────────────────────────────────
-    # When user photographs a laptop or monitor displaying a chicken,
-    # evaluate the displayed chicken's feather texture and plumage colors.
-    if screen_score >= 0.05:
-        if strict_score >= 0.02 or broad_score >= 0.04 or feather_score > 0.28 or color_score > 0.18:
-            return True, max(strict_score, broad_score, feather_score), f"Screen photo of chicken accepted (screen={screen_score:.2f}, feather={feather_score:.2f})"
+    # ── Strict rejection: Laptop / Screen / Non-Chicken Everyday Objects ──────
+    # If the camera is aimed at a laptop, monitor, keyboard, desk, or domestic pet:
+    # Do NOT pass it into disease classification! Reject immediately.
+    if screen_score >= 0.10 or top_label_norm in SCREEN_LABELS:
+        if strict_score < 0.15 and broad_score < 0.15:
+            return False, 0.0, f"Laptop/screen detected ({top_labels}). Please photograph an actual live gamefowl."
 
-    # ── Chicken inside cage/coop ──────────────────────────────────────────────
-    # Cage/crate wire detected around chicken — accept if plumage/bird features exist
-    if cage_score >= 0.05:
-        if strict_score >= 0.02 or broad_score >= 0.04 or feather_score > 0.28 or color_score > 0.18:
-            return True, max(strict_score, broad_score, feather_score), f"Caged chicken confirmed (cage={cage_score:.2f}, feather={feather_score:.2f})"
+    if non_poultry_score >= 0.20 or top_label_norm in NON_POULTRY_LABELS:
+        if strict_score < 0.12 and broad_score < 0.12:
+            return False, 0.0, f"Non-chicken object detected ({top_labels}). Please photograph a gamefowl."
 
     # ── Reject: human face/body (unless clear chicken in frame) ───────────────
-    if human_score >= 0.35 and strict_score < 0.05:
+    if human_score >= 0.25 and strict_score < 0.08:
         return False, 0.0, f"Human detected ({top_labels})"
 
     # ── Accept: strict chicken ────────────────────────────────────────────────
@@ -958,14 +1004,21 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
         return True, strict_score, f"Chicken confirmed (score={strict_score:.2f})"
 
     # ── Accept: broad bird + texture heuristic ────────────────────────────────
-    if broad_score >= 0.08:
-        if feather_score > 0.28:
-            return True, broad_score, f"Bird/fowl + feather texture (bird={broad_score:.2f}, feather={feather_score:.2f})"
+    if broad_score >= 0.08 and feather_score > 0.28:
+        return True, broad_score, f"Bird/fowl + feather texture (bird={broad_score:.2f}, feather={feather_score:.2f})"
+
+    # ── Chicken inside cage/coop ──────────────────────────────────────────────
+    # Cage/crate wire detected around chicken — accept if plumage/bird features exist
+    if cage_score >= 0.08:
+        if strict_score >= 0.03 or broad_score >= 0.05 or (feather_score > 0.35 and color_score > 0.25):
+            return True, max(strict_score, broad_score, feather_score), f"Caged chicken confirmed (cage={cage_score:.2f}, feather={feather_score:.2f})"
 
     # ── Stage 2 fallback: pure texture + color heuristic ─────────────────────
-    combined = feather_score * 0.6 + color_score * 0.4
-    if combined > 0.38:
-        return True, combined, f"Texture/color heuristic passed (feather={feather_score:.2f}, color={color_score:.2f})"
+    # Only allowed if NOT recognized as an inanimate object or screen
+    if screen_score < 0.05 and non_poultry_score < 0.10 and human_score < 0.15:
+        combined = feather_score * 0.6 + color_score * 0.4
+        if combined > 0.45 and feather_score > 0.38 and color_score > 0.30:
+            return True, combined, f"Texture/color heuristic passed (feather={feather_score:.2f}, color={color_score:.2f})"
 
     return False, 0.0, f"Not a chicken — detected: {top_labels}"
 

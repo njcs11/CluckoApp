@@ -2,8 +2,7 @@ import { useDarkMode } from '@/context/DarkModeContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { getHealthStatus, getStatusColor } from '@/utils/birdStatus';
 import { addChickenForCurrentUser, generateNextChickenCode, loadChickensForCurrentUser } from '@/utils/chickenStorage';
-import { getUserRole, apiGetFarms, apiGetQrScans } from '../../lib/api';
-import { apiGetReports } from '../../lib/api';
+import { getUserRole, apiGetFarms, apiGetQrScans, apiGetReports, apiGetMyPlan } from '../../lib/api';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
 import { Feather, FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -44,6 +43,7 @@ import ChickenAvatar from '../../components/ui/ChickenAvatar';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
+import FlockLimitModal from '../../components/ui/FlockLimitModal';
 
 // Accent color used only for the active "Overview" toggle tab and the
 // add-chicken FAB, matching the mockup's amber/gold accent. Every other
@@ -178,8 +178,9 @@ const buildHealthAlerts = (chickensData: Bird[]): HealthAlert[] =>
       };
     });
 
-  interface Farm {
-  id: number;
+interface Farm {
+  id: number | string;
+  name?: string;
   farm_name: string;
   farm_location: string;
 }
@@ -187,7 +188,7 @@ const buildHealthAlerts = (chickensData: Bird[]): HealthAlert[] =>
 const getFarmName = (farms: Farm[], farmId?: number | string | null): string => {
   if (!farmId) return 'Unassigned';
   const farm = farms.find((f) => String(f.id) === String(farmId));
-  return farm ? farm.farm_name : 'Unassigned';
+  return farm ? (farm.farm_name || farm.name || 'Unassigned') : 'Unassigned';
 };
 
 export default function ChickensScreen() {
@@ -222,6 +223,8 @@ export default function ChickensScreen() {
     farmId: null,
   });
   const [isSavingChicken, setIsSavingChicken] = useState(false);
+  const [showFlockLimitModal, setShowFlockLimitModal] = useState(false);
+  const [userSubscription, setUserSubscription] = useState<any>(null);
 
   // Filter icon next to the search bar — same underlying filter as the
   // stat cards below (handleStatusFilter), just a second way to reach it,
@@ -446,6 +449,14 @@ useEffect(() => {
       } else {
         loadDefaultData();
       }
+
+      apiGetMyPlan()
+        .then((res) => {
+          if (res && res.subscription) {
+            setUserSubscription(res.subscription);
+          }
+        })
+        .catch(() => null);
     } catch (error) {
       console.error('Error loading chickens:', error);
       loadDefaultData();
@@ -483,10 +494,35 @@ useEffect(() => {
       guestAlert('adding a chicken');
       return;
     }
-    if (!newChicken.name) {
+    if (!newChicken.name || !newChicken.name.trim()) {
       notify({
         title: 'Missing Info',
         message: 'Please enter a name for your chicken.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    const targetFarm = newChicken.farmId;
+    const maxPerFarm = userSubscription?.limits?.max_chickens_per_farm ?? 20;
+    if (targetFarm) {
+      const currentFarmChickens = allBirds.filter((b) => String(b.farmId) === String(targetFarm)).length;
+      if (currentFarmChickens >= maxPerFarm) {
+        setShowAddForm(false);
+        setShowFlockLimitModal(true);
+        return;
+      }
+    }
+
+    const nameTrimmed = newChicken.name.trim().toLowerCase();
+    const duplicate = allBirds.some(b =>
+      (b.farmId === targetFarm || (!b.farmId && !targetFarm)) &&
+      b.name && b.name.trim().toLowerCase() === nameTrimmed
+    );
+    if (duplicate) {
+      notify({
+        title: 'Duplicate Name',
+        message: `A gamefowl named "${newChicken.name.trim()}" already exists in this farm. Each gamefowl must have a unique name.`,
         type: 'warning',
       });
       return;
@@ -541,24 +577,26 @@ useEffect(() => {
       });
       setNewChicken({ name: '', photo: null, farmId: null });
     } catch (err: any) {
-      const msg = err.message || '';
-      if (msg.includes('Chicken limit reached') || msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED')) {
+      const msg = err?.message || '';
+      if (
+        msg.includes('Chicken limit reached') ||
+        msg.includes('PLAN_CHICKEN_LIMIT_EXCEEDED') ||
+        err?.code === 'PLAN_CHICKEN_LIMIT_EXCEEDED'
+      ) {
         setShowQRModal(false);
-        Alert.alert(
-          'Flock Limit Reached',
-          'This farm has reached its chicken quota for your current plan. Upgrade to Pro (70 chickens) or Premium (unlimited chickens) to add more.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'View Plans & Upgrade', onPress: () => router.push('/subscription') }
-          ]
-        );
-      } else {
-        notify({
-          title: 'Save Failed',
-          message: msg || 'Failed to save chicken.',
-          type: 'alert',
-        });
+        apiGetMyPlan()
+          .then((p) => {
+            if (p?.subscription) setUserSubscription(p.subscription);
+          })
+          .catch(() => {});
+        setShowFlockLimitModal(true);
+        return;
       }
+      notify({
+        title: 'Save Failed',
+        message: msg || 'Failed to save chicken.',
+        type: 'alert',
+      });
     } finally {
       setIsSavingChicken(false);
     }
@@ -1498,6 +1536,32 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
+
+      <FlockLimitModal
+        visible={showFlockLimitModal}
+        onClose={() => setShowFlockLimitModal(false)}
+        scansRemaining={userSubscription?.scans_remaining ?? userSubscription?.usage?.scans_remaining ?? 9}
+        currentChickens={
+          generatedQR?.farmId
+            ? allBirds.filter((b) => String(b.farmId) === String(generatedQR.farmId)).length
+            : newChicken.farmId
+            ? allBirds.filter((b) => String(b.farmId) === String(newChicken.farmId)).length
+            : farms.length === 1
+            ? allBirds.filter((b) => String(b.farmId) === String(farms[0].id)).length
+            : allBirds.length
+        }
+        maxChickens={userSubscription?.limits?.max_chickens_per_farm ?? 20}
+        farmName={
+          generatedQR?.farmId
+            ? getFarmName(farms, generatedQR.farmId)
+            : newChicken.farmId
+            ? getFarmName(farms, newChicken.farmId)
+            : farms.length === 1
+            ? farms[0]?.name || farms[0]?.farm_name || 'Your Farm'
+            : 'Your Farm'
+        }
+        planName={userSubscription?.plan_name || 'Free Trial'}
+      />
 
       <Modal animationType="slide" transparent statusBarTranslucent visible={showScanDetailModal} onRequestClose={() => setShowScanDetailModal(false)}>
         <View style={styles.modalOverlay}>

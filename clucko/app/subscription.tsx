@@ -5,9 +5,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Linking,
   Modal,
   Platform,
@@ -64,6 +65,23 @@ export default function SubscriptionScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successPlanName, setSuccessPlanName] = useState('');
   const [successPlanDuration, setSuccessPlanDuration] = useState('');
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/profile');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [handleBack]);
 
   const loadSubscription = async () => {
     try {
@@ -258,7 +276,7 @@ export default function SubscriptionScreen() {
 
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
@@ -480,7 +498,7 @@ export default function SubscriptionScreen() {
                 <View style={styles.featureRow}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
                   <Text style={[styles.featureText, { color: colors.text }]}>
-                    Up to <Text style={{ fontWeight: '700' }}>70 Chickens</Text> per farm
+                    Up to <Text style={{ fontWeight: '700' }}>60 Chickens</Text> per farm
                   </Text>
                 </View>
                 <View style={styles.featureRow}>
@@ -495,7 +513,7 @@ export default function SubscriptionScreen() {
                 </View>
                 <View style={styles.featureRow}>
                   <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                  <Text style={[styles.featureText, { color: colors.text }]}>Full Disease Diagnostics & Grad-CAM Heatmaps</Text>
+                  <Text style={[styles.featureText, { color: colors.text }]}>AI Visual Focus Heatmaps</Text>
                 </View>
               </View>
 
