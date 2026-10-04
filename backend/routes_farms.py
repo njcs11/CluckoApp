@@ -59,6 +59,9 @@ def get_farms():
                 ''', (request.user_id,))
             farms = cur.fetchall()
         return jsonify(farms)
+    except Exception as e:
+        print(f"[ERROR in get_farms]: {e}")
+        return jsonify({'error': 'Failed to retrieve farms', 'details': str(e)}), 500
     finally:
         db.close()
 
@@ -267,6 +270,9 @@ def get_farm(farm_id):
             chickens = cur.fetchall()
 
         return jsonify({'farm': farm, 'members': members, 'chickens': chickens})
+    except Exception as e:
+        print(f"[ERROR in get_farm {farm_id}]: {e}")
+        return jsonify({'error': 'Failed to retrieve farm', 'details': str(e)}), 500
     finally:
         db.close()
 

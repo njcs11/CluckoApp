@@ -34,6 +34,7 @@ import {
   apiUpdateMemberStatus,
   apiCreateCaretaker,
   apiDeleteFarm,
+  getCachedFarmDetail,
 } from '../../lib/api';
 
 export default function FarmDetailScreen() {
@@ -113,15 +114,26 @@ export default function FarmDetailScreen() {
   };
 
   const loadData = async () => {
-    setLoading(true);
+    const cached = await getCachedFarmDetail(Number(id));
+    if (cached && cached.farm) {
+      setFarm(cached.farm);
+      setMembers(cached.members || []);
+      setChickens(cached.chickens || []);
+      setLoading(false);
+    } else if (!farm) {
+      setLoading(true);
+    }
+
     try {
       const [data, profileData] = await Promise.all([
         apiGetFarm(Number(id)),
         apiGetProfile().catch(() => null),
       ]);
-      setFarm(data.farm);
-      setMembers(data.members || []);
-      setChickens(data.chickens || []);
+      if (data && data.farm) {
+        setFarm(data.farm);
+        setMembers(data.members || []);
+        setChickens(data.chickens || []);
+      }
       if (profileData?.role) {
         setUserRole(profileData.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
       }

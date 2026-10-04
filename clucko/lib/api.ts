@@ -690,6 +690,38 @@ export const apiGetGradcam = async (base64Image: string, module: string = "eye")
 };
 
 // ─── FARMS ────────────────────────────────────────────────────
+const FARMS_CACHE_KEY = "cached_farms_list";
+
+export const getCachedFarms = async (): Promise<any[] | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(FARMS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn("Error reading cached farms:", e);
+  }
+  return null;
+};
+
+export const getCachedFarmDetail = async (farmId: number | string): Promise<any | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(`cached_farm_detail_${farmId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.farm) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn(`Error reading cached farm detail ${farmId}:`, e);
+  }
+  return null;
+};
+
 export const apiGetFarms = async () => {
   return deduplicatedFetch("farms", async () => {
     const token = await getToken();
@@ -707,11 +739,22 @@ export const apiGetFarms = async () => {
         }
         throw new Error(json.error || "Failed to load farms");
       }
+      if (Array.isArray(json)) {
+        try {
+          await AsyncStorage.setItem(FARMS_CACHE_KEY, JSON.stringify(json));
+        } catch (err) {
+          console.warn("Failed to cache farms:", err);
+        }
+      }
       return json;
     } catch (err: any) {
       if (err.message === "Invalid token" || err.message === "Token expired" || err.message === "Token missing") {
         await clearStaleSession();
         return [];
+      }
+      const cached = await getCachedFarms();
+      if (cached) {
+        return cached;
       }
       throw err;
     }
@@ -726,6 +769,7 @@ export const apiCreateFarm = async (data: {
   longitude?: number;
 }) => {
   invalidateApiCache("farms");
+  await AsyncStorage.removeItem(FARMS_CACHE_KEY).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms`, {
     method: "POST",
@@ -748,6 +792,9 @@ export const apiUpdateFarm = async (
   },
 ) => {
   invalidateApiCache("farms");
+  invalidateApiCache(`farm_detail_${farm_id}`);
+  await AsyncStorage.removeItem(FARMS_CACHE_KEY).catch(() => {});
+  await AsyncStorage.removeItem(`cached_farm_detail_${farm_id}`).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
     method: "PUT",
@@ -760,17 +807,37 @@ export const apiUpdateFarm = async (
 };
 
 export const apiGetFarm = async (farm_id: number) => {
-  const API_URL = await getApiUrl();
-  const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
-    headers: await headers(),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error);
-  return json;
+  return deduplicatedFetch(`farm_detail_${farm_id}`, async () => {
+    const API_URL = await getApiUrl();
+    try {
+      const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
+        headers: await headers(),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load farm details");
+      if (json && json.farm) {
+        try {
+          await AsyncStorage.setItem(`cached_farm_detail_${farm_id}`, JSON.stringify(json));
+        } catch (err) {
+          console.warn("Failed to cache farm detail:", err);
+        }
+      }
+      return json;
+    } catch (err: any) {
+      const cached = await getCachedFarmDetail(farm_id);
+      if (cached) {
+        return cached;
+      }
+      throw err;
+    }
+  }, 3000);
 };
 
 export const apiDeleteFarm = async (farm_id: number) => {
   invalidateApiCache("farms");
+  invalidateApiCache(`farm_detail_${farm_id}`);
+  await AsyncStorage.removeItem(FARMS_CACHE_KEY).catch(() => {});
+  await AsyncStorage.removeItem(`cached_farm_detail_${farm_id}`).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/farms/${farm_id}`, {
     method: "DELETE",
@@ -804,6 +871,8 @@ export const apiGetFarmMembers = async (farm_id: number) => {
 };
 
 export const apiRemoveMember = async (farm_id: number, member_id: number) => {
+  invalidateApiCache(`farm_detail_${farm_id}`);
+  await AsyncStorage.removeItem(`cached_farm_detail_${farm_id}`).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(
     `${API_URL}/api/farms/${farm_id}/members/${member_id}`,
@@ -819,6 +888,8 @@ export const apiUpdateMemberStatus = async (
   member_id: number,
   is_active: boolean
 ) => {
+  invalidateApiCache(`farm_detail_${farm_id}`);
+  await AsyncStorage.removeItem(`cached_farm_detail_${farm_id}`).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(
     `${API_URL}/api/farms/${farm_id}/members/${member_id}/status`,
@@ -841,6 +912,8 @@ export const apiCreateCaretaker = async (data: {
   phone_number?: string;
   farm_id: number;
 }) => {
+  invalidateApiCache(`farm_detail_${data.farm_id}`);
+  await AsyncStorage.removeItem(`cached_farm_detail_${data.farm_id}`).catch(() => {});
   const API_URL = await getApiUrl();
   const res = await fetch(`${API_URL}/api/auth/create-caretaker`, {
     method: "POST",

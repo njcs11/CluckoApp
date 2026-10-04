@@ -29,7 +29,7 @@ import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import LocationPickerModal from '../../components/ui/LocationPickerModal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
-import { apiCreateFarm, apiDeleteFarm, apiGetFarms, apiGetProfile, apiUpdateFarm, apiGetMyPlan } from '../../lib/api';
+import { apiCreateFarm, apiDeleteFarm, apiGetFarms, apiGetProfile, apiUpdateFarm, apiGetMyPlan, getCachedFarms } from '../../lib/api';
 
 interface Farm {
   id: number;
@@ -114,14 +114,23 @@ export default function FarmListScreen() {
   };
 
   const loadFarms = async () => {
-    setLoading(true);
+    const cached = await getCachedFarms();
+    if (cached && cached.length > 0) {
+      setFarms(cached);
+      setLoading(false);
+    } else if (farms.length === 0) {
+      setLoading(true);
+    }
+
     try {
       const [data, profileData, subData] = await Promise.all([
         apiGetFarms(),
         apiGetProfile().catch(() => null),
         apiGetMyPlan().catch(() => null),
       ]);
-      setFarms(data || []);
+      if (Array.isArray(data)) {
+        setFarms(data);
+      }
       if (profileData?.role) {
         setUserRole(profileData.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
       }
@@ -130,11 +139,13 @@ export default function FarmListScreen() {
       }
     } catch (error: any) {
       console.error('Error loading farms:', error);
-      await notify({
-        title: 'Error',
-        message: error.message || 'Failed to load farms.',
-        type: 'alert',
-      });
+      if (!cached || cached.length === 0) {
+        await notify({
+          title: 'Error',
+          message: error.message || 'Failed to load farms.',
+          type: 'alert',
+        });
+      }
     } finally {
       setLoading(false);
     }
