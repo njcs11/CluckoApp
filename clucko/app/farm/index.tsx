@@ -29,6 +29,7 @@ import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import LocationPickerModal from '../../components/ui/LocationPickerModal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
+import { MyFarmsSkeleton } from '../../components/ui/SkeletonLoaders';
 import { apiCreateFarm, apiDeleteFarm, apiGetFarms, apiGetProfile, apiUpdateFarm, apiGetMyPlan, getCachedFarms } from '../../lib/api';
 
 interface Farm {
@@ -348,8 +349,18 @@ export default function FarmListScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDarkMode ? 'light' : 'dark'} />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.text, fontSize: scaleFont(18) }]}>My Farms</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+          <MyFarmsSkeleton />
+        </ScrollView>
       </SafeAreaView>
     );
   }

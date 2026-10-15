@@ -1,14 +1,26 @@
 from flask import request, jsonify
+import re
 from db import get_db, token_required
 from app import app
 
+def to_utc_iso(dt):
+    if not dt:
+        return None
+    if isinstance(dt, str):
+        if not dt.endswith('Z') and '+' not in dt and not re.search(r'-\d{2}:\d{2}$', dt):
+            return dt + 'Z'
+        return dt
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.isoformat()
+    return dt.isoformat() + 'Z'
+
 
 def get_accessible_farm_ids(cur, user_id):
-    """Returns a list of farm IDs accessible to the user (as owner or caretaker)."""
+    """Returns a list of farm IDs accessible to the user (as owner or active caretaker)."""
     cur.execute('''
         SELECT DISTINCT f.id FROM farms f
         LEFT JOIN farm_members fm ON fm.farm_id = f.id
-        WHERE f.owner_id = %s OR fm.user_id = %s
+        WHERE f.owner_id = %s OR (fm.user_id = %s AND (fm.is_active IS NULL OR fm.is_active = TRUE))
     ''', (user_id, user_id))
     rows = cur.fetchall()
     return [r['id'] if isinstance(r, dict) else r[0] for r in rows]
@@ -24,6 +36,18 @@ def get_notifications():
             farm_ids = get_accessible_farm_ids(cur, request.user_id)
             if not farm_ids:
                 return jsonify([])
+
+            # Optional filter by specific farm requested by client
+            req_fid = request.args.get('farm_id')
+            if req_fid:
+                try:
+                    req_fid_int = int(req_fid)
+                    if req_fid_int in farm_ids:
+                        farm_ids = [req_fid_int]
+                    else:
+                        return jsonify([])
+                except (ValueError, TypeError):
+                    pass
 
             placeholders = ', '.join(['%s'] * len(farm_ids))
             query = f'''
@@ -47,10 +71,18 @@ def get_notifications():
                 LEFT JOIN notification_reads nr 
                     ON nr.notification_id = n.id AND nr.user_id = %s
                 WHERE n.farm_id IN ({placeholders})
+                  AND (
+                      -- General farm notifications (disease alerts, scans, tasks, chicken additions)
+                      (n.title NOT LIKE 'Welcome Back%%' AND n.title NOT LIKE 'Welcome to Clucko%%')
+                      -- OR personal login / greeting notifications (only seen by that user)
+                      OR n.user_id = %s
+                      -- OR farm owners monitoring when caretakers log in or join their farm
+                      OR f.owner_id = %s
+                  )
                 ORDER BY n.created_at DESC
                 LIMIT 50
             '''
-            cur.execute(query, (request.user_id, *farm_ids))
+            cur.execute(query, (request.user_id, *farm_ids, request.user_id, request.user_id))
             rows = cur.fetchall()
 
             # Format rows
@@ -68,7 +100,7 @@ def get_notifications():
                     'type': r['type'] or 'info',
                     'chickenId': str(r['chicken_id']) if r['chicken_id'] else None,
                     'chickenName': r['chicken_name'] or None,
-                    'timestamp': r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at']),
+                    'timestamp': to_utc_iso(r['created_at']),
                     'read': bool(r['is_read']),
                 })
             return jsonify(results)
@@ -291,7 +323,7 @@ def get_activities():
                     'captured_by_name': r['captured_by_name'] or 'Farm Member',
                     'captured_by_role': (r['captured_by_role'] or 'member').capitalize(),
                     'image_url': r['image_url'],
-                    'timestamp': r['timestamp'].isoformat() if hasattr(r['timestamp'], 'isoformat') else str(r['timestamp']),
+                    'timestamp': to_utc_iso(r['timestamp']),
                 })
             return jsonify(activities)
     finally:

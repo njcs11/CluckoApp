@@ -327,6 +327,9 @@ def get_chicken(cid):
 @app.route('/api/chickens/<cid>', methods=['DELETE'])
 @token_required
 def delete_chicken(cid):
+    if getattr(request, 'user_role', '') == 'caretaker':
+        return jsonify({'error': 'Caretakers do not have permission to delete chickens. Please contact your farm owner.'}), 403
+
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -476,9 +479,9 @@ def get_stats():
         with db.cursor() as cur:
             cur.execute('''
                 SELECT COUNT(*) as total,
-                  SUM(status='HEALTHY') as healthy,
-                  SUM(status='WARNING') as warning,
-                  SUM(status='CRITICAL') as critical
+                  COUNT(CASE WHEN status='HEALTHY' THEN 1 END) as healthy,
+                  COUNT(CASE WHEN status='WARNING' THEN 1 END) as warning,
+                  COUNT(CASE WHEN status='CRITICAL' THEN 1 END) as critical
                 FROM chickens WHERE user_id=%s
             ''', (request.user_id,))
             return jsonify(cur.fetchone())

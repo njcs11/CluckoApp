@@ -5,6 +5,7 @@ import { generateNextChickenCode } from '@/utils/chickenStorage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { pickOrCaptureChickenPhoto, photoUriToBase64, resizeAndCompress, captureFromCamera, pickFromLibrary } from '@/utils/photoStorage';
 import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
 import { File as ExpoFile, Paths } from 'expo-file-system';
@@ -361,9 +362,66 @@ export default function CaptureScreen() {
   useFocusEffect(
     useCallback(() => {
       checkFlockCapacityNotice();
+      checkAndAutoSavePendingChicken();
       return () => setTorchOn(false);
     }, [farms, chickens, userSubscription])
   );
+
+  const checkAndAutoSavePendingChicken = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('@pending_quota_chicken');
+      if (!raw) return;
+      const planRes = await apiGetMyPlan().catch(() => null);
+      const isUpgraded = planRes?.subscription?.plan === 'pro' || planRes?.subscription?.plan === 'premium';
+      if (!isUpgraded) return;
+
+      const pending = JSON.parse(raw);
+      if (!pending || !pending.chicken) return;
+
+      let photoB64 = pending.photoBase64;
+      if (!photoB64 && pending.photoUri) {
+        try {
+          const compressed = await resizeAndCompress(pending.photoUri);
+          photoB64 = await photoUriToBase64(compressed);
+        } catch (_) {}
+      }
+
+      const created: Chicken = await apiCreateChicken({
+        qr_code: pending.chicken.chickenId || pending.chicken.qr_code,
+        chicken_name: pending.chicken.name || pending.chicken.chicken_name,
+        farm_id: pending.chicken.farmId ? Number(pending.chicken.farmId) : undefined,
+        photo_url: photoB64,
+      });
+
+      if (pending.scanResult && created?.id) {
+        await apiSaveScan({
+          chicken_id: created.id,
+          disease_name: pending.scanResult.disease || undefined,
+          confidence_score: pending.scanResult.confidence,
+          severity: pending.scanResult.severity,
+          image_type: pending.scanResult.module || 'eye',
+          scan_type: 'camera',
+          image_url: photoB64,
+          all_predictions: {
+            symptoms: pending.scanResult.symptoms,
+            gradcam_image: pending.scanResult.gradcamImage,
+          },
+        });
+      }
+
+      await AsyncStorage.removeItem('@pending_quota_chicken');
+      await notify({
+        title: '🐔 Pending Chicken Saved!',
+        message: `${pending.chicken.name || 'Your chicken'} has been automatically saved with your new subscription.`,
+        type: 'success',
+        chickenId: String(created.id),
+        chickenName: pending.chicken.name,
+      });
+      loadInitialData();
+    } catch (e) {
+      console.warn('Auto-save error in capture:', e);
+    }
+  };
 
   const clearPendingCapture = async () => {
     setLastPhotoUri(null);
@@ -554,6 +612,9 @@ export default function CaptureScreen() {
       highConfidenceAlert: Boolean(result.high_confidence_alert),
       base64Image: base64Image || lastPhotoBase64,
       gradcamImage: result.gradcam_image || null,
+      moduleMismatch: Boolean(result.module_mismatch),
+      moduleNotice: result.module_notice || null,
+      suggestedModule: result.suggested_module || null,
     };
 
     setTorchOn(false);
@@ -792,6 +853,62 @@ export default function CaptureScreen() {
     handleCapture();
   };
 
+  const handleUploadPhotoPress = async () => {
+    if (checkingCapture || scanning || isCapturing) return;
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          await notify({
+            title: 'Permission Needed',
+            message: 'Please grant photo library access to upload photos taken on your farm.',
+            type: 'warning',
+          });
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'] as any,
+        allowsEditing: false,
+        quality: 0.85,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      const asset = result.assets[0];
+      setSelectedMode('photo');
+      setLastPhotoUri(asset.uri);
+
+      let b64 = asset.base64;
+      if (!b64) {
+        try {
+          const compressed = await resizeAndCompress(asset.uri);
+          b64 = await photoUriToBase64(compressed);
+          if (b64.startsWith('data:')) {
+            b64 = b64.split(',')[1];
+          }
+        } catch (e) {
+          console.warn('Could not compress uploaded photo:', e);
+        }
+      }
+      setLastPhotoBase64(b64 || null);
+
+      setCheckingCapture(true);
+      await runScanResult(b64 || undefined);
+    } catch (error: any) {
+      console.error('Error uploading photo:', error);
+      await notify({
+        title: 'Upload Failed',
+        message: error?.message || 'Could not process photo from gallery.',
+        type: 'alert',
+      });
+    } finally {
+      setCheckingCapture(false);
+    }
+  };
+
   // --- Chicken selection (pre-capture pill + post-capture "existing" branch) ---
   const openChickenPickerForPreselect = () => {
     setPickerPurpose('preselect');
@@ -1026,8 +1143,8 @@ export default function CaptureScreen() {
     if (isCreatingChicken || !pendingChicken) return;
     setIsCreatingChicken(true);
 
+    let photoBase64: string | undefined;
     try {
-      let photoBase64: string | undefined;
       if (pendingChicken.photo) {
         photoBase64 = await photoUriToBase64(pendingChicken.photo);
       } else if (lastPhotoUri) {
@@ -1071,6 +1188,19 @@ export default function CaptureScreen() {
         error?.code === 'PLAN_CHICKEN_LIMIT_EXCEEDED'
       ) {
         setShowQRModal(false);
+        const pendingData = {
+          source: 'capture',
+          chicken: {
+            chickenId: pendingChicken.chickenId,
+            name: pendingChicken.name,
+            farmId: pendingChicken.farmId,
+            photo: pendingChicken.photo || lastPhotoUri,
+          },
+          photoBase64: photoBase64 || lastPhotoBase64 || null,
+          photoUri: pendingChicken.photo || lastPhotoUri || null,
+          scanResult: scanResult || null,
+        };
+        AsyncStorage.setItem('@pending_quota_chicken', JSON.stringify(pendingData)).catch(() => {});
         apiGetMyPlan()
           .then((p) => {
             if (p?.subscription) setUserSubscription(p.subscription);
@@ -1615,21 +1745,62 @@ export default function CaptureScreen() {
                         </TouchableOpacity>
                       </View>
                     ) : (
-                      <TouchableOpacity
-                        onPress={handleShutterPress}
-                        activeOpacity={0.9}
-                        disabled={checkingCapture || scanning}
-                      >
-                        <Animated.View style={[styles.shutterOuterRing, { transform: [{ scale: shutterAnim }] }]}>
-                          <View style={[styles.shutterInner, { backgroundColor: '#fff' }]}>
-                            {isAnalyzing ? (
-                              <ActivityIndicator color="#1a1a1a" size="small" />
-                            ) : (
-                              <Ionicons name="camera" size={30} color="#1a1a1a" />
-                            )}
-                          </View>
-                        </Animated.View>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 28, width: '100%' }}>
+                        {/* Offline / Farm Gallery Upload Button */}
+                        <TouchableOpacity
+                          onPress={handleUploadPhotoPress}
+                          activeOpacity={0.8}
+                          disabled={checkingCapture || scanning}
+                          style={{
+                            width: 50,
+                            height: 50,
+                            borderRadius: 25,
+                            backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                            borderWidth: 1.5,
+                            borderColor: 'rgba(255, 255, 255, 0.45)',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Ionicons name="images-outline" size={24} color="#fff" />
+                        </TouchableOpacity>
+
+                        {/* Camera Shutter */}
+                        <TouchableOpacity
+                          onPress={handleShutterPress}
+                          activeOpacity={0.9}
+                          disabled={checkingCapture || scanning}
+                        >
+                          <Animated.View style={[styles.shutterOuterRing, { transform: [{ scale: shutterAnim }] }]}>
+                            <View style={[styles.shutterInner, { backgroundColor: '#fff' }]}>
+                              {isAnalyzing ? (
+                                <ActivityIndicator color="#1a1a1a" size="small" />
+                              ) : (
+                                <Ionicons name="camera" size={30} color="#1a1a1a" />
+                              )}
+                            </View>
+                          </Animated.View>
+                        </TouchableOpacity>
+
+                        {/* Flip Camera */}
+                        <TouchableOpacity
+                          onPress={handleFlipCamera}
+                          activeOpacity={0.8}
+                          disabled={checkingCapture || scanning}
+                          style={{
+                            width: 50,
+                            height: 50,
+                            borderRadius: 25,
+                            backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                            borderWidth: 1.5,
+                            borderColor: 'rgba(255, 255, 255, 0.45)',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Ionicons name="camera-reverse-outline" size={24} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
                     )}
                   </View>
                 )}
@@ -1860,7 +2031,14 @@ export default function CaptureScreen() {
           preselected before capturing. */}
       <Modal animationType="fade" transparent visible={showNewOrExistingModal} onRequestClose={() => setShowNewOrExistingModal(false)}>
         <View style={styles.detectionOverlay}>
-          <View style={[styles.newOrExistingCard, { maxWidth: MAX_PHONE_WIDTH - 60 }]}>
+          <View style={[styles.newOrExistingCard, { maxWidth: MAX_PHONE_WIDTH - 60, position: 'relative' }]}>
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 14, right: 14, zIndex: 10, padding: 6 }}
+              onPress={() => setShowNewOrExistingModal(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close" size={22} color="#666" />
+            </TouchableOpacity>
             <View style={styles.newOrExistingIconCircle}>
               <Ionicons name="help-circle" size={32} color="#fff" />
             </View>
@@ -2129,6 +2307,27 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
         <Ionicons name="scan-circle-outline" size={15} color="#1565C0" />
         <Text style={styles.autoFocusText}>AI Analyzed: {moduleLabel}</Text>
       </View>
+
+      {/* Module Mismatch Notice Banner */}
+      {scanResult.moduleMismatch && scanResult.moduleNotice && (
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: '#FFF3E0',
+          borderColor: '#FFB74D',
+          borderWidth: 1,
+          borderRadius: 12,
+          padding: 12,
+          marginTop: 6,
+          marginBottom: 10,
+        }}>
+          <Ionicons name="information-circle" size={22} color="#E65100" />
+          <Text style={{ flex: 1, fontSize: 12.5, color: '#E65100', fontWeight: '600', lineHeight: 17 }}>
+            {scanResult.moduleNotice}
+          </Text>
+        </View>
+      )}
 
       {/* Visual attention & photo toggle */}
       {(displayPhotoUri || displayGradcamUri || !canViewHeatmaps) && (

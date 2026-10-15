@@ -4,11 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
 import { Tabs, router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, Dimensions, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
+import ProfileEditInProgressModal from '../../components/ui/ProfileEditInProgressModal';
 import { useRole } from '../../hooks/useRole';
 
 const { width } = Dimensions.get('window');
@@ -102,17 +103,29 @@ function CurvedTabBarBackground({
   );
 }
 
-function AnimatedCenterButton({ isTablet }: { isTablet: boolean }) {
+function AnimatedCenterButton({ isTablet, focused = false }: { isTablet: boolean; focused?: boolean }) {
   const { isDarkMode } = useDarkMode();
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.08 : 1)).current;
+
+  useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: focused ? 1.08 : 1,
+      friction: 5,
+      tension: 140,
+      useNativeDriver: true,
+    }).start();
+  }, [focused]);
+
   // Darkest green in our palette (#1E3D2D)
   const darkestGreen = isDarkMode ? '#172E22' : '#1E3D2D';
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.centerButtonOuter,
         {
           backgroundColor: darkestGreen,
+          transform: [{ scale: scaleAnim }],
         },
         isTablet && styles.centerButtonOuterTablet,
       ]}
@@ -120,7 +133,7 @@ function AnimatedCenterButton({ isTablet }: { isTablet: boolean }) {
       <View style={styles.centerIconWrap}>
         <Feather name="camera" size={isTablet ? 28 : 23} color="#FFFFFF" />
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -176,6 +189,28 @@ export default function TabLayout() {
       checkGuestStatus();
     }, [])
   );
+
+  const [isProfileEditing, setIsProfileEditing] = useState(false);
+  const [showProfileEditModal, setShowProfileEditModal] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const val = await AsyncStorage.getItem('is_profile_editing');
+        setIsProfileEditing(val === 'true');
+      } catch (_) {}
+    }, 400);
+    return () => clearInterval(interval);
+  }, []);
+
+  const blockIfEditingProfile = (e: any): boolean => {
+    if (isProfileEditing) {
+      e.preventDefault();
+      setShowProfileEditModal(true);
+      return true;
+    }
+    return false;
+  };
 
   const blockIfGuest = (e: any, featureLabel: string) => {
     if (isGuestMode) {
@@ -243,6 +278,11 @@ export default function TabLayout() {
               />
             ),
           }}
+          listeners={{
+            tabPress: (e) => {
+              blockIfEditingProfile(e);
+            },
+          }}
         />
 
         <Tabs.Screen
@@ -259,6 +299,11 @@ export default function TabLayout() {
               />
             ),
           }}
+          listeners={{
+            tabPress: (e) => {
+              blockIfEditingProfile(e);
+            },
+          }}
         />
 
         <Tabs.Screen
@@ -266,11 +311,14 @@ export default function TabLayout() {
           options={{
             title: '',
             tabBarIcon: ({ focused }) => (
-              <AnimatedCenterButton isTablet={isTablet} />
+              <AnimatedCenterButton isTablet={isTablet} focused={focused} />
             ),
           }}
           listeners={{
-            tabPress: (e) => blockIfGuest(e, 'Scan & Detect'),
+            tabPress: (e) => {
+              if (blockIfEditingProfile(e)) return;
+              blockIfGuest(e, 'Scan & Detect');
+            },
           }}
         />
 
@@ -287,6 +335,11 @@ export default function TabLayout() {
                 isTablet={isTablet}
               />
             ),
+          }}
+          listeners={{
+            tabPress: (e) => {
+              blockIfEditingProfile(e);
+            },
           }}
         />
 
@@ -313,6 +366,10 @@ export default function TabLayout() {
         visible={guestModalVisible}
         onClose={() => setGuestModalVisible(false)}
         featureLabel={guestFeature}
+      />
+      <ProfileEditInProgressModal
+        visible={showProfileEditModal}
+        onStay={() => setShowProfileEditModal(false)}
       />
     </>
   );

@@ -41,9 +41,13 @@ import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
 import WelcomeModal from '../../components/ui/WelcomeModal';
-import FarmOnboardingModal from '../../components/ui/FarmOnboardingModal';
+import ProductTourModal from '../../components/ui/ProductTourModal';
+import { useTour } from '@/context/TourContext';
+import { parseUtcDate } from '@/context/NotificationContext';
 import { apiGetProfile, apiGetActivities, apiGetMyPlan } from '../../lib/api';
 import { formatDateKey, getRelativeDateLabel, getUpcomingTasks, loadTasks, Task, toggleTaskComplete } from '../../utils/tasks';
+import { HomeRecentActivitySkeleton, RecentScansSkeleton } from '../../components/ui/SkeletonLoaders';
+import { AnimatedEntrance } from '../../components/ui/AnimatedEntrance';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FEATURED_CARD_WIDTH = screenWidth - 32;
@@ -126,10 +130,13 @@ export default function HomeScreen() {
     clearAllNotifications,
     deleteNotification,
     showDetail,
+    loading: loadingNotifications,
   } = useNotifications();
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [loadingChickens, setLoadingChickens] = useState(false);
   const [isGuestMode, setIsGuestMode] = useState(mode === 'guest');
   const [userName, setUserName] = useState('Guest User');
   const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
@@ -140,6 +147,7 @@ export default function HomeScreen() {
   const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
   const [togglingTaskId, setTogglingTaskId] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<any>(null);
+  const { startTour } = useTour();
 
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [acceptedDisclaimer, setAcceptedDisclaimer] = useState(false);
@@ -155,8 +163,7 @@ export default function HomeScreen() {
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [welcomeName, setWelcomeName] = useState('there');
 
-  const [showFarmOnboarding, setShowFarmOnboarding] = useState(false);
-  const farmOnboardingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showProductTour, setShowProductTour] = useState(false);
 
   // --- Pull-to-refresh ---
   const [refreshing, setRefreshing] = useState(false);
@@ -169,7 +176,6 @@ export default function HomeScreen() {
         loadChickens(),
         loadFarms().then((f) => {
           setFarms(f);
-          if (f.length > 0) setShowFarmOnboarding(false);
         }),
         loadUpcomingTasks(),
         loadRecentActivities(),
@@ -279,78 +285,36 @@ export default function HomeScreen() {
     }
   };
 
-  const checkFarmOnboarding = async () => {
+  const checkProductTour = async () => {
     try {
       const guest = await checkIsGuestMode();
       if (guest) return;
-
-      const role = await AsyncStorage.getItem('userRole');
-      const userDataStr = await AsyncStorage.getItem('userData');
-      let isOwner = true;
-      if (role && role.toLowerCase() === 'caretaker') isOwner = false;
-      if (userDataStr) {
-        try {
-          const parsed = JSON.parse(userDataStr);
-          if (parsed.role && parsed.role.toLowerCase() === 'caretaker') isOwner = false;
-        } catch (_) { }
-      }
-      if (!isOwner) return;
-
-      const currentFarms = await loadFarms();
-      if (currentFarms.length === 0) {
-        if (farmOnboardingTimerRef.current) {
-          clearTimeout(farmOnboardingTimerRef.current);
-        }
-        // Exactly 3 seconds after login / landing on home with 0 farms
-        farmOnboardingTimerRef.current = setTimeout(() => {
-          setShowFarmOnboarding(true);
-        }, 3000);
-      } else {
-        setShowFarmOnboarding(false);
+      const seen = await AsyncStorage.getItem('has_seen_product_tour');
+      if (!seen || seen !== 'true') {
+        setShowProductTour(true);
       }
     } catch (err) {
-      console.error('Error checking farm onboarding:', err);
+      console.error('Error checking product tour:', err);
     }
-  };
-
-  const handleStartCreateFarm = () => {
-    setShowFarmOnboarding(false);
-    router.push({ pathname: '/farm', params: { autoAdd: '1' } });
   };
 
   useEffect(() => {
     syncGuestMode();
     loadUserName();
     loadChickens();
-    loadFarms().then((f) => {
-      setFarms(f);
-      if (f.length > 0) setShowFarmOnboarding(false);
-    });
+    loadFarms().then((f) => setFarms(f));
     loadUpcomingTasks();
     loadSubscription();
     checkDisclaimerStatus();
     checkLoginWelcome();
-    checkFarmOnboarding();
-
-    return () => {
-      if (farmOnboardingTimerRef.current) {
-        clearTimeout(farmOnboardingTimerRef.current);
-      }
-    };
+    checkProductTour();
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadUserName();
       loadChickens();
-      loadFarms().then((f) => {
-        setFarms(f);
-        if (f.length > 0) {
-          setShowFarmOnboarding(false);
-        } else {
-          checkFarmOnboarding();
-        }
-      });
+      loadFarms().then((f) => setFarms(f));
       loadUpcomingTasks();
       loadRecentActivities();
       loadSubscription();
@@ -360,6 +324,7 @@ export default function HomeScreen() {
   );
 
   const loadRecentActivities = async () => {
+    setLoadingActivities(true);
     try {
       const acts = await apiGetActivities();
       if (Array.isArray(acts)) {
@@ -367,6 +332,8 @@ export default function HomeScreen() {
       }
     } catch (e) {
       console.error('Error loading recent activities:', e);
+    } finally {
+      setLoadingActivities(false);
     }
   };
 
@@ -505,6 +472,7 @@ export default function HomeScreen() {
   };
 
   const loadChickens = async () => {
+    setLoadingChickens(true);
     try {
       const guest = await checkIsGuestMode();
       if (guest) {
@@ -527,6 +495,8 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error loading chickens:', error);
+    } finally {
+      setLoadingChickens(false);
     }
   };
 
@@ -739,7 +709,6 @@ export default function HomeScreen() {
       count: allChickens.length,
       icon: <ChickenIcon size={20} color={colors.primary} />,
       circleBg: colors.primary + '18',
-      onPress: handleHealthTrack,
     },
     {
       key: 'Healthy',
@@ -747,7 +716,6 @@ export default function HomeScreen() {
       count: healthyCount,
       icon: <Ionicons name="heart-outline" size={20} color="#4CAF50" />,
       circleBg: '#4CAF5018',
-      onPress: () => setActiveFilter('Healthy'),
     },
     {
       key: 'Warning',
@@ -755,7 +723,6 @@ export default function HomeScreen() {
       count: warningCount,
       icon: <Ionicons name="alert-circle-outline" size={20} color="#FF9800" />,
       circleBg: '#FF980018',
-      onPress: () => setActiveFilter('Warning'),
     },
     {
       key: 'Critical',
@@ -763,7 +730,6 @@ export default function HomeScreen() {
       count: criticalCount,
       icon: <Ionicons name="warning-outline" size={20} color="#f44336" />,
       circleBg: '#f4433618',
-      onPress: () => setActiveFilter('Critical'),
     },
   ];
 
@@ -950,18 +916,28 @@ export default function HomeScreen() {
               {isGuestMode ? 'User' : userName}
             </Text>
           </View>
-          <TouchableOpacity
-            style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
-            onPress={() => setShowNotifications(true)}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="notifications-outline" size={22} color={colors.text} />
-            {unreadCount > 0 && (
-              <View style={styles.headerBellBadge}>
-                <Text style={styles.headerBellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity
+              style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
+              onPress={() => startTour()}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
+              onPress={() => setShowNotifications(true)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="notifications-outline" size={22} color={colors.text} />
+              {unreadCount > 0 && (
+                <View style={styles.headerBellBadge}>
+                  <Text style={styles.headerBellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ===================== Subscription Banner / Status Pill ===================== */}
@@ -1176,21 +1152,19 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* ===================== Quick stat tiles ===================== */}
+        {/* ===================== Quick stat tiles (Static Summary) ===================== */}
         <View style={styles.statsRow}>
           {quickStats.map((stat) => (
-            <TouchableOpacity
+            <View
               key={stat.key}
               style={[styles.statCard, { backgroundColor: colors.card }]}
-              onPress={stat.onPress}
-              activeOpacity={0.8}
             >
               <View style={[styles.statIconCircle, { backgroundColor: stat.circleBg }]}>{stat.icon}</View>
               <Text style={[styles.statNumber, { color: colors.text }]}>{stat.count}</Text>
               <Text style={[styles.statLabel, { color: colors.textLight }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                 {stat.label}
               </Text>
-            </TouchableOpacity>
+            </View>
           ))}
         </View>
 
@@ -1244,7 +1218,9 @@ export default function HomeScreen() {
             })}
           </ScrollView>
 
-          {featuredBirds.length > 0 ? (
+          {loadingChickens && featuredBirds.length === 0 ? (
+            <RecentScansSkeleton />
+          ) : featuredBirds.length > 0 ? (
             <>
               <FlatList
                 ref={featuredListRef}
@@ -1340,7 +1316,9 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {recentActivities.length > 0 ? (
+          {loadingActivities && recentActivities.length === 0 ? (
+            <HomeRecentActivitySkeleton />
+          ) : recentActivities.length > 0 ? (
             <View style={[styles.activityCardWrap, { backgroundColor: colors.card, borderColor: colors.divider }]}>
               {recentActivities.slice(0, 5).map((act: any, idx: number) => {
                 const isCrit = act.status === 'Critical';
@@ -1348,35 +1326,36 @@ export default function HomeScreen() {
                 const tint = isCrit ? '#f44336' : isWarn ? '#FF9800' : '#4CAF50';
                 const iconName = isCrit ? 'warning' : isWarn ? 'alert-circle' : 'checkmark-circle';
 
-                const d = new Date(act.timestamp);
-                const diffMs = Date.now() - d.getTime();
+                const d = parseUtcDate(act.timestamp);
+                const diffMs = Math.max(0, Date.now() - d.getTime());
                 const diffMin = Math.floor(diffMs / 60000);
                 const timeLabel = diffMin < 1 ? 'Just now' : diffMin < 60 ? `${diffMin}m ago` : diffMin < 1440 ? `${Math.floor(diffMin / 60)}h ago` : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
                 return (
-                  <TouchableOpacity
-                    key={act.id || idx}
-                    style={[
-                      styles.homeActivityRow,
-                      { borderBottomColor: colors.divider },
-                      idx === Math.min(recentActivities.length, 5) - 1 && { borderBottomWidth: 0 },
-                    ]}
-                    onPress={() => router.push(`/chicken/${act.chicken_id}`)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[styles.homeActivityIcon, { backgroundColor: tint + '18' }]}>
-                      <Ionicons name={iconName as any} size={16} color={tint} />
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[styles.homeActivityTitle, { color: colors.text }]} numberOfLines={1}>
-                        {act.condition} — {act.chicken_name}
-                      </Text>
-                      <Text style={[styles.homeActivitySub, { color: colors.textLight }]} numberOfLines={1}>
-                        Captured by {act.captured_by_name} ({act.captured_by_role}) · {act.farm_name}
-                      </Text>
-                    </View>
-                    <Text style={[styles.homeActivityTime, { color: colors.textLight }]}>{timeLabel}</Text>
-                  </TouchableOpacity>
+                  <AnimatedEntrance key={act.id || idx} index={idx}>
+                    <TouchableOpacity
+                      style={[
+                        styles.homeActivityRow,
+                        { borderBottomColor: colors.divider },
+                        idx === Math.min(recentActivities.length, 5) - 1 && { borderBottomWidth: 0 },
+                      ]}
+                      onPress={() => router.push(`/chicken/${act.chicken_id}`)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={[styles.homeActivityIcon, { backgroundColor: tint + '18' }]}>
+                        <Ionicons name={iconName as any} size={16} color={tint} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.homeActivityTitle, { color: colors.text }]} numberOfLines={1}>
+                          {act.condition} — {act.chicken_name}
+                        </Text>
+                        <Text style={[styles.homeActivitySub, { color: colors.textLight }]} numberOfLines={1}>
+                          Captured by {act.captured_by_name} ({act.captured_by_role}) · {act.farm_name}
+                        </Text>
+                      </View>
+                      <Text style={[styles.homeActivityTime, { color: colors.textLight }]}>{timeLabel}</Text>
+                    </TouchableOpacity>
+                  </AnimatedEntrance>
                 );
               })}
             </View>
@@ -1499,6 +1478,7 @@ export default function HomeScreen() {
       <NotificationsListModal
         visible={showNotifications}
         notifications={notifications}
+        loading={loadingNotifications}
         onClose={() => setShowNotifications(false)}
         onMarkAllAsRead={markAllAsRead}
         onClearAll={clearAllNotifications}
@@ -1533,9 +1513,9 @@ export default function HomeScreen() {
         }}
       />
 
-      <FarmOnboardingModal
-        visible={showFarmOnboarding}
-        onStartCreateFarm={handleStartCreateFarm}
+      <ProductTourModal
+        visible={showProductTour}
+        onClose={() => setShowProductTour(false)}
       />
     </SafeAreaView>
   );

@@ -568,11 +568,12 @@ export default function SignupScreen() {
                 <Ionicons name="call-outline" size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
-                  placeholder="+63 917 123 4567 or 0917..."
+                  placeholder="09XXXXXXXXX"
                   placeholderTextColor="#9CA3AF"
                   value={form.phone_number}
                   onChangeText={handlePhoneChange}
                   keyboardType="phone-pad"
+                  maxLength={11}
                 />
               </View>
             </View>

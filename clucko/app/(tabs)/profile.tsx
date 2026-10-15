@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  BackHandler,
   Image,
   Modal,
   PanResponder,
@@ -38,7 +39,10 @@ import AnimatedSegmentedTabs from '../../components/ui/AnimatedSegmentedTabs';
 import FarmIcon from '../../components/ui/FarmIcon';
 import LogoutConfirmModal from '../../components/ui/LogoutConfirmModal';
 import NotificationsListModal from '../../components/ui/NotificationsListModal';
+import ProfileEditInProgressModal from '../../components/ui/ProfileEditInProgressModal';
 import { apiGetFarms, apiGetProfile, apiLogout, apiUpdateProfile, apiGetMyPlan, apiDeleteAccount } from '../../lib/api';
+import { ProfileDetailsSkeleton } from '../../components/ui/SkeletonLoaders';
+import { AnimatedEntrance } from '../../components/ui/AnimatedEntrance';
 
 const GENERIC_PROFILE_KEY = 'userProfile';
 const GENERIC_LAST_NOTIF_CHECK_KEY = 'lastNotifCheck';
@@ -97,7 +101,10 @@ export default function ProfileScreen() {
     deleteNotification,
     refresh: refreshNotifications,
     showSuccess,
+    loading: loadingNotifications,
   } = useNotifications();
+
+  const [loadingProfile, setLoadingProfile] = useState(false);
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [mediaPermission, requestMediaPermission] = ImagePicker.useMediaLibraryPermissions();
@@ -258,6 +265,7 @@ export default function ProfileScreen() {
   const [farmsList, setFarmsList] = useState<any[]>([]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [showFarmPickerForCaretakers, setShowFarmPickerForCaretakers] = useState(false);
+  const [showEditNoticeModal, setShowEditNoticeModal] = useState(false);
 
   const handleConnectedUsersPress = () => {
     if (profile.role === 'Caretaker') {
@@ -350,8 +358,21 @@ export default function ProfileScreen() {
       refreshNotifications();
       loadStats();
       AsyncStorage.removeItem('active_chicken_profile_id');
+      return () => {
+        AsyncStorage.removeItem('is_profile_editing').catch(() => {});
+      };
     }, [])
   );
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const onBackPress = () => {
+      setShowEditNoticeModal(true);
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [isEditing]);
 
   const handleNotificationPress = (notification: NotificationItem) => {
     showDetail(notification);
@@ -390,6 +411,7 @@ export default function ProfileScreen() {
   };
 
   const loadProfile = async () => {
+    setLoadingProfile(true);
     try {
       const data = await apiGetProfile();
       const roleDisplay = data?.role
@@ -439,12 +461,21 @@ export default function ProfileScreen() {
       }
     } catch (error) {
       console.error('Error loading profile:', error);
+    } finally {
+      setLoadingProfile(false);
     }
+  };
+
+  const startEditing = () => {
+    setActiveTab('details');
+    setIsEditing(true);
+    AsyncStorage.setItem('is_profile_editing', 'true').catch(() => {});
   };
 
   const handleCancelEdit = () => {
     setEditedProfile(profile);
     setIsEditing(false);
+    AsyncStorage.removeItem('is_profile_editing').catch(() => {});
   };
 
   const saveProfile = async () => {
@@ -463,6 +494,7 @@ export default function ProfileScreen() {
 
       setProfile(editedProfile);
       setIsEditing(false);
+      await AsyncStorage.removeItem('is_profile_editing').catch(() => {});
 
       await notify({
         title: 'Personal Profile Updated',
@@ -751,7 +783,7 @@ export default function ProfileScreen() {
           ) : (
             <TouchableOpacity
               style={[styles.editProfileButton, { borderColor: colors.primary }]}
-              onPress={() => { setActiveTab('details'); setIsEditing(true); }}
+              onPress={startEditing}
               activeOpacity={0.8}
             >
               <Ionicons name="create-outline" size={14} color={colors.primary} />
@@ -799,11 +831,15 @@ export default function ProfileScreen() {
 
         <Animated.View style={{ opacity: profileTabFadeAnim, width: '100%' }}>
           {activeTab === 'details' && (
-          <View style={styles.section}>
-            <View style={[styles.card, { backgroundColor: colors.card }]}>
-              <View style={styles.cardHeader}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Personal Information</Text>
-              </View>
+            loadingProfile && !profile.email ? (
+              <ProfileDetailsSkeleton />
+            ) : (
+              <AnimatedEntrance index={0}>
+                <View style={styles.section}>
+                  <View style={[styles.card, { backgroundColor: colors.card }]}>
+                    <View style={styles.cardHeader}>
+                      <Text style={[styles.cardTitle, { color: colors.text }]}>Personal Information</Text>
+                    </View>
 
               <View style={[styles.infoRow, { borderBottomColor: colors.divider }]}>
                 <View style={styles.infoLeft}>
@@ -831,7 +867,15 @@ export default function ProfileScreen() {
                   <Text style={[styles.infoLabel, { color: colors.textLight }]}>Phone Number </Text>
                 </View>
                 {isEditing ? (
-                  <TextInput style={[styles.infoInput, { color: colors.text, borderColor: colors.border }]} value={editedProfile.phone} onChangeText={(text) => setEditedProfile({ ...editedProfile, phone: text })} keyboardType="phone-pad" />
+                  <TextInput
+                    style={[styles.infoInput, { color: colors.text, borderColor: colors.border }]}
+                    value={editedProfile.phone}
+                    onChangeText={(text) => setEditedProfile({ ...editedProfile, phone: text.replace(/\D/g, '').slice(0, 11) })}
+                    keyboardType="phone-pad"
+                    maxLength={11}
+                    placeholder="09XXXXXXXXX"
+                    placeholderTextColor={colors.textLight}
+                  />
                 ) : (
                   <Text style={[styles.infoValue, { color: colors.text }]}>{profile.phone}</Text>
                 )}
@@ -849,7 +893,13 @@ export default function ProfileScreen() {
             {/* Subscription & Quota Card */}
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card }]}
-              onPress={() => router.push('/subscription')}
+              onPress={() => {
+                if (isEditing) {
+                  setShowEditNoticeModal(true);
+                  return;
+                }
+                router.push('/subscription');
+              }}
               activeOpacity={0.85}
             >
               <View style={styles.cardHeader}>
@@ -930,7 +980,13 @@ export default function ProfileScreen() {
                   )}
                 </View>
                 {!isEditing && profile.role === 'Owner' && (
-                  <TouchableOpacity onPress={() => router.push('/farm')}>
+                  <TouchableOpacity onPress={() => {
+                    if (isEditing) {
+                      setShowEditNoticeModal(true);
+                      return;
+                    }
+                    router.push('/farm');
+                  }}>
                     <Text style={[styles.manageAllFarmsText, { color: colors.primary }]}>
                       All Farms ({stats.totalFarms}) →
                     </Text>
@@ -1110,9 +1166,12 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
-        )}
+        </AnimatedEntrance>
+        )
+      )}
 
         {activeTab === 'preferences' && (
+          <AnimatedEntrance index={0}>
           <View style={styles.section}>
             <View style={[styles.card, { backgroundColor: colors.card }]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Appearance</Text>
@@ -1285,6 +1344,7 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
           </View>
+        </AnimatedEntrance>
         )}
         </Animated.View>
 
@@ -1306,6 +1366,7 @@ export default function ProfileScreen() {
       <NotificationsListModal
         visible={showNotifications}
         notifications={notifications}
+        loading={loadingNotifications}
         onClose={() => setShowNotifications(false)}
         onMarkAllAsRead={markAllAsRead}
         onClearAll={clearAllNotifications}
@@ -1470,6 +1531,16 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Profile Edit in Progress Warning Modal */}
+      <ProfileEditInProgressModal
+        visible={showEditNoticeModal}
+        onStay={() => setShowEditNoticeModal(false)}
+        onDiscard={() => {
+          setShowEditNoticeModal(false);
+          handleCancelEdit();
+        }}
+      />
     </SafeAreaView>
   );
 }

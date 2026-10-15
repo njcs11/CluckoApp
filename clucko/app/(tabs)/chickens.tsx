@@ -36,7 +36,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedSegmentedTabs from '../../components/ui/AnimatedSegmentedTabs';
 import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
-import { captureFromCamera, pickFromLibrary, persistChickenPhoto } from '@/utils/photoStorage';
+import { captureFromCamera, pickFromLibrary, persistChickenPhoto, resizeAndCompress, photoUriToBase64 } from '@/utils/photoStorage';
 import QRCode from 'react-native-qrcode-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenAvatar from '../../components/ui/ChickenAvatar';
@@ -44,6 +44,8 @@ import ChickenIcon from '../../components/ui/ChickenIcon';
 import FarmIcon from '../../components/ui/FarmIcon';
 import GuestBlockModal from '../../components/ui/GuestBlockModal';
 import FlockLimitModal from '../../components/ui/FlockLimitModal';
+import { FlockChickensSkeleton, RecentScansSkeleton } from '../../components/ui/SkeletonLoaders';
+import { AnimatedEntrance } from '../../components/ui/AnimatedEntrance';
 
 // Accent color used only for the active "Overview" toggle tab and the
 // add-chicken FAB, matching the mockup's amber/gold accent. Every other
@@ -258,6 +260,7 @@ export default function ChickensScreen() {
 const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
 const [recentScans, setRecentScans] = useState<RecentScanItem[]>([]);
 const [loadingRecentScans, setLoadingRecentScans] = useState(false);
+const [loadingChickens, setLoadingChickens] = useState(false);
 
 const loadRecentScans = async () => {
   try {
@@ -324,9 +327,42 @@ const loadScanHistory = async () => {
     refreshFarms();
     loadScanHistory();
     loadRecentScans();
+    checkAndAutoSavePendingChicken();
     AsyncStorage.removeItem('active_chicken_profile_id');
   }, [])
 );
+
+  const checkAndAutoSavePendingChicken = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('@pending_quota_chicken');
+      if (!raw) return;
+      const planRes = await apiGetMyPlan().catch(() => null);
+      const isUpgraded = planRes?.subscription?.plan === 'pro' || planRes?.subscription?.plan === 'premium';
+      if (!isUpgraded) return;
+
+      const pending = JSON.parse(raw);
+      if (!pending || !pending.chicken) return;
+
+      await addChickenForCurrentUser({
+        name: pending.chicken.name,
+        photo: pending.chicken.photo || pending.photoUri,
+        farmId: pending.chicken.farmId,
+        chickenId: pending.chicken.chickenId,
+      });
+
+      await AsyncStorage.removeItem('@pending_quota_chicken');
+      await notify({
+        title: '🐔 Pending Chicken Auto-Saved!',
+        message: `${pending.chicken.name || 'Your chicken'} has been automatically saved now that your subscription is active!`,
+        type: 'success',
+        chickenId: String(pending.chicken.chickenId || ''),
+        chickenName: pending.chicken.name,
+      });
+      loadChickens();
+    } catch (e) {
+      console.warn('Auto-save error in chickens tab:', e);
+    }
+  };
 
 useEffect(() => {
   loadChickens();
@@ -446,6 +482,7 @@ useEffect(() => {
   // wiped out or overwritten by another account's signup/login on the
   // same device.
   const loadChickens = async () => {
+    setLoadingChickens(true);
     try {
       const guest = await checkIsGuestMode();
       if (guest) {
@@ -483,6 +520,8 @@ useEffect(() => {
         .catch(() => null);
     } catch (error) {
       console.error('Error loading chickens:', error);
+    } finally {
+      setLoadingChickens(false);
     }
   };
 
@@ -532,6 +571,17 @@ useEffect(() => {
       const currentFarmChickens = allBirds.filter((b) => String(b.farmId) === String(targetFarm)).length;
       if (currentFarmChickens >= maxPerFarm) {
         setShowAddForm(false);
+        const chickenCode = generateNextChickenCode(allBirds, newChicken.farmId);
+        AsyncStorage.setItem('@pending_quota_chicken', JSON.stringify({
+          source: 'chickens_tab',
+          chicken: {
+            chickenId: chickenCode,
+            name: newChicken.name.trim(),
+            farmId: newChicken.farmId,
+            photo: newChicken.photo,
+          },
+          photoUri: newChicken.photo,
+        })).catch(() => {});
         setShowFlockLimitModal(true);
         return;
       }
@@ -607,6 +657,18 @@ useEffect(() => {
         err?.code === 'PLAN_CHICKEN_LIMIT_EXCEEDED'
       ) {
         setShowQRModal(false);
+        if (generatedQR) {
+          AsyncStorage.setItem('@pending_quota_chicken', JSON.stringify({
+            source: 'chickens_tab',
+            chicken: {
+              chickenId: generatedQR.chickenId,
+              name: generatedQR.name,
+              farmId: generatedQR.farmId,
+              photo: generatedQR.photo,
+            },
+            photoUri: generatedQR.photo,
+          })).catch(() => {});
+        }
         apiGetMyPlan()
           .then((p) => {
             if (p?.subscription) setUserSubscription(p.subscription);
@@ -815,29 +877,30 @@ useEffect(() => {
     router.push(`/chicken/${item.id}`);
   };
 
-  const renderBirdItem = ({ item }: any) => {
+  const renderBirdItem = ({ item, index }: any) => {
     const statusColor = getStatusColor(item);
     return (
-      <TouchableOpacity
-        style={[styles.birdCard, { backgroundColor: colors.card, borderColor: colors.divider }]}
-        onPress={() => handleBirdPress(item)}
-        activeOpacity={0.85}
-      >
-        <View style={styles.birdCardTopRow}>
-          <ChickenAvatar photo={item.photo} size={54} />
+      <AnimatedEntrance index={index ?? 0}>
+        <TouchableOpacity
+          style={[styles.birdCard, { backgroundColor: colors.card, borderColor: colors.divider }]}
+          onPress={() => handleBirdPress(item)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.birdCardTopRow}>
+            <ChickenAvatar photo={item.photo} size={54} />
 
-          <View style={styles.birdCardIdentity}>
-            <View style={styles.birdNameRow}>
-              <Text style={[styles.birdName, { color: colors.text }]} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.statusText, { color: statusColor }]}>
-                  {getHealthStatus(item).toUpperCase()}
+            <View style={styles.birdCardIdentity}>
+              <View style={styles.birdNameRow}>
+                <Text style={[styles.birdName, { color: colors.text }]} numberOfLines={1}>
+                  {item.name}
                 </Text>
+                <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
+                  <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+                  <Text style={[styles.statusText, { color: statusColor }]}>
+                    {getHealthStatus(item).toUpperCase()}
+                  </Text>
+                </View>
               </View>
-            </View>
 
             <View style={styles.birdMetaRow}>
               <Text style={[styles.birdIdTag, { color: colors.textLight }]}>
@@ -877,7 +940,8 @@ useEffect(() => {
           <Text style={[styles.birdDate, { color: colors.textLight }]}>Last scanned {item.lastScan}</Text>
         </View>
       </TouchableOpacity>
-    );
+    </AnimatedEntrance>
+  );
   };
 
   const renderAlertItem = ({ item }: any) => (
@@ -908,7 +972,7 @@ useEffect(() => {
     </TouchableOpacity>
   );
 
-  const renderRecentScanItem = ({ item }: { item: RecentScanItem }) => {
+  const renderRecentScanItem = ({ item, index }: { item: RecentScanItem; index?: number }) => {
     const dt = item.scanned_at ? new Date(item.scanned_at) : null;
     const dateStr = dt && !isNaN(dt.getTime())
       ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -920,46 +984,48 @@ useEffect(() => {
     const birdPhoto = item.photo_url || getBirdImageForChickenId(item.qr_code);
 
     return (
-      <TouchableOpacity
-        style={[styles.scanHistoryCard, { backgroundColor: colors.card, borderColor: colors.divider }]}
-        activeOpacity={0.85}
-        onPress={() => router.push(`/chicken/${item.chicken_id}`)}
-      >
-        <ChickenAvatar photo={birdPhoto} size={54} />
-        <View style={styles.scanHistoryInfo}>
-          <View style={styles.scanHistoryTopRow}>
-            <Text style={[styles.scanHistoryName, { color: colors.text }]} numberOfLines={1}>
-              {item.qr_code ? `${item.qr_code} · ${item.chicken_name}` : item.chicken_name}
-            </Text>
-            <View style={[styles.scanHistoryBadge, { backgroundColor: (item.status_color || '#4CAF50') + '20' }]}>
-              <Text style={[styles.scanHistoryStatus, { color: item.status_color || '#4CAF50' }]}>
-                {item.status || 'HEALTHY'}
+      <AnimatedEntrance index={index ?? 0}>
+        <TouchableOpacity
+          style={[styles.scanHistoryCard, { backgroundColor: colors.card, borderColor: colors.divider }]}
+          activeOpacity={0.85}
+          onPress={() => router.push(`/chicken/${item.chicken_id}`)}
+        >
+          <ChickenAvatar photo={birdPhoto} size={54} />
+          <View style={styles.scanHistoryInfo}>
+            <View style={styles.scanHistoryTopRow}>
+              <Text style={[styles.scanHistoryName, { color: colors.text }]} numberOfLines={1}>
+                {item.qr_code ? `${item.qr_code} · ${item.chicken_name}` : item.chicken_name}
+              </Text>
+              <View style={[styles.scanHistoryBadge, { backgroundColor: (item.status_color || '#4CAF50') + '20' }]}>
+                <Text style={[styles.scanHistoryStatus, { color: item.status_color || '#4CAF50' }]}>
+                  {item.status || 'HEALTHY'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.recentScanFarmRow}>
+              <FarmIcon size={13} color={colors.textLight} />
+              <Text style={[styles.recentScanFarmText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {item.farm_name || 'Unassigned'}
               </Text>
             </View>
-          </View>
 
-          <View style={styles.recentScanFarmRow}>
-            <FarmIcon size={13} color={colors.textLight} />
-            <Text style={[styles.recentScanFarmText, { color: colors.textSecondary }]} numberOfLines={1}>
-              {item.farm_name || 'Unassigned'}
-            </Text>
-          </View>
-
-          <View style={styles.scanHistoryFooter}>
-            <View style={styles.recentScanScannerRow}>
-              <Ionicons name="person-circle-outline" size={14} color={colors.primary} />
-              <Text style={[styles.recentScanScannerText, { color: colors.text }]} numberOfLines={1}>
-                {item.scanner_label || `${item.scanner_name} (${item.scanner_role})`}
-              </Text>
-            </View>
-            <View style={styles.scanHistoryMeta}>
-              <Ionicons name="time-outline" size={11} color={colors.textLight} />
-              <Text style={[styles.scanHistoryDate, { color: colors.textLight }]}>{timeDisplay}</Text>
+            <View style={styles.scanHistoryFooter}>
+              <View style={styles.recentScanScannerRow}>
+                <Ionicons name="person-circle-outline" size={14} color={colors.primary} />
+                <Text style={[styles.recentScanScannerText, { color: colors.text }]} numberOfLines={1}>
+                  {item.scanner_label || `${item.scanner_name} (${item.scanner_role})`}
+                </Text>
+              </View>
+              <View style={styles.scanHistoryMeta}>
+                <Ionicons name="time-outline" size={11} color={colors.textLight} />
+                <Text style={[styles.scanHistoryDate, { color: colors.textLight }]}>{timeDisplay}</Text>
+              </View>
             </View>
           </View>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
-      </TouchableOpacity>
+          <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
+        </TouchableOpacity>
+      </AnimatedEntrance>
     );
   };
 
@@ -1306,7 +1372,9 @@ useEffect(() => {
                   </TouchableOpacity>
                 </View>
 
-                {sortedBirds.length === 0 ? (
+                {loadingChickens && sortedBirds.length === 0 ? (
+                  <FlockChickensSkeleton />
+                ) : sortedBirds.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Ionicons name="search-outline" size={44} color={colors.textLight} />
                     <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No chickens match your search</Text>
@@ -1395,7 +1463,9 @@ useEffect(() => {
                 </View>
               )}
 
-              {recentScans.length === 0 ? (
+              {loadingRecentScans && recentScans.length === 0 ? (
+                <RecentScansSkeleton />
+              ) : recentScans.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="qr-code-outline" size={48} color={colors.textLight} />
                   <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>

@@ -74,6 +74,10 @@ export const getCachedChickens = async (): Promise<any[] | null> => {
     }
   } catch (e) {
     console.warn("Error reading cached chickens:", e);
+    // Automatically purge oversized or corrupted cache row to prevent repeated CursorWindow crashes
+    try {
+      await AsyncStorage.removeItem(CACHE_KEY);
+    } catch (_) {}
   }
   return null;
 };
@@ -87,7 +91,12 @@ export const loadChickensForCurrentUser = async (): Promise<any[] | null> => {
     if (Array.isArray(data)) {
       const mapped = data.map(mapChickenFromApi);
       try {
-        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(mapped));
+        // Strip oversized base64 data strings from the AsyncStorage SQLite row to prevent Android 2MB CursorWindow limit crash
+        const cacheSafe = mapped.map((c) => ({
+          ...c,
+          photo: (typeof c.photo === 'string' && c.photo.startsWith('data:') && c.photo.length > 2000) ? null : c.photo,
+        }));
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheSafe));
       } catch (err) {
         console.warn("Error saving chickens to cache:", err);
       }

@@ -4,6 +4,7 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import ChickenIcon from './ChickenIcon';
 import FarmIcon from './FarmIcon';
+import { NotificationsSkeleton } from './SkeletonLoaders';
 import {
     Animated,
     Dimensions,
@@ -22,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 interface NotificationsListModalProps {
   visible: boolean;
   notifications: NotificationItem[];
+  loading?: boolean;
   onClose: () => void;
   onMarkAllAsRead: () => void;
   onClearAll: () => void;
@@ -63,20 +65,24 @@ const getMainIcon = (notification: NotificationItem, primaryColor: string) => {
   return { render: (color: string) => <Ionicons name="notifications-outline" size={17} color={color} />, bg: '#2D5541' };
 };
 
-const formatRelative = (date: Date) => {
-  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (mins < 1) return 'now';
+const formatRelative = (date: any) => {
+  if (!date) return 'Just now';
+  const d = date instanceof Date ? date : new Date(date);
+  const diffMs = Math.max(0, Date.now() - d.getTime());
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
 export default function NotificationsListModal({
   visible,
   notifications,
+  loading = false,
   onClose,
   onMarkAllAsRead,
   onClearAll,
@@ -244,7 +250,9 @@ export default function NotificationsListModal({
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* List */}
-          {notifications.length === 0 ? (
+          {loading && notifications.length === 0 ? (
+            <NotificationsSkeleton />
+          ) : notifications.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="notifications-off-outline" size={32} color={colors.textLight} />
               <Text style={[styles.emptyText, { color: colors.textLight }]}>You're all caught up.</Text>

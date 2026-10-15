@@ -121,27 +121,11 @@ export function suggestEmailTypo(email: string): string | null {
 }
 
 /**
- * Formats a phone number cleanly as typed.
- * Supports PH mobile numbers (e.g., 0917 123 4567 or +63 917 123 4567).
+ * Formats and sanitizes a phone number to standard PH mobile format (max 11 digits, e.g. 09XXXXXXXXX).
+ * Prevents typing more than 11 digits.
  */
 export function formatPhoneNumber(input: string): string {
   if (!input) return '';
-  // Strip all characters except digits and leading +
-  const cleaned = input.replace(/[^\d+]/g, '');
-  
-  if (cleaned.startsWith('+63')) {
-    const digits = cleaned.slice(3).replace(/\D/g, '');
-    if (digits.length <= 3) return `+63 ${digits}`;
-    if (digits.length <= 6) return `+63 ${digits.slice(0, 3)} ${digits.slice(3)}`;
-    return `+63 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`;
-  }
-
-  if (cleaned.startsWith('09')) {
-    const digits = cleaned.replace(/\D/g, '');
-    if (digits.length <= 4) return digits;
-    if (digits.length <= 7) return `${digits.slice(0, 4)} ${digits.slice(4)}`;
-    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
-  }
-
-  return input;
+  const digits = input.replace(/\D/g, '');
+  return digits.slice(0, 11);
 }

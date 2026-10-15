@@ -79,6 +79,7 @@ interface NotificationContextValue {
   clearAllNotifications: () => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
+  loading: boolean;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -86,8 +87,24 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 const AUTO_DISMISS_MS = 5000;
 const POLL_INTERVAL_MS = 15000; // Poll backend notifications every 15 seconds
 
+export const parseUtcDate = (raw: any): Date => {
+  if (!raw) return new Date();
+  if (raw instanceof Date) return raw;
+  if (typeof raw === 'string') {
+    let s = raw.trim();
+    if (!s.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(s) && !s.includes('GMT')) {
+      s = s.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d;
+  }
+  const fallback = new Date(raw);
+  return isNaN(fallback.getTime()) ? new Date() : fallback;
+};
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const [displayed, setDisplayed] = useState<NotificationItem | null>(null);
   const [errorModal, setErrorModal] = useState<{ visible: boolean; title: string; message: string; type?: 'error' | 'success' } | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -100,6 +117,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const refresh = useCallback(async () => {
+    setLoading(true);
     try {
       const token = await getToken();
       if (token) {
@@ -113,7 +131,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             title: r.title,
             message: r.message,
             type: r.type || 'info',
-            timestamp: new Date(r.timestamp),
+            timestamp: parseUtcDate(r.timestamp),
             read: !!r.read,
             chickenId: r.chickenId ? String(r.chickenId) : undefined,
             chickenName: r.chickenName || undefined,
@@ -137,6 +155,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
+    } finally {
+      setLoading(false);
     }
   }, [persistLocal]);
 
@@ -303,6 +323,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         clearAllNotifications,
         deleteNotification,
         refresh,
+        loading,
       }}
     >
       {children}

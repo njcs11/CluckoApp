@@ -21,6 +21,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, G, Path, Rect, Stop, LinearGradient as SvgLinearGradient, Text as SvgText } from 'react-native-svg';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import { useRole } from '../../hooks/useRole';  // ← ADDED
+import { ReportsSkeleton } from '../../components/ui/SkeletonLoaders';
+import { AnimatedEntrance } from '../../components/ui/AnimatedEntrance';
 
 const DefsAny = Defs as any;
 
@@ -178,6 +180,7 @@ export default function ReportsScreen() {
 
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [checkingGuest, setCheckingGuest] = useState(true);
+  const [loadingReports, setLoadingReports] = useState(true);
   const [allChickens, setAllChickens] = useState<any[]>([]);
 
   useFocusEffect(
@@ -193,6 +196,7 @@ export default function ReportsScreen() {
         console.error('Error loading reports data:', error);
       } finally {
         setCheckingGuest(false);
+        setLoadingReports(false);
       }
     };
     loadData();
@@ -328,8 +332,15 @@ const buildWeeklyActivity = (scans: any[]) => {
     },
   ];
 
-  if (checkingGuest) {
-    return <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} />;
+  if (checkingGuest || (loadingReports && allChickens.length === 0)) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar style={isDarkMode ? 'light' : 'dark'} />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ReportsSkeleton />
+        </ScrollView>
+      </SafeAreaView>
+    );
   }
 
   if (isGuestMode) {
@@ -387,53 +398,58 @@ const buildWeeklyActivity = (scans: any[]) => {
         </View>
 
         {/* Stat cards */}
-        <View style={styles.statsGrid}>
-          {statCards.map((stat) => (
-            <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.card }]}>
-              <View style={styles.statCardTopRow}>
-                <View style={[styles.statIconBadge, { backgroundColor: stat.tint + '18' }]}>{stat.icon}</View>
+        <AnimatedEntrance index={0}>
+          <View style={styles.statsGrid}>
+            {statCards.map((stat) => (
+              <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.card }]}>
+                <View style={styles.statCardTopRow}>
+                  <View style={[styles.statIconBadge, { backgroundColor: stat.tint + '18' }]}>{stat.icon}</View>
+                </View>
+                <Text style={[styles.statValue, { color: colors.text }]}>{stat.value}</Text>
+                <Text style={[styles.statLabel, { color: colors.textLight }]}>{stat.label}</Text>
+                <Text style={[styles.statTrend, { color: stat.tint }]}>{stat.trend}</Text>
               </View>
-              <Text style={[styles.statValue, { color: colors.text }]}>{stat.value}</Text>
-              <Text style={[styles.statLabel, { color: colors.textLight }]}>{stat.label}</Text>
-              <Text style={[styles.statTrend, { color: stat.tint }]}>{stat.trend}</Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        </AnimatedEntrance>
 
         {/* Scan activity chart */}
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Scan Activity</Text>
-            <View style={[styles.pillToggle, { backgroundColor: colors.background }]}>
-              <TouchableOpacity
-                style={[styles.pillOption, selectedPeriod === 'weekly' && { backgroundColor: colors.primary }]}
-                onPress={() => setSelectedPeriod('weekly')}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pillOptionText, { color: selectedPeriod === 'weekly' ? '#fff' : colors.textSecondary }]}>Week</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.pillOption, selectedPeriod === 'monthly' && { backgroundColor: colors.primary }]}
-                onPress={() => setSelectedPeriod('monthly')}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pillOptionText, { color: selectedPeriod === 'monthly' ? '#fff' : colors.textSecondary }]}>Month</Text>
-              </TouchableOpacity>
+        <AnimatedEntrance index={1}>
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Scan Activity</Text>
+              <View style={[styles.pillToggle, { backgroundColor: colors.background }]}>
+                <TouchableOpacity
+                  style={[styles.pillOption, selectedPeriod === 'weekly' && { backgroundColor: colors.primary }]}
+                  onPress={() => setSelectedPeriod('weekly')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.pillOptionText, { color: selectedPeriod === 'weekly' ? '#fff' : colors.textSecondary }]}>Week</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pillOption, selectedPeriod === 'monthly' && { backgroundColor: colors.primary }]}
+                  onPress={() => setSelectedPeriod('monthly')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.pillOptionText, { color: selectedPeriod === 'monthly' ? '#fff' : colors.textSecondary }]}>Month</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <LineChart labels={activeLabels} values={activeValues} maxValue={safeMaxValue} color={colors.primary} />
+            <View style={[styles.chartFooter, { borderTopColor: colors.divider }]}>
+              <Text style={[styles.chartFooterLabel, { color: colors.textLight }]}>
+                Total scans this {selectedPeriod === 'weekly' ? 'week' : '6 months'}
+              </Text>
+              <Text style={[styles.chartFooterValue, { color: colors.primary }]}>{totalScansThisPeriod}</Text>
             </View>
           </View>
-          <LineChart labels={activeLabels} values={activeValues} maxValue={safeMaxValue} color={colors.primary} />
-          <View style={[styles.chartFooter, { borderTopColor: colors.divider }]}>
-            <Text style={[styles.chartFooterLabel, { color: colors.textLight }]}>
-              Total scans this {selectedPeriod === 'weekly' ? 'week' : '6 months'}
-            </Text>
-            <Text style={[styles.chartFooterValue, { color: colors.primary }]}>{totalScansThisPeriod}</Text>
-          </View>
-        </View>
+        </AnimatedEntrance>
 
         {/* Health distribution donut */}
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Health Distribution</Text>
-          <View style={styles.donutRow}>
+        <AnimatedEntrance index={2}>
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Health Distribution</Text>
+            <View style={styles.donutRow}>
             <View style={styles.donutWrap}>
               <Donut data={donutData} size={140} strokeWidth={18} />
               <View style={styles.donutCenter}>
@@ -455,7 +471,8 @@ const buildWeeklyActivity = (scans: any[]) => {
               ))}
             </View>
           </View>
-        </View>
+          </View>
+        </AnimatedEntrance>
 
         {/* Recent activity */}
         <View style={[styles.card, { backgroundColor: colors.card }]}>

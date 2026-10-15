@@ -24,7 +24,10 @@ import {
   apiCreateCheckout,
   apiGetMyPlan,
   apiVerifyPayment,
+  apiCreateChicken,
+  apiSaveScan,
 } from '../lib/api';
+import { resizeAndCompress, photoUriToBase64 } from '@/utils/photoStorage';
 
 export default function SubscriptionScreen() {
   const { colors, isDarkMode } = useDarkMode();
@@ -213,6 +216,7 @@ export default function SubscriptionScreen() {
         setShowSuccessModal(true);
 
         await loadSubscription();
+        await autoSavePendingQuotaChicken();
         await notify({
           title: '🎉 Payment Successful!',
           message: `Your account has been upgraded to ${activatedName}. All perks are active!`,
@@ -235,6 +239,57 @@ export default function SubscriptionScreen() {
       });
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const autoSavePendingQuotaChicken = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('@pending_quota_chicken');
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (!pending || !pending.chicken) return;
+
+      let photoB64 = pending.photoBase64;
+      if (!photoB64 && pending.photoUri) {
+        try {
+          const compressed = await resizeAndCompress(pending.photoUri);
+          photoB64 = await photoUriToBase64(compressed);
+        } catch (_) {}
+      }
+
+      const created = await apiCreateChicken({
+        qr_code: pending.chicken.chickenId || pending.chicken.qr_code,
+        chicken_name: pending.chicken.name || pending.chicken.chicken_name,
+        farm_id: pending.chicken.farmId ? Number(pending.chicken.farmId) : undefined,
+        photo_url: photoB64,
+      });
+
+      if (pending.scanResult && created?.id) {
+        await apiSaveScan({
+          chicken_id: created.id,
+          disease_name: pending.scanResult.disease || undefined,
+          confidence_score: pending.scanResult.confidence,
+          severity: pending.scanResult.severity,
+          image_type: pending.scanResult.module || 'eye',
+          scan_type: 'camera',
+          image_url: photoB64,
+          all_predictions: {
+            symptoms: pending.scanResult.symptoms,
+            gradcam_image: pending.scanResult.gradcamImage,
+          },
+        });
+      }
+
+      await AsyncStorage.removeItem('@pending_quota_chicken');
+      await notify({
+        title: '🐔 Pending Chicken Auto-Saved!',
+        message: `${pending.chicken.name || 'Your chicken'} has been automatically saved now that your subscription is active!`,
+        type: 'success',
+        chickenId: String(created?.id || ''),
+        chickenName: pending.chicken.name,
+      });
+    } catch (e) {
+      console.warn('Auto-save error in subscription:', e);
     }
   };
 

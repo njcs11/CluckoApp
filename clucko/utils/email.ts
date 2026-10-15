@@ -7,7 +7,25 @@ const EMAILJS_TEMPLATE_ID = 'template_u0b0yl9';
 const EMAILJS_PUBLIC_KEY = 'lJJPMqktLrmyBcQBJ';
 
 export async function sendResetCodeEmail(toEmail: string, code: string): Promise<boolean> {
-  // 1. First attempt: Direct EmailJS with Origin header
+  const normalizedEmail = toEmail.trim().toLowerCase();
+
+  // 1. ALWAYS register the verification code with the backend first!
+  let serverRegistered = false;
+  try {
+    const serverSent = await apiSendResetCode(normalizedEmail, code);
+    if (serverSent) {
+      serverRegistered = true;
+    }
+  } catch (serverErr) {
+    console.warn('Backend proxy send failed, attempting direct EmailJS:', serverErr);
+  }
+
+  // If server-side dispatch already succeeded, we are done!
+  if (serverRegistered) {
+    return true;
+  }
+
+  // 2. Client-side EmailJS dispatch fallback
   try {
     const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
@@ -20,7 +38,7 @@ export async function sendResetCodeEmail(toEmail: string, code: string): Promise
         template_id: EMAILJS_TEMPLATE_ID,
         user_id: EMAILJS_PUBLIC_KEY,
         template_params: {
-          to_email: toEmail,
+          to_email: normalizedEmail,
           code,
         },
       }),
@@ -30,18 +48,8 @@ export async function sendResetCodeEmail(toEmail: string, code: string): Promise
       return true;
     }
   } catch (error) {
-    console.warn('Direct EmailJS send failed, falling back to server dispatch:', error);
+    console.warn('Direct EmailJS send failed:', error);
   }
 
-  // 2. Second attempt: Backend proxy
-  try {
-    const serverSent = await apiSendResetCode(toEmail, code);
-    if (serverSent) {
-      return true;
-    }
-  } catch (serverErr) {
-    console.error('Server-side email dispatch failed:', serverErr);
-  }
-
-  return false;
+  return serverRegistered;
 }

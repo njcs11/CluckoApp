@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import app
-from db import get_db, token_required, SECRET_KEY, revoke_token
+from db import get_db, token_required, SECRET_KEY, revoke_token, record_user_activity
 import random
 import string
 
@@ -17,7 +17,198 @@ def is_valid_email(email: str) -> bool:
 
 EMAILJS_SERVICE_ID = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
 EMAILJS_TEMPLATE_ID = os.environ.get('EMAILJS_TEMPLATE_ID', 'template_u0b0yl9')
+EMAILJS_WELCOME_TEMPLATE_ID = os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID', 'template_welcome')
 EMAILJS_USER_ID = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
+
+# Optional Direct SMTP Configuration (e.g. Gmail / SendGrid / Custom Mail Server)
+def get_smtp_credentials():
+    """
+    Dynamically loads SMTP credentials from backend/.env or os.environ on each dispatch.
+    Ensures newly added credentials work immediately without requiring full server restarts.
+    """
+    env_file = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        os.environ[k.strip()] = v.strip()
+        except Exception as e:
+            print(f"[AUTH] Warning reading .env: {e}")
+
+    user = os.environ.get('SMTP_USER')
+    password = os.environ.get('SMTP_PASSWORD')
+    host = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
+    try:
+        port = int(os.environ.get('SMTP_PORT', '587'))
+    except ValueError:
+        port = 587
+    from_name = os.environ.get('SMTP_FROM_NAME', 'Clucko Gamefowl Health')
+
+    return user, password, host, port, from_name
+
+def send_caretaker_welcome_email(to_email: str, first_name: str, last_name: str, temp_password: str, farm_name: str, owner_name: str) -> bool:
+    """
+    Dispatches a dedicated welcome email to newly created caretaker with their account credentials.
+    Supports either direct SMTP (zero template dependency) or EmailJS with a dedicated EMAILJS_WELCOME_TEMPLATE_ID.
+    NEVER reuses the password reset template to prevent misleading the user.
+    """
+    caretaker_full_name = f"{first_name} {last_name}".strip()
+    subject = f"Welcome to {farm_name} - Your Clucko Caretaker Login Credentials"
+
+    # Plain text version
+    text_content = (
+        f"Hello {caretaker_full_name},\n\n"
+        f"You have been added as an official Caretaker for '{farm_name}' by {owner_name} on the Clucko Gamefowl Health app.\n\n"
+        f"Your Caretaker Login Credentials:\n"
+        f"• Login Email: {to_email}\n"
+        f"• Temporary Password: {temp_password}\n"
+        f"• Assigned Farm: {farm_name}\n"
+        f"• Farm Owner: {owner_name}\n\n"
+        f"You can now open the Clucko app, log in using these credentials, and manage the flock.\n"
+        f"For security, please change your password after logging in.\n\n"
+        f"Best regards,\n"
+        f"The Clucko Team"
+    )
+
+    # Rich responsive HTML version (used by direct SMTP)
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f3f6f4; margin: 0; padding: 20px; }}
+        .card {{ max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06); border: 1px solid #e2e8e4; }}
+        .header {{ background: #1E3D2D; padding: 32px 24px; text-align: center; color: #ffffff; }}
+        .header h1 {{ margin: 0 0 6px 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }}
+        .header p {{ margin: 0; font-size: 14px; color: #C8E6C9; }}
+        .body {{ padding: 28px 24px; color: #2D3748; line-height: 1.6; font-size: 15px; }}
+        .credentials-box {{ background: #F7FAF8; border: 1px solid #D6EADF; border-radius: 12px; padding: 20px; margin: 20px 0; }}
+        .cred-row {{ display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #E2E8F0; }}
+        .cred-row:last-child {{ border-bottom: none; }}
+        .cred-label {{ font-weight: 600; color: #4A5568; font-size: 14px; }}
+        .cred-val {{ font-family: monospace; font-size: 15px; font-weight: 700; color: #1E3D2D; }}
+        .footer {{ padding: 20px 24px; text-align: center; font-size: 12px; color: #718096; background: #FAFBF9; border-top: 1px solid #EDF2F7; }}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <h1>Welcome to Clucko!</h1>
+          <p>Your Caretaker Account has been created</p>
+        </div>
+        <div class="body">
+          <p>Hello <b>{caretaker_full_name}</b>,</p>
+          <p>You have been assigned as an official Caretaker for <b>{farm_name}</b> by farm owner <b>{owner_name}</b>.</p>
+          <div class="credentials-box">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #4A5568; font-size: 14px; border-bottom: 1px dashed #E2E8F0; width: 44%;">Login Email:</td>
+                <td style="padding: 8px 0; font-family: monospace; font-size: 14px; font-weight: 700; color: #1E3D2D; text-align: right; border-bottom: 1px dashed #E2E8F0;">{to_email}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #4A5568; font-size: 14px; border-bottom: 1px dashed #E2E8F0;">Temporary Password:</td>
+                <td style="padding: 8px 0; font-family: monospace; font-size: 14px; font-weight: 700; color: #1E3D2D; text-align: right; border-bottom: 1px dashed #E2E8F0;">{temp_password}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #4A5568; font-size: 14px; border-bottom: 1px dashed #E2E8F0;">Assigned Farm:</td>
+                <td style="padding: 8px 0; font-size: 14px; font-weight: 700; color: #1E3D2D; text-align: right; border-bottom: 1px dashed #E2E8F0;">{farm_name}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: 600; color: #4A5568; font-size: 14px;">Farm Owner:</td>
+                <td style="padding: 8px 0; font-size: 14px; font-weight: 700; color: #1E3D2D; text-align: right;">{owner_name}</td>
+              </tr>
+            </table>
+          </div>
+          <p>You can now open the Clucko app on your mobile device, log in with these credentials, and begin monitoring flock health, recording AI scans, and tracking farm tasks.</p>
+          <p style="font-size: 13px; color: #718096; margin-top: 20px;"><i>Security tip: We recommend updating your password in the Profile tab after your initial sign in.</i></p>
+        </div>
+        <div class="footer">
+          Clucko Gamefowl Disease Detector • Davao City, Philippines
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+
+    # 1. First priority: Direct SMTP if configured in .env
+    smtp_user, smtp_password, smtp_host, smtp_port, smtp_from_name = get_smtp_credentials()
+    if smtp_user and smtp_password:
+        try:
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = f"{smtp_from_name} <{smtp_user}>"
+            msg['To'] = to_email
+
+            part1 = MIMEText(text_content, 'plain')
+            part2 = MIMEText(html_content, 'html')
+            msg.attach(part1)
+            msg.attach(part2)
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, to_email, msg.as_string())
+
+            print(f"[AUTH] Caretaker welcome email dispatched directly via SMTP ({smtp_user}) to {to_email}")
+            return True
+        except Exception as smtp_err:
+            print(f"[AUTH] Direct SMTP dispatch failed: {smtp_err}")
+
+    # 2. Second priority: EmailJS with dedicated EMAILJS_WELCOME_TEMPLATE_ID
+    if EMAILJS_WELCOME_TEMPLATE_ID:
+        try:
+            import requests
+            payload = {
+                'service_id': EMAILJS_SERVICE_ID,
+                'template_id': EMAILJS_WELCOME_TEMPLATE_ID,
+                'user_id': EMAILJS_USER_ID,
+                'template_params': {
+                    'to_email': to_email,
+                    'email': to_email,
+                    'user_email': to_email,
+                    'login_email': to_email,
+                    'user_name': caretaker_full_name,
+                    'caretaker_name': caretaker_full_name,
+                    'name': caretaker_full_name,
+                    'to_name': caretaker_full_name,
+                    'farm_name': farm_name,
+                    'farm': farm_name,
+                    'owner_name': owner_name,
+                    'farm_owner': owner_name,
+                    'temp_password': temp_password,
+                    'password': temp_password,
+                    'subject': subject,
+                    'message': text_content,
+                },
+            }
+            resp = requests.post(
+                'https://api.emailjs.com/api/v1.0/email/send',
+                headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
+                json=payload,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                print(f"[AUTH] Caretaker welcome email dispatched via EmailJS ({EMAILJS_WELCOME_TEMPLATE_ID}) to {to_email}")
+                return True
+            else:
+                print(f"[AUTH] EmailJS response status: {resp.status_code}, detail: {resp.text}")
+                if "template ID not found" in resp.text:
+                    print(f"[AUTH] [ACTION NEEDED] Please create template '{EMAILJS_WELCOME_TEMPLATE_ID}' in EmailJS dashboard: https://dashboard.emailjs.com/admin/templates")
+        except Exception as ejs_err:
+            print(f"[AUTH] EmailJS dispatch error: {ejs_err}")
+
+    # Note: We NEVER reuse EMAILJS_TEMPLATE_ID (Password Reset template) for caretaker welcome emails
+    # to avoid mixing password reset text with caretaker account credentials.
+    print(f"[AUTH] Caretaker created ({to_email}). Set SMTP_USER/SMTP_PASSWORD or EMAILJS_WELCOME_TEMPLATE_ID in .env for automated email delivery.")
+    return False
 
 # In-memory rate limit store: key -> [timestamp, ...]
 _RATE_LIMIT_STORE = defaultdict(list)
@@ -189,7 +380,7 @@ def record_login_notification(cur, db, user):
         cur.execute('''
             SELECT DISTINCT f.id FROM farms f
             LEFT JOIN farm_members fm ON fm.farm_id = f.id
-            WHERE f.owner_id = %s OR fm.user_id = %s
+            WHERE f.owner_id = %s OR (fm.user_id = %s AND (fm.is_active IS NULL OR fm.is_active = TRUE))
         ''', (user_id, user_id))
         farm_rows = cur.fetchall()
         farm_ids = [r['id'] if isinstance(r, dict) else r[0] for r in farm_rows]
@@ -272,6 +463,7 @@ def login():
         }, SECRET_KEY, algorithm='HS256')
 
         user.pop('password_hash', None)
+        record_user_activity(user['id'])
         return jsonify({
             'success': True,
             'token': token,
@@ -410,6 +602,7 @@ def google_auth():
 
         if user:
             user.pop('password_hash', None)
+        record_user_activity(user_id)
 
         return jsonify({
             'success': True,
@@ -491,9 +684,35 @@ def create_caretaker():
             cur.execute('''
                 INSERT INTO farm_members (farm_id, user_id, role)
                 VALUES (%s, %s, 'caretaker')
-            ''', (d['farm_id'], caretaker_id))
+            ''', (farm_id, caretaker_id))
+
+            # Fetch farm name and owner name for welcome notification & email
+            cur.execute('SELECT farm_name FROM farms WHERE id=%s', (farm_id,))
+            f_row = cur.fetchone()
+            farm_name = f_row['farm_name'] if f_row and f_row.get('farm_name') else 'Assigned Farm'
+
+            cur.execute("SELECT CONCAT(first_name, ' ', COALESCE(last_name, '')) AS name FROM users WHERE id=%s", (request.user_id,))
+            o_row = cur.fetchone()
+            owner_name = o_row['name'].strip() if o_row and o_row.get('name') else 'Farm Owner'
+
+            # Insert welcome notification for newly created caretaker
+            welcome_msg = f"Welcome to Clucko, {first_name}! You have been assigned as a Caretaker for '{farm_name}' by {owner_name}. You can now view and care for the flock."
+            cur.execute('''
+                INSERT INTO notifications (farm_id, user_id, title, message, type)
+                VALUES (%s, %s, 'Welcome to Clucko!', %s, 'success')
+            ''', (farm_id, caretaker_id, welcome_msg))
 
             db.commit()
+
+            # Dispatch invitation email so caretaker knows their account is created
+            email_sent = send_caretaker_welcome_email(
+                to_email=email_clean,
+                first_name=first_name,
+                last_name=last_name,
+                temp_password=password,
+                farm_name=farm_name,
+                owner_name=owner_name
+            )
 
             cur.execute('''
                 SELECT id, first_name, last_name, email, phone_number, role
@@ -501,11 +720,17 @@ def create_caretaker():
             ''', (caretaker_id,))
             caretaker = cur.fetchone()
 
-        return jsonify({'success': True, 'caretaker': caretaker})
+        return jsonify({'success': True, 'caretaker': caretaker, 'email_sent': email_sent})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         db.close()
+
+@app.route('/api/auth/heartbeat', methods=['GET', 'POST'])
+@token_required
+def auth_heartbeat():
+    record_user_activity(request.user_id)
+    return jsonify({'success': True, 'user_id': request.user_id})
 
 @app.route('/api/auth/profile', methods=['GET'])
 @token_required
@@ -779,6 +1004,25 @@ def send_reset_code_api():
         'attempts': 0
     }
 
+    # Persist to dedicated password_reset_codes table so codes survive server restarts
+    # without touching or locking the users table
+    db_reset = None
+    try:
+        db_reset = get_db()
+        with db_reset.cursor() as cur:
+            cur.execute('''
+                INSERT INTO password_reset_codes (email, code, expires_at, attempts)
+                VALUES (%s, %s, NOW() + INTERVAL '15 MINUTE', 0)
+                ON CONFLICT (email) DO UPDATE 
+                SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, attempts = 0
+            ''', (email, code))
+            db_reset.commit()
+    except Exception as db_err:
+        print(f"[AUTH] DB reset code persist warning: {db_err}")
+    finally:
+        if db_reset:
+            db_reset.close()
+
     try:
         resp = requests.post(
             'https://api.emailjs.com/api/v1.0/email/send',
@@ -809,7 +1053,7 @@ def send_reset_code_api():
 @app.route('/api/auth/reset-password', methods=['POST'])
 def reset_password():
     ip = request.remote_addr or 'unknown'
-    if is_rate_limited(f"reset_pw_ip:{ip}", max_requests=10, window_seconds=60):
+    if is_rate_limited(f"reset_pw_ip:{ip}", max_requests=15, window_seconds=60):
         return jsonify({'error': 'Too many reset attempts. Please wait a moment.'}), 429
 
     d = request.json or {}
@@ -827,24 +1071,68 @@ def reset_password():
         return jsonify({'error': 'Verification code is required'}), 400
 
     record = _RESET_CODES.get(email)
-    if not record:
-        return jsonify({'error': 'No active verification code found for this email. Please request a new code.'}), 400
+    valid_code = False
 
-    if time.time() > record['expires_at']:
-        _RESET_CODES.pop(email, None)
-        return jsonify({'error': 'Verification code has expired. Please request a new code.'}), 400
+    if record:
+        if time.time() > record['expires_at']:
+            _RESET_CODES.pop(email, None)
+        elif record.get('attempts', 0) >= 10:
+            _RESET_CODES.pop(email, None)
+            return jsonify({'error': 'Too many failed verification attempts. Please request a new code.'}), 429
+        elif hmac.compare_digest(str(record['code']).strip(), str(code).strip()):
+            valid_code = True
+        else:
+            record['attempts'] = record.get('attempts', 0) + 1
 
-    if record['attempts'] >= 5:
-        _RESET_CODES.pop(email, None)
-        return jsonify({'error': 'Too many failed verification attempts. Please request a new code.'}), 429
+    # Check dedicated password_reset_codes table fallback if memory record missing or refreshed
+    if not valid_code:
+        db_chk = None
+        try:
+            db_chk = get_db()
+            with db_chk.cursor() as cur:
+                cur.execute(
+                    'SELECT code, expires_at, attempts FROM password_reset_codes WHERE LOWER(email) = %s',
+                    (email,)
+                )
+                r_code = cur.fetchone()
+                if r_code:
+                    stored_code = str(r_code['code']).strip()
+                    stored_exp = r_code.get('expires_at')
+                    attempts = r_code.get('attempts') or 0
+                    if attempts >= 10:
+                        return jsonify({'error': 'Too many failed verification attempts. Please request a new code.'}), 429
+                    is_expired = False
+                    if stored_exp:
+                        from datetime import datetime
+                        if isinstance(stored_exp, datetime) and datetime.utcnow() > stored_exp:
+                            is_expired = True
+                    if not is_expired and hmac.compare_digest(stored_code, str(code).strip()):
+                        valid_code = True
+                    else:
+                        cur.execute('UPDATE password_reset_codes SET attempts = attempts + 1 WHERE LOWER(email) = %s', (email,))
+                        db_chk.commit()
+        except Exception as db_verif_err:
+            print(f"[AUTH] DB reset code verification warning: {db_verif_err}")
+        finally:
+            if db_chk:
+                db_chk.close()
 
-    record['attempts'] += 1
+    if not valid_code:
+        return jsonify({'error': 'Invalid or expired verification code. Please request a new code.'}), 400
 
-    if not hmac.compare_digest(record['code'], code):
-        return jsonify({'error': 'Invalid verification code. Please check and try again.'}), 400
-
-    # Single-use: immediately invalidate the code upon successful verification
+    # Invalidate code upon successful verification (single-use)
     _RESET_CODES.pop(email, None)
+    db_cleanup = None
+    try:
+        db_cleanup = get_db()
+        with db_cleanup.cursor() as cur:
+            cur.execute('DELETE FROM password_reset_codes WHERE LOWER(email) = %s', (email,))
+            db_cleanup.commit()
+    except Exception:
+        pass
+    finally:
+        if db_cleanup:
+            db_cleanup.close()
 
     pw_hash = hash_password(new_password)
 

@@ -242,7 +242,7 @@ def token_required(f):
             if not user_id:
                 return jsonify({'error': 'Invalid token'}), 401
             request.user_id = user_id
-            request.user_role = data.get('role', 'caretaker')
+            request.user_role = data.get('role', 'owner')
             record_user_activity(user_id)
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token expired'}), 401

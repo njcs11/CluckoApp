@@ -4,7 +4,7 @@ import { deleteChickenForCurrentUser, loadChickensForCurrentUser, updateChickenF
 import { Farm, getFarmName, loadFarms } from '@/utils/farms';
 import { persistChickenPhoto } from '@/utils/photoStorage';
 import { checkIsGuestMode, GUEST_SAMPLE_CHICKENS } from '@/utils/guestMode';
-import { apiGetChickenHistory, apiGetGradcam, apiGetMyPlan } from '@/lib/api';
+import { apiGetChickenHistory, apiGetGradcam, apiGetMyPlan, apiGetProfile } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from "expo-router/react-navigation";
@@ -60,6 +60,7 @@ export default function ChickenDetailScreen() {
   const [historyModalTab, setHistoryModalTab] = useState<'photo' | 'gradcam'>('photo');
   const [generatingGradcam, setGeneratingGradcam] = useState(false);
   const [userSubscription, setUserSubscription] = useState<any>(null);
+  const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
 
   const canViewHeatmaps = Boolean(
     userSubscription?.has_heatmaps ||
@@ -227,6 +228,13 @@ export default function ChickenDetailScreen() {
   useEffect(() => {
     loadChickenDetails();
     loadScanHistory();
+    apiGetProfile()
+      .then((res) => {
+        if (res?.role) {
+          setUserRole(res.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
+        }
+      })
+      .catch(() => null);
     apiGetMyPlan()
       .then((res) => {
         if (res?.subscription) {
@@ -398,6 +406,15 @@ export default function ChickenDetailScreen() {
   };
 
   const handleMenuDeletePress = () => {
+    if (userRole === 'caretaker') {
+      notify({
+        title: 'Permission Denied',
+        message: 'Caretakers do not have permission to delete chickens.',
+        type: 'warning',
+      });
+      closeMenu();
+      return;
+    }
     setMenuStep('confirmDelete');
   };
 
@@ -490,6 +507,15 @@ export default function ChickenDetailScreen() {
 
   // --- Delete chicken ---
   const handleDeleteChicken = async () => {
+    if (userRole === 'caretaker') {
+      notify({
+        title: 'Permission Denied',
+        message: 'Caretakers do not have permission to delete chickens.',
+        type: 'warning',
+      });
+      closeMenu();
+      return;
+    }
     setDeleting(true);
     try {
       await deleteChickenForCurrentUser(String(id));
@@ -565,21 +591,23 @@ export default function ChickenDetailScreen() {
           {menuStep === 'menu' ? (
             <View style={[styles.dropdownMenu, { backgroundColor: colors.card, shadowColor: isDarkMode ? '#000' : '#333' }]}>
               <TouchableOpacity
-                style={[styles.dropdownItem, { borderBottomColor: colors.divider }]}
+                style={[styles.dropdownItem, userRole !== 'caretaker' && { borderBottomColor: colors.divider }]}
                 onPress={handleMenuEditPress}
                 activeOpacity={0.7}
               >
                 <Ionicons name="create-outline" size={18} color={colors.text} />
                 <Text style={[styles.dropdownItemText, { color: colors.text }]}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dropdownItem}
-                onPress={handleMenuDeletePress}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="trash-outline" size={18} color="#f44336" />
-                <Text style={[styles.dropdownItemText, { color: '#f44336' }]}>Delete</Text>
-              </TouchableOpacity>
+              {userRole !== 'caretaker' && (
+                <TouchableOpacity
+                  style={styles.dropdownItem}
+                  onPress={handleMenuDeletePress}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#f44336" />
+                  <Text style={[styles.dropdownItemText, { color: '#f44336' }]}>Delete</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             <Pressable

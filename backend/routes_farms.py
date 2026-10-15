@@ -255,12 +255,25 @@ def get_farm(farm_id):
             cur.execute('''
                 SELECT u.id, u.first_name, u.last_name, u.email,
                        u.phone_number, fm.role, fm.joined_at,
-                       (COALESCE(fm.is_active, TRUE) AND COALESCE(u.is_active, TRUE)) as is_active
+                       (COALESCE(fm.is_active, TRUE) AND COALESCE(u.is_active, TRUE)) as is_active,
+                       u.last_active_at,
+                       CASE
+                           WHEN u.id = %s THEN TRUE
+                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
+                           ELSE FALSE
+                       END as is_online,
+                       CASE
+                           WHEN u.id = %s THEN 'Online'
+                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
+                           WHEN u.last_active_at::date = CURRENT_DATE THEN 'Active today'
+                           WHEN u.last_active_at IS NOT NULL THEN TO_CHAR(u.last_active_at, 'Mon DD')
+                           ELSE 'Offline'
+                       END as online_status_text
                 FROM farm_members fm
                 JOIN users u ON fm.user_id = u.id
                 WHERE fm.farm_id = %s
                 ORDER BY fm.role DESC, fm.joined_at ASC
-            ''', (farm_id,))
+            ''', (request.user_id, request.user_id, farm_id))
             members = cur.fetchall()
 
             cur.execute('''
@@ -362,10 +375,12 @@ def get_farm_members(farm_id):
                        COALESCE(fm.is_active, u.is_active, TRUE) as is_active,
                        u.last_active_at,
                        CASE
+                           WHEN u.id = %s THEN TRUE
                            WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
                            ELSE FALSE
                        END as is_online,
                        CASE
+                           WHEN u.id = %s THEN 'Online'
                            WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
                            WHEN u.last_active_at::date = CURRENT_DATE THEN 'Active today'
                            WHEN u.last_active_at IS NOT NULL THEN TO_CHAR(u.last_active_at, 'Mon DD')
@@ -375,7 +390,7 @@ def get_farm_members(farm_id):
                 JOIN users u ON fm.user_id = u.id
                 WHERE fm.farm_id = %s
                 ORDER BY fm.role DESC
-            ''', (farm_id,))
+            ''', (request.user_id, request.user_id, farm_id))
             members = cur.fetchall()
         return jsonify(members)
     finally:
@@ -438,19 +453,44 @@ def remove_member(farm_id, member_id):
             if not farm or farm['owner_id'] != request.user_id:
                 return jsonify({'error': 'Only farm owner can remove members'}), 403
 
+            # 1. Remove membership from this farm
             cur.execute('''
                 DELETE FROM farm_members
                 WHERE farm_id=%s AND user_id=%s AND role='caretaker'
             ''', (farm_id, member_id))
 
-            # Deactivate caretaker user account so they cannot log in
+            # 2. Check if this caretaker is part of any other farms
             cur.execute('''
-                UPDATE users
-                SET is_active = FALSE
-                WHERE id=%s AND role='caretaker'
+                SELECT COUNT(*) as remaining_farms
+                FROM farm_members
+                WHERE user_id = %s
             ''', (member_id,))
+            row = cur.fetchone()
+            remaining = row['remaining_farms'] if row else 0
+
+            # 3. If caretaker is no longer assigned to any farms, completely delete the caretaker account
+            cur.execute('SELECT role, email FROM users WHERE id=%s', (member_id,))
+            target_user = cur.fetchone()
+
+            if target_user and target_user.get('role') == 'caretaker' and remaining == 0:
+                # Clean up dependent rows so foreign keys and data stay completely consistent
+                cur.execute('DELETE FROM notifications WHERE user_id=%s', (member_id,))
+                cur.execute('DELETE FROM notification_reads WHERE user_id=%s', (member_id,))
+                cur.execute('UPDATE tasks SET assigned_to_user_id=NULL WHERE assigned_to_user_id=%s', (member_id,))
+                cur.execute('UPDATE tasks SET created_by_user_id=%s WHERE created_by_user_id=%s', (farm['owner_id'], member_id))
+                cur.execute('UPDATE image_captures SET user_id=%s WHERE user_id=%s', (farm['owner_id'], member_id))
+                cur.execute('UPDATE health_history SET user_id=%s WHERE user_id=%s', (farm['owner_id'], member_id))
+                cur.execute('DELETE FROM qr_scans WHERE user_id=%s', (member_id,))
+                cur.execute('DELETE FROM subscriptions WHERE user_id=%s', (member_id,))
+                cur.execute('DELETE FROM subscription_transactions WHERE user_id=%s', (member_id,))
+                if target_user.get('email'):
+                    cur.execute('DELETE FROM password_reset_codes WHERE LOWER(email)=%s', (target_user['email'].lower(),))
+
+                # Fully delete caretaker user record
+                cur.execute('DELETE FROM users WHERE id=%s AND role=%s', (member_id, 'caretaker'))
+                print(f"[AUTH] Caretaker user {member_id} ({target_user.get('email')}) completely deleted from database.")
 
             db.commit()
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'message': 'Caretaker deleted successfully'})
     finally:
-        db.close()
+        db.close()

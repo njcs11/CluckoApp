@@ -750,10 +750,48 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
 
     cls = max(candidates, key=lambda c: c['top_prediction']['confidence'])
 
+    # Check anatomical prominence to detect module mismatch and improve accuracy
+    hsv_roi = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+    comb_mask = ((hsv_roi[:, :, 0] < 15) | (hsv_roi[:, :, 0] > 165)) & (hsv_roi[:, :, 1] > 60) & (hsv_roi[:, :, 2] > 50)
+    comb_ratio = float(comb_mask.mean())
+
+    detected_module = module
+    module_mismatch = False
+    module_notice = None
+
+    if module == 'wing' and comb_ratio >= 0.012:
+        try:
+            alt_candidates = [
+                _classify(rois['head'], models_dir, diseases_config, 'eye'),
+                _classify(rois['full'], models_dir, diseases_config, 'eye')
+            ]
+            alt_cls = max(alt_candidates, key=lambda c: c['top_prediction']['confidence'])
+            if alt_cls['top_prediction']['confidence'] >= 55.0 and alt_cls['uncertainty_ratio'] <= 0.88:
+                cls = alt_cls
+                detected_module = 'eye'
+                module_mismatch = True
+                module_notice = "Head/Eye detected: Clucko automatically adapted detection to the Eye module for higher diagnostic accuracy."
+        except Exception:
+            pass
+    elif module == 'eye' and comb_ratio < 0.004:
+        try:
+            alt_candidates = [
+                _classify(rois['wing'], models_dir, diseases_config, 'wing'),
+                _classify(rois['full'], models_dir, diseases_config, 'wing')
+            ]
+            alt_cls = max(alt_candidates, key=lambda c: c['top_prediction']['confidence'])
+            if alt_cls['top_prediction']['confidence'] >= 55.0 and alt_cls['uncertainty_ratio'] <= 0.88:
+                cls = alt_cls
+                detected_module = 'wing'
+                module_mismatch = True
+                module_notice = "Wing/Body detected: Clucko automatically adapted detection to the Wing module for higher diagnostic accuracy."
+        except Exception:
+            pass
+
     if cls['uncertainty_ratio'] > 0.88:
         return _rejection(
-            f"Model too uncertain (entropy={cls['uncertainty_ratio']:.2f})", module,
-            message="Image unclear or outside diagnostic scope. Try better lighting or a closer angle focusing strictly on the " + module + "."
+            f"Model too uncertain (entropy={cls['uncertainty_ratio']:.2f})", detected_module,
+            message="Image unclear or outside diagnostic scope. Try better lighting or a closer angle focusing strictly on the " + detected_module + "."
         )
 
     top = cls['top_prediction']
@@ -763,16 +801,20 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
     # Detection threshold & scope validation
     if top['confidence'] < 52.0 or (top['confidence'] < 60.0 and margin < 8.0):
         return _rejection(
-            f"Confidence too low ({top['confidence']}%)", module,
-            message=f"Detection confidence too low ({top['confidence']}%). Could not reliably diagnose within our verified disease scope for {module}. Try a clearer photo focusing on the {module}.",
+            f"Confidence too low ({top['confidence']}%)", detected_module,
+            message=f"Detection confidence too low ({top['confidence']}%). Could not reliably diagnose within our verified disease scope for {detected_module}. Try a clearer photo focusing on the {detected_module}.",
             all_predictions=cls['all_predictions']
         )
 
-    res = _build_success(cls, module)
+    res = _build_success(cls, detected_module)
+    res['module_mismatch'] = module_mismatch
+    res['original_module'] = module
+    res['detected_module'] = detected_module
+    res['module_notice'] = module_notice
 
     # Attach Grad-CAM heatmap visualization
     try:
-        model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
+        model_path = os.path.join(models_dir, f'gamefowl_model_{detected_module}.h5')
         if os.path.exists(model_path):
             tf, *_ = _load_tf()
             loaded_model = tf.keras.models.load_model(model_path)

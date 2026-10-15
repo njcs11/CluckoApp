@@ -46,13 +46,16 @@ const getBadge = (type: string, primaryColor: string) => {
   }
 };
 
-const formatRelative = (date: Date) => {
-  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (mins < 1) return 'now';
+const formatRelative = (date: any) => {
+  if (!date) return 'Just now';
+  const d = date instanceof Date ? date : new Date(date);
+  const diffMs = Math.max(0, Date.now() - d.getTime());
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
 export default function NotificationDetailModal({

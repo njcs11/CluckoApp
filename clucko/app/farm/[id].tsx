@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Share,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,6 +28,8 @@ import ChickenAvatar from '../../components/ui/ChickenAvatar';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import FarmIcon from '../../components/ui/FarmIcon';
 import ConfirmModal from '../../components/ui/ConfirmModal';
+import { FarmDetailSkeleton } from '../../components/ui/SkeletonLoaders';
+import { evaluatePasswordStrength, isValidEmail } from '@/utils/authValidation';
 import {
   apiGetFarm,
   apiGetProfile,
@@ -72,6 +75,8 @@ export default function FarmDetailScreen() {
   }, [handleBack]);
 
   const [userRole, setUserRole] = useState<'owner' | 'caretaker'>('owner');
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [farm, setFarm] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [chickens, setChickens] = useState<any[]>([]);
@@ -92,8 +97,31 @@ export default function FarmDetailScreen() {
     first_name: '', last_name: '',
     email: '', password: '', phone_number: '',
   });
+  const [formErrors, setFormErrors] = useState<{
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    phone_number?: string;
+    password?: string;
+  }>({});
+  const [createdCaretakerInfo, setCreatedCaretakerInfo] = useState<{
+    name: string;
+    email: string;
+    tempPassword: string;
+    farmName: string;
+  } | null>(null);
 
-  const setField = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const setField = (k: string, v: string) => {
+    if (formErrors[k as keyof typeof formErrors]) {
+      setFormErrors(prev => ({ ...prev, [k]: undefined }));
+    }
+    if (k === 'phone_number') {
+      const digitsOnly = v.replace(/[^0-9]/g, '').slice(0, 11);
+      setForm(f => ({ ...f, [k]: digitsOnly }));
+      return;
+    }
+    setForm(f => ({ ...f, [k]: v }));
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -134,8 +162,12 @@ export default function FarmDetailScreen() {
         setMembers(data.members || []);
         setChickens(data.chickens || []);
       }
-      if (profileData?.role) {
-        setUserRole(profileData.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
+      if (profileData) {
+        if (profileData.id) setCurrentUserId(profileData.id);
+        if (profileData.email) setCurrentUserEmail(profileData.email.toLowerCase());
+        if (profileData.role) {
+          setUserRole(profileData.role.toLowerCase() === 'caretaker' ? 'caretaker' : 'owner');
+        }
       }
     } catch (e: any) {
       console.error('Farm load error:', e);
@@ -171,34 +203,73 @@ export default function FarmDetailScreen() {
   };
 
   const handleAddCaretaker = async () => {
-    if (!form.first_name || !form.last_name || !form.email || !form.password) {
-      await notify({
-        title: 'Missing Information',
-        message: 'Please fill in first name, last name, email, and password.',
-        type: 'warning',
-      });
+    const errors: typeof formErrors = {};
+    const fn = form.first_name.trim();
+    const ln = form.last_name.trim();
+    const em = form.email.trim().toLowerCase();
+    const ph = form.phone_number.trim();
+    const pw = form.password;
+
+    if (!fn) {
+      errors.first_name = 'First name is required.';
+    } else if (fn.length < 2) {
+      errors.first_name = 'First name must be at least 2 characters.';
+    }
+
+    if (!ln) {
+      errors.last_name = 'Last name is required.';
+    } else if (ln.length < 2) {
+      errors.last_name = 'Last name must be at least 2 characters.';
+    }
+
+    if (!em) {
+      errors.email = 'Email address is required.';
+    } else if (!isValidEmail(em)) {
+      errors.email = 'Please enter a valid email address.';
+    }
+
+    if (ph) {
+      if (ph.length !== 11 || !ph.startsWith('09')) {
+        errors.phone_number = 'Phone number must be 11 digits starting with 09.';
+      }
+    }
+
+    if (!pw) {
+      errors.password = 'Password is required.';
+    } else if (pw.length < 8) {
+      errors.password = 'Password must be at least 8 characters.';
+    } else if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) {
+      errors.password = 'Password must contain at least 1 letter and 1 number.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
-    if (form.password.length < 6) {
-      await notify({
-        title: 'Invalid Password',
-        message: 'Password must be at least 6 characters.',
-        type: 'warning',
-      });
-      return;
-    }
+    setFormErrors({});
+
     setSaving(true);
     try {
       await apiCreateCaretaker({
         ...form,
+        first_name: fn,
+        last_name: ln,
+        email: em,
+        phone_number: ph,
         farm_id: Number(id),
       });
       setShowAddModal(false);
+      setCreatedCaretakerInfo({
+        name: `${fn} ${ln}`,
+        email: em,
+        tempPassword: pw,
+        farmName: farm?.farm_name || 'Assigned Farm',
+      });
       setForm({ first_name: '', last_name: '', email: '', password: '', phone_number: '' });
       await loadData();
       await notify({
         title: 'Caretaker Added',
-        message: `${form.first_name} ${form.last_name} has been assigned to this farm.`,
+        message: `${fn} ${ln} has been assigned to this farm.`,
         type: 'success',
       });
     } catch (e: any) {
@@ -312,8 +383,9 @@ export default function FarmDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar style="light" />
+        <FarmDetailSkeleton activeTab={activeTab} />
       </SafeAreaView>
     );
   }
@@ -515,9 +587,11 @@ export default function FarmDetailScreen() {
             ) : (
               caretakers.map((member: any) => {
                 const isActive = member.is_active !== false;
-                const isOnline = member.is_online === true;
-                const statusText = member.online_status_text || (isOnline ? 'Online' : 'Offline');
-                const presenceColor = isOnline ? '#4CAF50' : statusText === 'Active today' ? '#8BC34A' : '#9E9E9E';
+                const isCurrentUser = (currentUserId != null && member.id === currentUserId) ||
+                  (currentUserEmail != null && member.email?.toLowerCase() === currentUserEmail);
+                const isOnline = member.is_online === true || isCurrentUser;
+                const statusText = isOnline ? 'Online' : (member.online_status_text || 'Offline');
+                const presenceColor = isOnline ? '#4CAF50' : '#9E9E9E';
 
                 return (
                   <View
@@ -701,44 +775,123 @@ export default function FarmDetailScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>First Name *</Text>
                   <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    style={[
+                      styles.input,
+                      { color: colors.text, borderColor: formErrors.first_name ? '#e53935' : colors.border, backgroundColor: colors.background },
+                    ]}
                     placeholder="First Name"
                     placeholderTextColor={colors.textLight}
                     value={form.first_name}
                     onChangeText={v => setField('first_name', v)}
                   />
+                  {formErrors.first_name && (
+                    <Text style={{ color: '#e53935', fontSize: 11, marginTop: 4 }}>{formErrors.first_name}</Text>
+                  )}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Last Name *</Text>
                   <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                    style={[
+                      styles.input,
+                      { color: colors.text, borderColor: formErrors.last_name ? '#e53935' : colors.border, backgroundColor: colors.background },
+                    ]}
                     placeholder="Last Name"
                     placeholderTextColor={colors.textLight}
                     value={form.last_name}
                     onChangeText={v => setField('last_name', v)}
                   />
+                  {formErrors.last_name && (
+                    <Text style={{ color: '#e53935', fontSize: 11, marginTop: 4 }}>{formErrors.last_name}</Text>
+                  )}
                 </View>
               </View>
 
-              {[
-                { label: 'Email *', field: 'email', keyboard: 'email-address' as any, placeholder: 'caretaker@email.com', secure: false },
-                { label: 'Phone Number', field: 'phone_number', keyboard: 'phone-pad' as any, placeholder: '09XXXXXXXXX', secure: false },
-                { label: 'Password *', field: 'password', keyboard: 'default' as any, placeholder: 'Min. 6 characters', secure: true },
-              ].map(({ label, field, keyboard, placeholder, secure }) => (
-                <View key={field} style={{ marginBottom: 12 }}>
-                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</Text>
-                  <TextInput
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-                    placeholder={placeholder}
-                    placeholderTextColor={colors.textLight}
-                    value={(form as any)[field]}
-                    onChangeText={v => setField(field, v)}
-                    keyboardType={keyboard}
-                    secureTextEntry={secure}
-                    autoCapitalize="none"
-                  />
+              {/* Email */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email Address *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text, borderColor: formErrors.email ? '#e53935' : colors.border, backgroundColor: colors.background },
+                  ]}
+                  placeholder="caretaker@email.com"
+                  placeholderTextColor={colors.textLight}
+                  value={form.email}
+                  onChangeText={v => setField('email', v)}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                {formErrors.email && (
+                  <Text style={{ color: '#e53935', fontSize: 11, marginTop: 4 }}>{formErrors.email}</Text>
+                )}
+              </View>
+
+              {/* Phone Number */}
+              <View style={{ marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Phone Number (Optional)</Text>
+                  <Text style={{ fontSize: 11, color: colors.textLight }}>11 digits (09XXXXXXXXX)</Text>
                 </View>
-              ))}
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text, borderColor: formErrors.phone_number ? '#e53935' : colors.border, backgroundColor: colors.background },
+                  ]}
+                  placeholder="09XXXXXXXXX"
+                  placeholderTextColor={colors.textLight}
+                  value={form.phone_number}
+                  onChangeText={v => setField('phone_number', v)}
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                />
+                {formErrors.phone_number && (
+                  <Text style={{ color: '#e53935', fontSize: 11, marginTop: 4 }}>{formErrors.phone_number}</Text>
+                )}
+              </View>
+
+              {/* Password */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Temporary Password *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.text, borderColor: formErrors.password ? '#e53935' : colors.border, backgroundColor: colors.background },
+                  ]}
+                  placeholder="Min. 8 characters (letters & numbers)"
+                  placeholderTextColor={colors.textLight}
+                  value={form.password}
+                  onChangeText={v => setField('password', v)}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+                {/* Real-time Password Strength Bar matching Signup */}
+                {form.password.length > 0 && (
+                  <View style={{ marginTop: 6 }}>
+                    {(() => {
+                      const strength = evaluatePasswordStrength(form.password);
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0', overflow: 'hidden', flexDirection: 'row' }}>
+                            <View
+                              style={{
+                                width: strength.score === 1 ? '33%' : strength.score === 2 ? '66%' : '100%',
+                                height: '100%',
+                                backgroundColor: strength.color,
+                              }}
+                            />
+                          </View>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: strength.color }}>
+                            {strength.label}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
+                )}
+                {formErrors.password && (
+                  <Text style={{ color: '#e53935', fontSize: 11, marginTop: 4 }}>{formErrors.password}</Text>
+                )}
+              </View>
 
               {/* Farm assignment display */}
               <View style={[styles.farmAssignBox, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '30' }]}>
@@ -765,6 +918,104 @@ export default function FarmDetailScreen() {
 
               <View style={{ height: 20 }} />
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Created Caretaker Credentials Modal ────────────────────────────── */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={createdCaretakerInfo !== null}
+        onRequestClose={() => setCreatedCaretakerInfo(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.card, maxWidth: 380 }]}>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <View
+                style={{
+                  width: 58,
+                  height: 58,
+                  borderRadius: 29,
+                  backgroundColor: 'rgba(76, 175, 80, 0.14)',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 10,
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={36} color={colors.primary} />
+              </View>
+              <Text style={[styles.modalTitle, { color: colors.text, textAlign: 'center' }]}>
+                Caretaker Account Created!
+              </Text>
+              <Text style={{ fontSize: 12.5, color: colors.textLight, textAlign: 'center', marginTop: 4, lineHeight: 18 }}>
+                Login details have been dispatched to their Gmail. You can also share these credentials directly:
+              </Text>
+            </View>
+
+            <View
+              style={{
+                backgroundColor: isDarkMode ? '#14221A' : '#F7FAF8',
+                borderWidth: 1,
+                borderColor: isDarkMode ? 'rgba(143, 224, 176, 0.2)' : '#D6EADF',
+                borderRadius: 14,
+                padding: 14,
+                marginBottom: 18,
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, color: colors.textLight, fontWeight: '600' }}>Name:</Text>
+                <Text style={{ fontSize: 13, color: colors.text, fontWeight: '700' }}>{createdCaretakerInfo?.name}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, color: colors.textLight, fontWeight: '600' }}>Login Email:</Text>
+                <Text style={{ fontSize: 13, color: colors.primary, fontWeight: '700' }}>{createdCaretakerInfo?.email}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, color: colors.textLight, fontWeight: '600' }}>Password:</Text>
+                <Text style={{ fontSize: 13, color: '#E65100', fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                  {createdCaretakerInfo?.tempPassword}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, color: colors.textLight, fontWeight: '600' }}>Farm:</Text>
+                <Text style={{ fontSize: 13, color: colors.text, fontWeight: '600' }}>{createdCaretakerInfo?.farmName}</Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  {
+                    backgroundColor: isDarkMode ? '#1E2D24' : '#E8F5E9',
+                    borderWidth: 1,
+                    borderColor: isDarkMode ? '#2D5541' : '#C8E6C9',
+                    flex: 1,
+                    marginTop: 0,
+                    flexDirection: 'row',
+                    gap: 6,
+                  },
+                ]}
+                onPress={() => {
+                  Share.share({
+                    message: `Clucko Caretaker Login Credentials:\nName: ${createdCaretakerInfo?.name}\nEmail: ${createdCaretakerInfo?.email}\nPassword: ${createdCaretakerInfo?.tempPassword}\nFarm: ${createdCaretakerInfo?.farmName}\n\nDownload the Clucko app to log in and monitor the flock.`,
+                  });
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+                <Text style={[styles.saveBtnText, { color: colors.primary }]}>Share</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: colors.primary, flex: 1, marginTop: 0 }]}
+                onPress={() => setCreatedCaretakerInfo(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.saveBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

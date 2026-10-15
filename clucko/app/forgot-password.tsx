@@ -39,6 +39,21 @@ export default function ForgotPasswordScreen() {
   const [step, setStep] = useState<'email' | 'reset'>('email');
   const [loading, setLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    visible: boolean;
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showFeedback = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setFeedbackModal({ visible: true, type, title, message });
+  };
 
   // Step 1 — email
   const [email, setEmail] = useState(params.email || '');
@@ -87,9 +102,10 @@ export default function ForgotPasswordScreen() {
     );
     const sent = await sendResetCodeEmail(normalizedEmail, newCode);
     if (!sent) {
-      Alert.alert(
+      showFeedback(
         'Email Sending Failed',
-        'Could not send the verification code to your email. Please check your internet connection or email address and try again.'
+        'Could not send the verification code to your email. Please check your internet connection or email address and try again.',
+        'error'
       );
       return false;
     }
@@ -153,7 +169,7 @@ export default function ForgotPasswordScreen() {
     } catch (error) {
       console.error('Error sending reset code:', error);
       setLoading(false);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      showFeedback('Error', 'Something went wrong. Please try again.', 'error');
     }
   };
 
@@ -165,12 +181,16 @@ export default function ForgotPasswordScreen() {
       if (sentOk) {
         setCode('');
         setCodeError('');
-        Alert.alert('Code Sent', `A new verification code was sent to ${targetEmail}. Please check your inbox.`);
+        showFeedback(
+          'Code Sent',
+          `A new verification code was sent to ${targetEmail}. Please check your inbox.`,
+          'success'
+        );
       }
     } catch (error) {
       console.error('Error resending reset code:', error);
       setLoading(false);
-      Alert.alert('Error', 'Failed to resend verification code. Please try again.');
+      showFeedback('Error', 'Failed to resend verification code. Please try again.', 'error');
     }
   };
 
@@ -231,7 +251,7 @@ export default function ForgotPasswordScreen() {
         console.warn('Backend reset password error (fallback to local if demo):', apiErr);
         if (targetEmail !== DEMO_EMAIL) {
           setLoading(false);
-          Alert.alert('Reset Failed', apiErr?.message || 'Could not update password on server. Please try again.');
+          showFeedback('Reset Failed', apiErr?.message || 'Could not update password on server. Please try again.', 'error');
           return;
         }
       }
@@ -257,7 +277,7 @@ export default function ForgotPasswordScreen() {
     } catch (error) {
       console.error('Error resetting password:', error);
       setLoading(false);
-      Alert.alert('Error', 'Failed to reset password. Please try again.');
+      showFeedback('Error', 'Failed to reset password. Please try again.', 'error');
     }
   };
 
@@ -405,9 +425,61 @@ export default function ForgotPasswordScreen() {
               <Ionicons name="checkmark-circle" size={48} color={colors.primary} />
             </View>
             <Text style={[styles.successTitle, { color: colors.text }]}>Password Reset!</Text>
-            <Text style={[styles.successMessage, { color: colors.textSecondary }]}>Your password has been updated. Please login with your new password.</Text>
             <TouchableOpacity style={[styles.successButton, { backgroundColor: colors.primary }]} onPress={handleProceedToLogin} activeOpacity={0.85}>
               <Text style={[styles.successButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>Proceed to Login</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={feedbackModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFeedbackModal((prev) => ({ ...prev, visible: false }))}
+      >
+        <View style={styles.successOverlay}>
+          <View style={[styles.successCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
+            <View
+              style={[
+                styles.successIconCircle,
+                {
+                  width: 58,
+                  height: 58,
+                  borderRadius: 29,
+                  backgroundColor: feedbackModal.type === 'error' ? 'rgba(244, 67, 54, 0.14)' : colors.badgeBackground,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  feedbackModal.type === 'error'
+                    ? 'alert-circle-outline'
+                    : feedbackModal.type === 'success'
+                    ? 'mail-outline'
+                    : 'information-circle-outline'
+                }
+                size={32}
+                color={feedbackModal.type === 'error' ? '#f44336' : colors.primary}
+              />
+            </View>
+            <Text style={[styles.successTitle, { color: colors.text, fontSize: 19, marginTop: 8 }]}>
+              {feedbackModal.title}
+            </Text>
+            <Text style={[styles.successMessage, { color: colors.textSecondary, marginTop: 6, marginBottom: 20 }]}>
+              {feedbackModal.message}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.successButton,
+                { backgroundColor: colors.primary },
+              ]}
+              onPress={() => setFeedbackModal((prev) => ({ ...prev, visible: false }))}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.successButtonText, { color: isDarkMode ? '#0E1210' : '#fff' }]}>OK</Text>
             </TouchableOpacity>
           </View>
         </View>
