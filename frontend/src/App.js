@@ -147,8 +147,7 @@ function AppLayout() {
           <div className="sidebar-section-title">AI Vision Suite</div>
 
           <NavLink
-            to="/"
-            end
+            to="/detect"
             className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
             onClick={() => setMobileMenuOpen(false)}
             title="AI Vision Disease Detector — Real-Time Inference"
@@ -366,17 +365,18 @@ function AppLayout() {
 
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<DetectPage />} />
+            <Route path="/" element={<Navigate to="/admin" replace />} />
+            <Route path="/detect" element={<DetectPage />} />
             <Route path="/diseases" element={<DiseasesPage />} />
             <Route path="/dataset" element={<DatasetPage />} />
             <Route path="/train" element={<TrainPage />} />
             
-            {/* Admin Management Suite Routes (Protected) */}
-            <Route path="/admin" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-            <Route path="/admin/users" element={<AdminProtectedRoute><AdminUsersPage /></AdminProtectedRoute>} />
-            <Route path="/admin/subscriptions" element={<AdminProtectedRoute><AdminSubscriptionsPage /></AdminProtectedRoute>} />
-            <Route path="/admin/pricing" element={<AdminProtectedRoute><AdminPricingPage /></AdminProtectedRoute>} />
-            <Route path="/admin/audit-logs" element={<AdminProtectedRoute><AdminAuditLogsPage /></AdminProtectedRoute>} />
+            {/* Admin Management Suite Routes */}
+            <Route path="/admin" element={<AdminDashboardPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
+            <Route path="/admin/pricing" element={<AdminPricingPage />} />
+            <Route path="/admin/audit-logs" element={<AdminAuditLogsPage />} />
           </Routes>
         </main>
       </div>
@@ -392,7 +392,7 @@ export default function App() {
           <Routes>
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/login" element={<AdminLoginPage />} />
-            <Route path="/*" element={<AppLayout />} />
+            <Route path="/*" element={<AdminProtectedRoute><AppLayout /></AdminProtectedRoute>} />
           </Routes>
         </DetectProvider>
       </TrainProvider>
