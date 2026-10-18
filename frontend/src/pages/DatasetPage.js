@@ -20,12 +20,18 @@ import {
   Search,
   Sliders,
   Info,
-  Film,
-  Sparkles
+  Film
 } from 'lucide-react';
 import { DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, FeetModuleIcon, CombModuleIcon } from '../components/icons';
 import ConfirmModal from '../components/ConfirmModal';
 import './DatasetPage.css';
+
+const resolveImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const apiBase = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
+  return `${apiBase}${url}`;
+};
 
 export default function DatasetPage() {
   const [diseases, setDiseases] = useState([]);
@@ -55,8 +61,10 @@ export default function DatasetPage() {
   const [loadingGallery, setLoadingGallery] = useState(false);
   const [selectedImageKeys, setSelectedImageKeys] = useState(new Set());
   const [gallerySearch, setGallerySearch] = useState('');
-  const [lightboxIndex, setLightboxIndex] = useState(null); // index in filteredImages
   const [failedImages, setFailedImages] = useState(new Set());
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+
 
   // Load basic diseases, modules, and statistics
   const loadStats = async () => {
@@ -677,7 +685,7 @@ export default function DatasetPage() {
                 >
                   <div className="img-wrap">
                     <img
-                      src={img.url}
+                      src={resolveImageUrl(img.url)}
                       alt={img.filename}
                       loading="lazy"
                       onError={e => {
@@ -698,6 +706,7 @@ export default function DatasetPage() {
                       >
                         <ZoomIn size={15} />
                       </button>
+
                       <button
                         className="overlay-btn delete-btn"
                         title="Delete this image"
@@ -760,6 +769,7 @@ export default function DatasetPage() {
                 </span>
               </div>
               <div className="lightbox-header-actions">
+
                 <button
                   className="btn btn-danger btn-sm"
                   onClick={() => handleDeleteSingle(currentLightboxImg.filename)}
@@ -774,7 +784,7 @@ export default function DatasetPage() {
 
             <div className="lightbox-body">
               <img
-                src={currentLightboxImg.url}
+                src={resolveImageUrl(currentLightboxImg.url)}
                 alt={currentLightboxImg.filename}
                 className="lightbox-img"
               />
@@ -813,6 +823,8 @@ export default function DatasetPage() {
           </div>
         </div>
       )}
+
+
 
       <ConfirmModal
         {...confirmModal}

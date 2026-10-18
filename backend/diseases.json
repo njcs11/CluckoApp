@@ -3,42 +3,67 @@
     {
       "id": "infectious_coryza",
       "name": "Infectious Coryza",
-      "description": "Bacterial respiratory disease caused by Avibacterium paragallinarum",
+      "description": "Acute bacterial respiratory disease caused by Avibacterium paragallinarum",
       "symptoms": [
-        "watery_eyes",
+        "facial_swelling",
         "swollen_eyes",
-        "nasal_discharge",
-        "facial_swelling"
+        "watery_eyes",
+        "closed_swollen_eyes"
       ],
       "affected_parts": [
-        "eye"
+        "eye",
+        "peri_orbital_face"
       ],
       "module": "eye",
       "severity": "moderate",
-      "color": "#f59e0b"
+      "color": "#f59e0b",
+      "care_recommendations": [
+        {
+          "title": "Antimicrobial Treatment",
+          "detail": "Early stages can be managed with antibiotics (such as erythromycin, oxytetracycline, or sulfonamides) prescribed by a veterinarian."
+        },
+        {
+          "title": "Isolation and Biosecurity",
+          "detail": "Isolate sick birds immediately, practice an 'all-in, all-out' flock management system, and thoroughly clean and disinfect coops."
+        }
+      ]
     },
     {
       "id": "fowl_pox",
       "name": "Fowl Pox",
-      "description": "Viral disease causing lesions on skin and mucous membranes",
+      "description": "Viral disease caused by Avipoxvirus causing dry cutaneous lesions on unfeathered facial skin and eyelids",
       "symptoms": [
         "eye_lesions",
-        "cloudy_eye",
-        "skin_lesions",
-        "scabs"
+        "wart_like_nodules",
+        "scabs",
+        "yellow_bumps"
       ],
       "affected_parts": [
         "eye",
-        "skin"
+        "peri_orbital_skin"
       ],
       "module": "eye",
       "severity": "high",
-      "color": "#ef4444"
+      "color": "#ef4444",
+      "care_recommendations": [
+        {
+          "title": "No Direct Cure",
+          "detail": "There is no specific antiviral treatment for fowl pox. The dry cutaneous form usually resolves naturally in 2 to 4 weeks."
+        },
+        {
+          "title": "Supportive Care",
+          "detail": "Isolate sick birds, keep the coop clean, provide easy access to feed and water, and apply mild antiseptics or iodine on dry skin lesions. Broad-spectrum antibiotics may treat secondary bacterial infections. Do not pick at scabs to prevent spreading the virus."
+        },
+        {
+          "title": "Prevention",
+          "detail": "Vaccinate the flock using live attenuated fowl pox or pigeon pox vaccines (administered via wing-web puncture) and strictly control mosquito populations around the coop."
+        }
+      ]
     },
     {
       "id": "healthy_eye",
       "name": "Healthy Eye",
-      "description": "No disease detected - eyes appear clear, bright, and healthy",
+      "description": "No ocular disease detected - eyes appear bright, alert, and clear with normal peri-orbital skin",
       "symptoms": [
         "normal_eye"
       ],
@@ -47,12 +72,18 @@
       ],
       "module": "eye",
       "severity": "none",
-      "color": "#10b981"
+      "color": "#10b981",
+      "care_recommendations": [
+        {
+          "title": "Flock Maintenance",
+          "detail": "Maintain regular biosecurity, clean watering stations daily, and conduct routine ocular inspections every 7 days."
+        }
+      ]
     },
     {
       "id": "healthy_wing",
       "name": "Healthy Wing",
-      "description": "No disease detected - wings held tight, symmetrical, and healthy posture",
+      "description": "No postural or wing paralysis detected - wings held tight, symmetrical, and alert against the flank",
       "symptoms": [
         "normal_posture",
         "symmetrical_wings"
@@ -63,26 +94,51 @@
       ],
       "module": "wing",
       "severity": "none",
-      "color": "#10b981"
+      "color": "#10b981",
+      "care_recommendations": [
+        {
+          "title": "Optimal Fitness",
+          "detail": "Continue scheduled exercise and routine physical conditioning. Verify roosting bars are clean and free of rough edges."
+        }
+      ]
     },
     {
       "id": "newcastle_disease",
       "name": "Newcastle Disease",
-      "description": "Highly contagious viral disease causing drooping wings, twisted neck, and posture impairment",
+      "description": "Highly contagious viral disease caused by Avian Paramyxovirus Serotype 1 attacking the nervous system and causing wing drooping",
       "symptoms": [
         "drooping_wings",
         "severe_droop",
-        "wing_weakness",
-        "twisted_neck",
-        "imbalance"
+        "wing_weakness"
       ],
       "affected_parts": [
-        "wing",
-        "posture"
+        "wing"
       ],
       "module": "wing",
       "severity": "critical",
-      "color": "#dc2626"
+      "color": "#dc2626",
+      "care_recommendations": [
+        {
+          "title": "Strict Isolation",
+          "detail": "Move affected gamefowl immediately to a completely separate quarantine pen far away from healthy birds. NDV spreads rapidly through the air and dander from flapping wings."
+        },
+        {
+          "title": "Sanitize and Clean Housing",
+          "detail": "Wash down cages, feeders, and waterers with a reliable disinfectant (such as Virkon, bleach solution, or iodine-based cleaners)."
+        },
+        {
+          "title": "Supportive Care",
+          "detail": "Provide clean water mixed with electrolytes and water-soluble Vitamin B-complex for nervous system support. Place feed and water directly in front of the bird's breast so it does not have to walk."
+        },
+        {
+          "title": "Culling and Safe Disposal",
+          "detail": "If gamefowl is severely paralyzed or dying, cull the bird humanely. Never throw carcasses in rivers or open bins. Burn or bury deep in the ground (at least 3 feet down) away from water sources, coated with quicklime (apog)."
+        },
+        {
+          "title": "Emergency Vaccination",
+          "detail": "Immediately vaccinate all other healthy, asymptomatic gamefowl in your yard using a live NDV vaccine (such as LaSota strain) to boost immunity before exposure."
+        }
+      ]
     }
   ]
 }

@@ -205,7 +205,7 @@ export default function DetectPage() {
                   <div className="rejection-title">Not a Chicken</div>
                   <p className="rejection-message">{result.message}</p>
                   <div className="rejection-reason">{result.rejection_reason}</div>
-                  <button className="btn btn-secondary" style={{marginTop:12}} onClick={reset}>
+                  <button className="btn btn-secondary" style={{marginTop:12}} onClick={resetDetection}>
                     Try Again
                   </button>
                 </div>
@@ -318,20 +318,7 @@ export default function DetectPage() {
                 ))}
               </div>}
 
-              {/* Statutory Veterinary Medical Disclaimer (Philippine RA 9286) */}
-              {!result.rejected && (
-                <div className="card vet-disclaimer-card" style={{ marginTop: 14, borderLeft: '4px solid #f59e0b', background: 'rgba(245, 158, 11, 0.08)' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <AlertTriangle size={20} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
-                    <div style={{ fontSize: '12.5px', lineHeight: 1.5, color: '#d1d5db' }}>
-                      <strong style={{ color: '#fbbf24', display: 'block', marginBottom: 2 }}>
-                        Veterinary Medical Advisory &amp; Disclaimer (RA 9286)
-                      </strong>
-                      Clucko AI provides automated computer-vision screening for decision support only. It does not provide clinical veterinary diagnoses or prescribe treatments under Republic Act No. 9286. Always isolate symptomatic poultry in a biosecure coop and consult a licensed avian veterinarian.
-                    </div>
-                  </div>
-                </div>
-              )}
+
             </div>
           )}
         </div>

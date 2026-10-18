@@ -60,6 +60,7 @@ const mapChickenFromApi = (c: any) => {
     addedByName: c.added_by_name || c.addedByName || null,
     addedByRole: c.added_by_role || c.addedByRole || null,
     qrCode: c.qr_code,
+    latestCondition: c.latest_condition || c.condition || c.predicted_condition || null,
   };
 };
 

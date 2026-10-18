@@ -936,14 +936,22 @@ export default function SignupScreen() {
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Limitation of Liability & Warranty</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Subscriptions, Payments &amp; 7-Day Refund Grace Period</Text>
+                <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
+                  Subscriptions to Pro or Premium plans provide expanded flock capacity and advanced features. In accordance with consumer protection standards, users are entitled to request a full refund within seven (7) calendar days of transaction completion directly inside the app.{'\n\n'}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>MANDATORY CUTOFF:</Text> Once the 7-day grace period has passed, transactions become strictly non-refundable and cannot be approved or rolled back. Approved refunds are subject to selective rollback rules to safeguard all existing flock data.
+                </Text>
+              </View>
+
+              <View style={styles.legalSection}>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>6. Limitation of Liability &amp; Warranty</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
                   Under no circumstances will Clucko, its developers, or affiliates be liable for any bird mortality, flock infection spread, financial losses, or operational damages resulting from the use or inability to use this detection software.
                 </Text>
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>6. Eligibility & Governing Law</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>7. Eligibility &amp; Governing Law</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
                   Users must be at least 18 years of age. These terms are governed by the laws of the Republic of the Philippines, with exclusive venue in Davao City. For inquiries: jasphertadlan@gmail.com.
                 </Text>

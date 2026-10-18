@@ -272,15 +272,16 @@ def admin_required(f):
 
             try:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-                if payload.get('role') != 'admin':
+                if payload.get('role') not in ('admin', 'superadmin'):
                     return jsonify({'error': 'Administrator access required'}), 403
                 request.user_id = payload['user_id']
                 request.user_role = payload.get('role', 'admin')
-                return f(*args, **kwargs)
             except jwt.ExpiredSignatureError:
                 return jsonify({'error': 'Token expired'}), 401
             except Exception:
                 return jsonify({'error': 'Invalid or expired token'}), 401
+
+            return f(*args, **kwargs)
 
         # If no auth header was provided, check whether we are running in local/development mode
         # or if the request is from a local development environment with no admin key enforced

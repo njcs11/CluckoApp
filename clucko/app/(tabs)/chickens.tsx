@@ -85,6 +85,8 @@ type Bird = {
   imageKey?: string;
   photo?: string | null;
   dateAdded?: string;
+  latestCondition?: string | null;
+  condition?: string | null;
 };
 
 type HealthAlert = {
@@ -315,6 +317,19 @@ const loadScanHistory = async () => {
       };
     });
     setScanHistory(mapped);
+    if (data.scans && Array.isArray(data.scans)) {
+      setAllBirds((prev) =>
+        prev.map((b) => {
+          if (b.latestCondition) return b;
+          const match = data.scans.find(
+            (s: any) => String(s.chicken_id) === String(b.id) || s.qr_code === b.chickenId
+          );
+          return match && match.predicted_condition
+            ? { ...b, latestCondition: match.predicted_condition }
+            : b;
+        })
+      );
+    }
   } catch (error) {
     console.error('Error loading scan history:', error);
   }
@@ -784,35 +799,6 @@ useEffect(() => {
   // Status filtering now goes through getHealthStatus() so the filter
   // works no matter which field ('status' or 'healthStatus') is set, and
   // no matter its casing.
-  const getFilteredBirds = () => {
-    let filtered = allBirds;
-
-    if (selectedFarmFilter !== 'all') {
-      filtered = filtered.filter(
-        (bird) => String(bird.farmId) === String(selectedFarmFilter)
-      );
-    }
-
-    if (selectedStatusFilter !== 'all') {
-      filtered = filtered.filter(
-        (bird) => getHealthStatus(bird).toLowerCase() === selectedStatusFilter.toLowerCase()
-      );
-    }
-
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (bird) =>
-          bird.name?.toLowerCase().includes(query) ||
-          bird.chickenId?.toLowerCase().includes(query) ||
-          bird.id?.toString().includes(query) ||
-          getFarmName(farms, bird.farmId).toLowerCase().includes(query)
-      );
-    }
-
-    return filtered;
-  };
-
   // Farm-scoped chicken list:
   // If a specific farm is selected, stats, counts, and alerts reflect ONLY that farm's chickens.
   // If 'all' farms are selected, they reflect the overall flock.
@@ -829,6 +815,87 @@ useEffect(() => {
       return match && String(match.farmId) === String(selectedFarmFilter);
     });
   }, [healthAlerts, allBirds, selectedFarmFilter]);
+
+  // Specific disease and status filter options for the search bar funnel filter modal
+  const diseaseFilterOptions = useMemo(() => {
+    const total = farmBirds.length;
+    const healthy = farmBirds.filter((b) => getHealthStatus(b) === 'Healthy').length;
+    const coryza = farmBirds.filter((b) => {
+      const cond = (b.latestCondition || b.condition || '').toLowerCase();
+      return cond.includes('coryza');
+    }).length;
+    const fowlPox = farmBirds.filter((b) => {
+      const cond = (b.latestCondition || b.condition || '').toLowerCase();
+      return cond.includes('pox');
+    }).length;
+    const newcastle = farmBirds.filter((b) => {
+      const cond = (b.latestCondition || b.condition || '').toLowerCase();
+      return cond.includes('newcastle');
+    }).length;
+    const alerts = farmBirds.filter((b) => {
+      const h = getHealthStatus(b);
+      return h === 'Warning' || h === 'Critical';
+    }).length;
+
+    return [
+      { key: 'all', label: 'All Chickens', count: total, color: '#4CAF50' },
+      { key: 'healthy', label: 'Healthy Flock', count: healthy, color: '#4CAF50' },
+      { key: 'coryza', label: 'Infectious Coryza', count: coryza, color: '#FF9800' },
+      { key: 'fowl_pox', label: 'Fowl Pox', count: fowlPox, color: '#F44336' },
+      { key: 'newcastle', label: 'Newcastle Disease', count: newcastle, color: '#9C27B0' },
+      { key: 'alerts', label: 'Active Alerts', count: alerts, color: '#E53935' },
+    ];
+  }, [farmBirds]);
+
+  // Status & condition filtering: matches by healthStatus, latestCondition, or specific disease name
+  const getFilteredBirds = () => {
+    let filtered = farmBirds;
+
+    if (selectedStatusFilter !== 'all') {
+      const filterKey = selectedStatusFilter.toLowerCase();
+      filtered = filtered.filter((bird) => {
+        const cond = (bird.latestCondition || bird.condition || '').toLowerCase();
+        const health = getHealthStatus(bird).toLowerCase();
+
+        if (filterKey === 'healthy') {
+          return health === 'healthy' || cond.includes('healthy');
+        }
+        if (filterKey === 'coryza') {
+          return cond.includes('coryza');
+        }
+        if (filterKey === 'fowl_pox' || filterKey === 'fowlpox') {
+          return cond.includes('pox');
+        }
+        if (filterKey === 'newcastle') {
+          return cond.includes('newcastle');
+        }
+        if (filterKey === 'alerts') {
+          return health === 'warning' || health === 'critical';
+        }
+        if (filterKey === 'warning') {
+          return health === 'warning';
+        }
+        if (filterKey === 'critical') {
+          return health === 'critical';
+        }
+        return health === filterKey || cond.includes(filterKey);
+      });
+    }
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (bird) =>
+          bird.name?.toLowerCase().includes(query) ||
+          bird.chickenId?.toLowerCase().includes(query) ||
+          bird.id?.toString().includes(query) ||
+          (bird.latestCondition && bird.latestCondition.toLowerCase().includes(query)) ||
+          getFarmName(farms, bird.farmId).toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  };
 
   // Counts now go through the same getHealthStatus() helper used by Home
   // and Reports, and respect the active farm filter.
@@ -1338,6 +1405,7 @@ useEffect(() => {
                 <View style={styles.filterInfo}>
                   <Text style={[styles.filterInfoText, { color: colors.textSecondary }]}>
                     Showing {filteredBirds.length} result{filteredBirds.length === 1 ? '' : 's'}
+                    {selectedStatusFilter !== 'all' && ` (${diseaseFilterOptions.find((o) => o.key === selectedStatusFilter)?.label || selectedStatusFilter})`}
                   </Text>
                   <TouchableOpacity onPress={() => { handleStatusFilter('all'); setSearchQuery(''); }}>
                     <Text style={[styles.clearFilter, { color: colors.primary }]}>Clear Filters</Text>
@@ -1523,25 +1591,34 @@ useEffect(() => {
         onChooseLibrary={handleChickenPhotoFromLibrary}
       />
 
-      {/* Filter menu — same handleStatusFilter used by the stat cards, just
-          reached from the search bar's filter icon too. */}
+      {/* Filter menu — filtering by specific conditions (coryza, fowlpox, newcastle, healthy) or overall alerts */}
       <Modal animationType="fade" transparent visible={showFilterMenu} onRequestClose={() => setShowFilterMenu(false)}>
         <TouchableOpacity style={styles.dropdownOverlay} activeOpacity={1} onPress={() => setShowFilterMenu(false)}>
           <View style={[styles.dropdownSheet, { backgroundColor: colors.card, maxWidth: MAX_CONTENT_WIDTH, width: '90%' }]}>
-            <Text style={[styles.dropdownTitle, { color: colors.textLight }]}>FILTER BY STATUS</Text>
-            {stats.map((stat) => (
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Text style={[styles.dropdownTitle, { color: colors.textLight, marginBottom: 0 }]}>FILTER BY DISEASE & CONDITION</Text>
+              {selectedStatusFilter !== 'all' && (
+                <TouchableOpacity onPress={() => { handleStatusFilter('all'); setShowFilterMenu(false); }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>Reset All</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {diseaseFilterOptions.map((opt) => (
               <TouchableOpacity
-                key={stat.filter}
+                key={opt.key}
                 style={[styles.dropdownOptionRow, { borderBottomColor: colors.divider }]}
                 onPress={() => {
-                  handleStatusFilter(stat.filter);
+                  handleStatusFilter(opt.key);
                   setShowFilterMenu(false);
                 }}
                 activeOpacity={0.75}
               >
-                <View style={[styles.dropdownOptionDot, { backgroundColor: stat.color }]} />
-                <Text style={[styles.dropdownOptionText, { color: colors.text }]}>{stat.label}</Text>
-                {selectedStatusFilter === stat.filter && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                <View style={[styles.dropdownOptionDot, { backgroundColor: opt.color }]} />
+                <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={[styles.dropdownOptionText, { color: colors.text }]}>{opt.label}</Text>
+                  <Text style={{ fontSize: 12, color: colors.textLight, fontWeight: '600', marginRight: 6 }}>({opt.count})</Text>
+                </View>
+                {selectedStatusFilter === opt.key && <Ionicons name="checkmark" size={18} color={colors.primary} />}
               </TouchableOpacity>
             ))}
           </View>

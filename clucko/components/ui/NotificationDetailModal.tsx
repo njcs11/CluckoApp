@@ -21,7 +21,7 @@ interface NotificationDetailModalProps {
   notification: {
     title: string;
     message: string;
-    type: 'success' | 'warning' | 'info' | 'alert';
+    type: 'success' | 'warning' | 'info' | 'alert' | 'error';
     timestamp: Date;
     chickenId?: string;
     chickenName?: string;
@@ -40,6 +40,7 @@ const getBadge = (type: string, primaryColor: string) => {
     case 'warning':
       return { icon: 'alert-circle' as const, color: '#FF9800' };
     case 'alert':
+    case 'error':
       return { icon: 'warning' as const, color: '#f44336' };
     default:
       return { icon: 'information-circle' as const, color: primaryColor };

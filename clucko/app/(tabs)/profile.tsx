@@ -808,13 +808,17 @@ export default function ProfileScreen() {
               <Text style={[styles.statLabel, { color: colors.textLight }]}>{pluralize(stats.users, 'User')} </Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.divider }]} />
-            <View style={styles.statItem}>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => setShowNotifications(true)}
+              activeOpacity={0.75}
+            >
               <View style={[styles.statIconCircle, { backgroundColor: colors.primary + '18' }]}>
                 <Ionicons name="notifications-outline" size={15} color={colors.primary} />
               </View>
               <Text style={[styles.statValue, { color: colors.text }]}>{stats.alerts}</Text>
               <Text style={[styles.statLabel, { color: colors.textLight }]}>{pluralize(stats.alerts, 'Alert')} </Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           <AnimatedSegmentedTabs

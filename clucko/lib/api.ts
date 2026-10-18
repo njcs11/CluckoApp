@@ -550,7 +550,7 @@ export const apiCreateNotification = async (data: {
   farm_id?: number;
   title: string;
   message: string;
-  type?: 'success' | 'warning' | 'info' | 'alert';
+  type?: 'success' | 'warning' | 'info' | 'alert' | 'error';
   chicken_id?: number;
   chicken_name?: string;
 }) => {
@@ -1104,6 +1104,63 @@ export const apiDevToggleSubscription = async (
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || "State toggle failed");
+  return json;
+};
+
+export const apiSubmitRefundRequest = async (reason: string, details?: string) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/subscriptions/request-refund`, {
+    method: "POST",
+    headers: await headers(),
+    body: JSON.stringify({ reason, details: details || '' }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to submit refund request");
+  return json;
+};
+
+export const apiGetMyRefundStatus = async () => {
+  const token = await getToken();
+  if (!token) return null;
+  const API_URL = await getApiUrl();
+  try {
+    const res = await fetch(`${API_URL}/api/subscriptions/my-refund-status`, {
+      headers: await headers(),
+    });
+    const json = await res.json();
+    if (!res.ok) return null;
+    return json;
+  } catch {
+    return null;
+  }
+};
+
+export const apiGetPendingCheckout = async () => {
+  const token = await getToken();
+  if (!token) return null;
+  const API_URL = await getApiUrl();
+  try {
+    const res = await fetch(`${API_URL}/api/subscriptions/pending-checkout`, {
+      headers: await headers(),
+    });
+    const json = await res.json();
+    if (!res.ok) return null;
+    return json;
+  } catch (err) {
+    console.warn("apiGetPendingCheckout error:", err);
+    return null;
+  }
+};
+
+export const apiCancelPendingCheckout = async (sessionId?: string) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/subscriptions/cancel-pending-checkout`, {
+    method: "POST",
+    headers: await headers(),
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to cancel pending checkout");
   return json;
 };
 

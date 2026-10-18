@@ -28,6 +28,10 @@ def get_chickens():
                 cur.execute('''
                     SELECT c.id, c.user_id, c.farm_id, c.qr_code, c.chicken_name, c.location,
                            c.status, c.status_color, c.created_at, c.updated_at,
+                           (SELECT dr.predicted_condition FROM image_captures ic 
+                            JOIN detection_results dr ON dr.image_id = ic.id 
+                            WHERE ic.chicken_id = c.id 
+                            ORDER BY ic.capture_datetime DESC LIMIT 1) AS latest_condition,
                            COALESCE(
                                NULLIF(c.photo_url, ''),
                                (SELECT ic.image_url FROM image_captures ic 
@@ -49,6 +53,10 @@ def get_chickens():
                 cur.execute('''
                     SELECT c.id, c.user_id, c.farm_id, c.qr_code, c.chicken_name, c.location,
                            c.status, c.status_color, c.created_at, c.updated_at,
+                           (SELECT dr.predicted_condition FROM image_captures ic 
+                            JOIN detection_results dr ON dr.image_id = ic.id 
+                            WHERE ic.chicken_id = c.id 
+                            ORDER BY ic.capture_datetime DESC LIMIT 1) AS latest_condition,
                            COALESCE(
                                NULLIF(c.photo_url, ''),
                                (SELECT ic.image_url FROM image_captures ic 

@@ -19,7 +19,7 @@ export interface NotificationItem {
   farm_name?: string;
   title: string;
   message: string;
-  type: 'success' | 'warning' | 'info' | 'alert';
+  type: 'success' | 'warning' | 'info' | 'alert' | 'error';
   timestamp: Date;
   read: boolean;
   chickenId?: string;
@@ -55,7 +55,7 @@ interface NotifyInput {
   farm_id?: number;
   title: string;
   message: string;
-  type: 'success' | 'warning' | 'info' | 'alert';
+  type: 'success' | 'warning' | 'info' | 'alert' | 'error';
   chickenId?: string;
   chickenName?: string;
   skipBackendSync?: boolean;

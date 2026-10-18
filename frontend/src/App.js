@@ -1,15 +1,65 @@
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
-import { Camera, Database, Cpu, FlaskConical, Menu, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { Toaster, toast } from 'react-hot-toast';
+import axios from 'axios';
+import { 
+  Camera, Database, Cpu, FlaskConical, Menu, X,
+  LayoutDashboard, Users, CreditCard, Sliders, ShieldCheck, LogOut,
+  Sun, Moon
+} from 'lucide-react';
 import './App.css';
 import DetectPage from './pages/DetectPage';
 import DiseasesPage from './pages/DiseasesPage';
 import TrainPage from './pages/TrainPage';
 import DatasetPage from './pages/DatasetPage';
+import AdminDashboardPage from './pages/AdminDashboardPage';
+import AdminUsersPage from './pages/AdminUsersPage';
+import AdminSubscriptionsPage from './pages/AdminSubscriptionsPage';
+import AdminPricingPage from './pages/AdminPricingPage';
+import AdminAuditLogsPage from './pages/AdminAuditLogsPage';
+import AdminLoginPage from './pages/AdminLoginPage';
 import { TrainProvider, useTrain } from './context/TrainContext';
 import { DetectProvider, useDetect } from './context/DetectContext';
 import { CluckoBrandBadge, PipelineActivityIcon, EyeModuleIcon, WingModuleIcon } from './components/icons';
+
+// Configure Axios base URL for local development vs cloud production (Vercel -> Render)
+const API_BASE = process.env.REACT_APP_API_URL || '';
+if (API_BASE) {
+  axios.defaults.baseURL = API_BASE.replace(/\/$/, '');
+}
+
+// Configure Axios JWT injection for platform administration
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('clucko_admin_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Auto-redirect on 401 unauthorized
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401 && window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') {
+      localStorage.removeItem('clucko_admin_token');
+      localStorage.removeItem('clucko_admin_user');
+      window.location.href = '/admin/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+function AdminProtectedRoute({ children }) {
+  const token = localStorage.getItem('clucko_admin_token');
+  const location = useLocation();
+
+  if (!token) {
+    return <Navigate to="/admin/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+}
 
 function AppLayout() {
   const { trainStatus, isAnyTrainingRunning } = useTrain();
@@ -17,6 +67,31 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('clucko_admin_theme') || 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('clucko_admin_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  let adminUser = null;
+  try {
+    const raw = localStorage.getItem('clucko_admin_user');
+    if (raw) adminUser = JSON.parse(raw);
+  } catch (_) {}
+
+  const handleAdminLogout = () => {
+    localStorage.removeItem('clucko_admin_token');
+    localStorage.removeItem('clucko_admin_user');
+    toast.success('Signed out of Administrator Panel');
+    navigate('/admin/login');
+  };
 
   const activeModule = trainStatus.eye.status === 'running' ? 'eye' : (trainStatus.wing.status === 'running' ? 'wing' : null);
   const activeProgress = activeModule ? trainStatus[activeModule]?.progress || 0 : 0;
@@ -69,11 +144,14 @@ function AppLayout() {
         </div>
 
         <nav className="sidebar-nav">
+          <div className="sidebar-section-title">AI Vision Suite</div>
+
           <NavLink
             to="/"
             end
             className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
             onClick={() => setMobileMenuOpen(false)}
+            title="AI Vision Disease Detector — Real-Time Inference"
           >
             <Camera size={17} className="nav-icon" />
             <span>Detect</span>
@@ -89,6 +167,7 @@ function AppLayout() {
             to="/diseases"
             className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
             onClick={() => setMobileMenuOpen(false)}
+            title="Gamefowl Disease Knowledge Base & Diagnostic Library"
           >
             <FlaskConical size={17} className="nav-icon" />
             <span>Diseases</span>
@@ -98,6 +177,7 @@ function AppLayout() {
             to="/dataset"
             className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
             onClick={() => setMobileMenuOpen(false)}
+            title="Training Image Repository & Dataset Management"
           >
             <Database size={17} className="nav-icon" />
             <span>Dataset</span>
@@ -107,6 +187,7 @@ function AppLayout() {
             to="/train"
             className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
             onClick={() => setMobileMenuOpen(false)}
+            title="MobileNetV2 Deep Learning Training Pipeline"
           >
             <Cpu size={17} className="nav-icon" />
             <span>Train Model</span>
@@ -116,6 +197,59 @@ function AppLayout() {
                 <span>{activeProgress}%</span>
               </span>
             )}
+          </NavLink>
+
+          <div className="sidebar-section-title admin-divider">Control Center</div>
+
+          <NavLink
+            to="/admin"
+            end
+            className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
+            onClick={() => setMobileMenuOpen(false)}
+            title="Executive Analytics, Revenue Charts & Financial Intelligence"
+          >
+            <LayoutDashboard size={17} className="nav-icon" />
+            <span>Overview & KPIs</span>
+          </NavLink>
+
+          <NavLink
+            to="/admin/users"
+            className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
+            onClick={() => setMobileMenuOpen(false)}
+            title="User Accounts, Role Management & Admin Onboarding"
+          >
+            <Users size={17} className="nav-icon" />
+            <span>User Accounts</span>
+          </NavLink>
+
+          <NavLink
+            to="/admin/subscriptions"
+            className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
+            onClick={() => setMobileMenuOpen(false)}
+            title="Subscription Ledgers, Payment Transactions & Refund Processing"
+          >
+            <CreditCard size={17} className="nav-icon" />
+            <span>Billing & Refunds</span>
+          </NavLink>
+
+          <NavLink
+            to="/admin/pricing"
+            className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
+            onClick={() => setMobileMenuOpen(false)}
+            title="Plan Pricing Matrix & Quota Configuration"
+          >
+            <Sliders size={17} className="nav-icon" />
+            <span>Pricing & Config</span>
+          </NavLink>
+
+          <NavLink
+            to="/admin/audit-logs"
+            className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}
+            onClick={() => setMobileMenuOpen(false)}
+            title="Immutable Forensic Audit Trail & BIR-Compliant Security Logs"
+          >
+            <ShieldCheck size={17} className="nav-icon" />
+            <span>Audit Trail</span>
           </NavLink>
         </nav>
 
@@ -132,16 +266,63 @@ function AppLayout() {
           </div>
         )}
 
+        {adminUser && (
+          <div 
+            className="sidebar-admin-profile"
+            title={`Active Session: ${adminUser.full_name || 'Admin'} (${adminUser.email}) — ${adminUser.is_superadmin ? 'SuperAdmin Full Root Authority' : 'Authorized Administrator'}`}
+          >
+            <div className="admin-avatar-small" title={adminUser.is_superadmin ? 'SuperAdmin Privileges Active' : 'Administrator'}>
+              {adminUser.is_superadmin ? '⚡' : (adminUser.first_name?.[0] || 'A')}
+            </div>
+            <div className="admin-profile-info">
+              <div className="admin-name-row">
+                <span className="admin-profile-name" title={adminUser.full_name || adminUser.email}>
+                  {adminUser.full_name || adminUser.email}
+                </span>
+                <span 
+                  className={`admin-role-badge ${adminUser.is_superadmin ? 'superadmin' : 'admin'}`}
+                  title={adminUser.is_superadmin ? 'SuperAdmin Root Authority' : 'Standard Administrator'}
+                >
+                  {adminUser.is_superadmin ? 'SUPER' : 'ADMIN'}
+                </span>
+              </div>
+              <span className="admin-profile-email" title={adminUser.email}>
+                {adminUser.email}
+              </span>
+            </div>
+            <button
+              className="admin-logout-btn"
+              onClick={handleAdminLogout}
+              title="Sign Out of Administrator Panel"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="sidebar-footer">
           <div className="footer-system-status">
-            <span className="status-indicator-dot online" />
-            <span className="footer-status-label">Clucko AI Core</span>
+            <div className="status-label-group">
+              <span className="status-indicator-dot online" />
+              <span className="footer-status-label">Clucko AI Core</span>
+            </div>
+            <button 
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? (
+                <Sun size={13} className="theme-icon sun" />
+              ) : (
+                <Moon size={13} className="theme-icon moon" />
+              )}
+            </button>
           </div>
           <div className="footer-version-row">
             <span className="footer-badge">v2.1 MobileNetV2</span>
             <span className="footer-sub-text">Autonomous Suite</span>
           </div>
-
         </div>
       </aside>
 
@@ -189,6 +370,13 @@ function AppLayout() {
             <Route path="/diseases" element={<DiseasesPage />} />
             <Route path="/dataset" element={<DatasetPage />} />
             <Route path="/train" element={<TrainPage />} />
+            
+            {/* Admin Management Suite Routes (Protected) */}
+            <Route path="/admin" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+            <Route path="/admin/users" element={<AdminProtectedRoute><AdminUsersPage /></AdminProtectedRoute>} />
+            <Route path="/admin/subscriptions" element={<AdminProtectedRoute><AdminSubscriptionsPage /></AdminProtectedRoute>} />
+            <Route path="/admin/pricing" element={<AdminProtectedRoute><AdminPricingPage /></AdminProtectedRoute>} />
+            <Route path="/admin/audit-logs" element={<AdminProtectedRoute><AdminAuditLogsPage /></AdminProtectedRoute>} />
           </Routes>
         </main>
       </div>
@@ -201,7 +389,11 @@ export default function App() {
     <BrowserRouter>
       <TrainProvider>
         <DetectProvider>
-          <AppLayout />
+          <Routes>
+            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path="/login" element={<AdminLoginPage />} />
+            <Route path="/*" element={<AppLayout />} />
+          </Routes>
         </DetectProvider>
       </TrainProvider>
     </BrowserRouter>

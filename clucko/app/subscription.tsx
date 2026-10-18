@@ -5,9 +5,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   BackHandler,
   Linking,
   Modal,
@@ -16,6 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -26,6 +28,10 @@ import {
   apiVerifyPayment,
   apiCreateChicken,
   apiSaveScan,
+  apiSubmitRefundRequest,
+  apiGetMyRefundStatus,
+  apiGetPendingCheckout,
+  apiCancelPendingCheckout,
 } from '../lib/api';
 import { resizeAndCompress, photoUriToBase64 } from '@/utils/photoStorage';
 
@@ -37,6 +43,7 @@ export default function SubscriptionScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [subData, setSubData] = useState<any>(null);
+  const [availablePlans, setAvailablePlans] = useState<any>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const [selectedPlan, setSelectedPlan] = useState<'pro' | 'premium'>('pro');
@@ -69,6 +76,42 @@ export default function SubscriptionScreen() {
   const [successPlanName, setSuccessPlanName] = useState('');
   const [successPlanDuration, setSuccessPlanDuration] = useState('');
 
+  // Refund Request State
+  const [refundRequestData, setRefundRequestData] = useState<any>(null);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundReason, setRefundReason] = useState('Accidental Purchase');
+  const [refundDetails, setRefundDetails] = useState('');
+  const [submittingRefund, setSubmittingRefund] = useState(false);
+  const [dismissedPriceBanner, setDismissedPriceBanner] = useState(false);
+  const [dismissedRejectBanner, setDismissedRejectBanner] = useState(false);
+  const [dismissedApproveBanner, setDismissedApproveBanner] = useState(false);
+
+  // Pending GCash Payment Auto-Recovery State
+  const [pendingRecovery, setPendingRecovery] = useState<any>(null);
+  const [verifyingPendingRecovery, setVerifyingPendingRecovery] = useState(false);
+  const [cancellingPendingRecovery, setCancellingPendingRecovery] = useState(false);
+
+  const checkPendingRecovery = useCallback(async () => {
+    try {
+      const serverPending = await apiGetPendingCheckout();
+      if (serverPending && serverPending.has_pending && serverPending.transaction) {
+        setPendingRecovery(serverPending.transaction);
+        return;
+      }
+      const cached = await AsyncStorage.getItem('@clucko_pending_checkout');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.session_id) {
+          setPendingRecovery(parsed);
+          return;
+        }
+      }
+      setPendingRecovery(null);
+    } catch (e) {
+      console.warn('Error checking pending recovery:', e);
+    }
+  }, []);
+
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -86,11 +129,36 @@ export default function SubscriptionScreen() {
     return () => sub.remove();
   }, [handleBack]);
 
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'active') {
+        checkPendingRecovery();
+        loadSubscription();
+      }
+    };
+    const appSub = AppState.addEventListener('change', handleAppStateChange);
+    return () => appSub.remove();
+  }, [checkPendingRecovery]);
+
   const loadSubscription = async () => {
     try {
-      const res = await apiGetMyPlan();
+      const [res, refRes, bannerDismissed] = await Promise.all([
+        apiGetMyPlan(),
+        apiGetMyRefundStatus(),
+        AsyncStorage.getItem('dismissed_pricing_notice_v1'),
+        checkPendingRecovery(),
+      ]);
+      if (bannerDismissed === 'true') {
+        setDismissedPriceBanner(true);
+      }
+      if (refRes && refRes.refund_request) {
+        setRefundRequestData(refRes.refund_request);
+      }
       if (res && res.subscription) {
         setSubData(res.subscription);
+        if (res.available_plans) {
+          setAvailablePlans(res.available_plans);
+        }
         // Default selection logic:
         if (res.subscription.plan === 'premium') {
           setSelectedPlan('premium');
@@ -103,6 +171,46 @@ export default function SubscriptionScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const submittingRefundRef = useRef(false);
+
+  const handleExecuteRefundRequest = async () => {
+    if (submittingRefundRef.current || submittingRefund) return;
+    if (!refundReason) {
+      notify({
+        type: 'warning',
+        title: 'Reason Required',
+        message: 'Please choose a reason for your refund request.',
+      });
+      return;
+    }
+    submittingRefundRef.current = true;
+    setSubmittingRefund(true);
+    try {
+      const res = await apiSubmitRefundRequest(refundReason, refundDetails);
+      if (res && res.success) {
+        setShowRefundModal(false);
+        notify({
+          type: 'success',
+          title: 'Refund Request Submitted',
+          message: 'Your refund request has been submitted to the platform administration for review.',
+        });
+        const statusRes = await apiGetMyRefundStatus();
+        if (statusRes?.refund_request) {
+          setRefundRequestData(statusRes.refund_request);
+        }
+      }
+    } catch (err: any) {
+      notify({
+        type: 'alert',
+        title: 'Submission Failed',
+        message: err.message || 'Unable to submit refund request. Please try again.',
+      });
+    } finally {
+      submittingRefundRef.current = false;
+      setSubmittingRefund(false);
     }
   };
 
@@ -150,11 +258,15 @@ export default function SubscriptionScreen() {
     ? 'Unlimited'
     : `${subData?.usage?.captures_remaining ?? (subData?.limits?.max_captures || 30)} Scans Left (${subData?.usage?.captures_count || 0}/${subData?.limits?.max_captures || 30} used)`;
 
-  // Selected plan calculation
+  // Dynamic Selected plan calculation from backend available_plans
   const isSelectedPro = selectedPlan === 'pro';
-  const planAmount = isSelectedPro ? 479 : 1099;
-  const planDurationText = isSelectedPro ? '3 Months' : '1 Year';
-  const planTitle = isSelectedPro ? 'Pro Account' : 'Premium Account';
+  const proPrice = availablePlans?.pro?.price !== undefined ? Number(availablePlans.pro.price) : 479;
+  const premiumPrice = availablePlans?.premium?.price !== undefined ? Number(availablePlans.premium.price) : 1099;
+  const planAmount = isSelectedPro ? proPrice : premiumPrice;
+  const planDurationText = isSelectedPro
+    ? (availablePlans?.pro?.duration_days ? `${Math.round(availablePlans.pro.duration_days / 30)} Months` : '3 Months')
+    : (availablePlans?.premium?.duration_days ? `${Math.round(availablePlans.premium.duration_days / 365)} Year` : '1 Year');
+  const planTitle = isSelectedPro ? (availablePlans?.pro?.name || 'Pro Account') : (availablePlans?.premium?.name || 'Premium Account');
 
   // 1. Open the In-App Confirmation Modal with Financial Breakdown
   const handleOpenConfirmModal = () => {
@@ -178,6 +290,17 @@ export default function SubscriptionScreen() {
 
       setActiveSession(res);
       setHasRedirected(true);
+
+      const recoveryObj = {
+        id: res.id,
+        session_id: res.session_id,
+        plan: res.plan,
+        plan_name: res.plan_name || (res.plan === 'pro' ? 'Pro Account' : 'Premium Account'),
+        amount: res.amount,
+        checkout_url: res.checkout_url,
+      };
+      await AsyncStorage.setItem('@clucko_pending_checkout', JSON.stringify(recoveryObj));
+      setPendingRecovery(recoveryObj);
 
       // Securely redirect to PayMongo GCash checkout page
       await Linking.openURL(res.checkout_url);
@@ -205,6 +328,8 @@ export default function SubscriptionScreen() {
       );
 
       if (res && res.success && res.paid) {
+        await AsyncStorage.removeItem('@clucko_pending_checkout');
+        setPendingRecovery(null);
         setShowConfirmModal(false);
         setActiveSession(null);
         setHasRedirected(false);
@@ -239,6 +364,75 @@ export default function SubscriptionScreen() {
       });
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // 4. Verify & Activate from Ongoing Recovery Banner
+  const handleVerifyPendingRecovery = async () => {
+    if (!pendingRecovery?.session_id) return;
+    setVerifyingPendingRecovery(true);
+    try {
+      const res = await apiVerifyPayment(
+        pendingRecovery.session_id,
+        pendingRecovery.plan || 'pro',
+        'paymongo'
+      );
+      if (res && res.success && res.paid) {
+        await AsyncStorage.removeItem('@clucko_pending_checkout');
+        setPendingRecovery(null);
+        setShowConfirmModal(false);
+        setActiveSession(null);
+
+        const activatedName = (pendingRecovery.plan === 'pro') ? 'Pro Account' : 'Premium Account';
+        const activatedDur = (pendingRecovery.plan === 'pro') ? '3 Months' : '1 Year';
+        setSuccessPlanName(activatedName);
+        setSuccessPlanDuration(activatedDur);
+        setShowSuccessModal(true);
+
+        await loadSubscription();
+        await autoSavePendingQuotaChicken();
+        await notify({
+          title: '🎉 Payment Successful!',
+          message: `Your account has been upgraded to ${activatedName}. All perks are active!`,
+          type: 'success',
+        });
+      } else {
+        setPaymentNoticeModal({
+          visible: true,
+          title: 'Payment Still Awaiting GCash',
+          message: res?.error || 'Payment has not been completed on GCash yet. Please finish the payment in GCash, then tap Verify.',
+          type: 'warning',
+        });
+      }
+    } catch (err: any) {
+      setPaymentNoticeModal({
+        visible: true,
+        title: 'Verification Incomplete',
+        message: err.message || 'Unable to confirm GCash status yet. If you completed payment, wait a moment and try again.',
+        type: 'error',
+      });
+    } finally {
+      setVerifyingPendingRecovery(false);
+    }
+  };
+
+  // 5. Cancel Ongoing Checkout Session
+  const handleCancelPendingRecovery = async () => {
+    setCancellingPendingRecovery(true);
+    try {
+      await apiCancelPendingCheckout(pendingRecovery?.session_id);
+      await AsyncStorage.removeItem('@clucko_pending_checkout');
+      setPendingRecovery(null);
+      notify({
+        title: 'Checkout Cancelled',
+        message: 'The unfinished checkout session has been cancelled.',
+        type: 'info',
+      });
+    } catch {
+      await AsyncStorage.removeItem('@clucko_pending_checkout');
+      setPendingRecovery(null);
+    } finally {
+      setCancellingPendingRecovery(false);
     }
   };
 
@@ -309,19 +503,19 @@ export default function SubscriptionScreen() {
   let ctaText = `Pay ₱${planAmount.toLocaleString()} with GCash`;
   if (isSelectedPro) {
     if (isCurrentlyPro) {
-      ctaText = `Extend Pro (+3 Months) • ₱479`;
+      ctaText = `Extend Pro (+3 Months) • ₱${proPrice.toLocaleString()}`;
     } else if (isCurrentlyPremium) {
       ctaText = `Current Plan is Higher (Premium Active)`;
     } else {
-      ctaText = `Subscribe to Pro • ₱479`;
+      ctaText = `Subscribe to Pro • ₱${proPrice.toLocaleString()}`;
     }
   } else {
     if (isCurrentlyPremium) {
-      ctaText = `Extend Premium (+1 Year) • ₱1,099`;
+      ctaText = `Extend Premium (+1 Year) • ₱${premiumPrice.toLocaleString()}`;
     } else if (isCurrentlyPro) {
-      ctaText = `Upgrade to Premium • ₱1,099`;
+      ctaText = `Upgrade to Premium • ₱${premiumPrice.toLocaleString()}`;
     } else {
-      ctaText = `Subscribe to Premium • ₱1,099`;
+      ctaText = `Subscribe to Premium • ₱${premiumPrice.toLocaleString()}`;
     }
   }
 
@@ -382,6 +576,142 @@ export default function SubscriptionScreen() {
               <Text style={[styles.expiredText, { color: '#B71C1C' }]}>
                 Your trial or plan has ended. All your existing farms and chickens remain completely safe! Upgrade to add more farms or chickens.
               </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Persistent In-App Pricing Update Banner */}
+        {!dismissedPriceBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#1E293B' : '#FEF3C7', borderColor: '#F59E0B' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
+              <Ionicons name="notifications" size={20} color="#D97706" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>
+                  Notice: Subscription Pricing Update
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#CBD5E1' : '#78350F' }]}>
+                  Pro Plan is now ₱{proPrice}/3mo and Premium Plan is ₱{premiumPrice}/yr. All active subscriptions maintain their valid duration without price change until next renewal.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.pricingNoticeDismiss}
+              onPress={() => {
+                setDismissedPriceBanner(true);
+                AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
+              }}
+            >
+              <Text style={styles.pricingNoticeDismissText}>Acknowledge</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Refund Approved Top Alert Banner (Green format same as pricing update banner) */}
+        {refundRequestData?.status === 'approved' && !dismissedApproveBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#064E3B28' : '#ECFDF5', borderColor: '#10B981' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
+              <Ionicons name="checkmark-circle" size={20} color="#059669" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#6EE7B7' : '#065F46' }]}>
+                  Notice: Refund Request Approved
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#047857' }]}>
+                  Your refund request for ₱{Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} has been approved and processed. {refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : 'The transaction was refunded and your subscription ledger updated.'}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#064E3B' : '#D1FAE5' }]}
+              onPress={() => setDismissedApproveBanner(true)}
+            >
+              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#A7F3D0' : '#047857' }]}>Acknowledge</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Refund Declined Top Alert Banner (Same format as pricing update banner) */}
+        {refundRequestData?.status === 'rejected' && !dismissedRejectBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#2D1718' : '#FEF2F2', borderColor: '#EF4444' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
+              <Ionicons name="close-circle" size={20} color="#DC2626" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FCA5A5' : '#B91C1C' }]}>
+                  Notice: Refund Request Declined
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#7F1D1D' }]}>
+                  Your previous refund request was reviewed and declined. Reason: {refundRequestData.admin_notes || 'Does not qualify under standard refund terms'}. If you have valid grounds or wish to adjust your reason, you can submit a new request below.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#450A0A' : '#FEE2E2' }]}
+              onPress={() => setDismissedRejectBanner(true)}
+            >
+              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#FCA5A5' : '#991B1B' }]}>Acknowledge</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Pending GCash Payment Auto-Recovery Card */}
+        {pendingRecovery && (
+          <View style={[styles.pendingRecoveryBanner, { backgroundColor: isDarkMode ? '#172033' : '#EFF6FF', borderColor: '#3B82F6' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <View style={[styles.pendingRecoveryIconWrap, { backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE' }]}>
+                <Ionicons name="time" size={20} color="#2563EB" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={[styles.pendingRecoveryTitle, { color: isDarkMode ? '#93C5FD' : '#1E40AF' }]}>
+                    Ongoing Payment Detected
+                  </Text>
+                  <View style={[styles.pendingBadge, { backgroundColor: isDarkMode ? '#1E3A8A' : '#BFDBFE' }]}>
+                    <Text style={[styles.pendingBadgeText, { color: isDarkMode ? '#93C5FD' : '#1D4ED8' }]}>
+                      {pendingRecovery.plan === 'pro' ? 'PRO' : 'PREMIUM'} • ₱{Number(pendingRecovery.amount).toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.pendingRecoveryBody, { color: isDarkMode ? '#CBD5E1' : '#334155' }]}>
+                  Did your GCash checkout get interrupted or did you accidentally exit the app? Your money is safe! If you finished payment on GCash, tap Verify to activate your plan right now.
+                </Text>
+
+                {/* Recovery Action Buttons */}
+                <View style={styles.pendingActionRow}>
+                  <TouchableOpacity
+                    style={[styles.pendingVerifyBtn, { opacity: verifyingPendingRecovery ? 0.7 : 1 }]}
+                    onPress={handleVerifyPendingRecovery}
+                    disabled={verifyingPendingRecovery}
+                  >
+                    {verifyingPendingRecovery ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="shield-checkmark" size={15} color="#fff" />
+                        <Text style={styles.pendingVerifyBtnText}>Verify & Activate</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {pendingRecovery.checkout_url && (
+                    <TouchableOpacity
+                      style={[styles.pendingResumeBtn, { borderColor: isDarkMode ? '#3B82F6' : '#2563EB' }]}
+                      onPress={() => Linking.openURL(pendingRecovery.checkout_url)}
+                    >
+                      <Ionicons name="open-outline" size={15} color={isDarkMode ? '#93C5FD' : '#1D4ED8'} />
+                      <Text style={[styles.pendingResumeBtnText, { color: isDarkMode ? '#93C5FD' : '#1D4ED8' }]}>Resume GCash</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.pendingCancelBtn}
+                    onPress={handleCancelPendingRecovery}
+                    disabled={cancellingPendingRecovery}
+                  >
+                    <Text style={[styles.pendingCancelBtnText, { color: isDarkMode ? '#94A3B8' : '#64748B' }]}>
+                      {cancellingPendingRecovery ? 'Cancelling...' : 'Cancel'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           </View>
         )}
@@ -451,6 +781,98 @@ export default function SubscriptionScreen() {
               <Text style={[styles.planPerkValue, { color: colors.text }]}>{capturesText}</Text>
             </View>
           </View>
+
+          {/* Refund Status Alerts or Request Button (Owners Only) */}
+          {!isCaretaker && (
+            <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 12 }}>
+              {refundRequestData?.status === 'pending' ? (
+                <View style={[styles.refundStatusCard, { backgroundColor: isDarkMode ? '#2D2214' : '#FFFBEB', borderColor: '#FDE68A' }]}>
+                  <Ionicons name="time" size={20} color="#D97706" />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: isDarkMode ? '#FDE68A' : '#B45309' }}>
+                      Refund Request Under Review
+                    </Text>
+                    <Text style={{ fontSize: 11.5, color: isDarkMode ? '#E2E8F0' : '#92400E', marginTop: 2 }}>
+                      You requested a refund for ₱{Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} ({refundRequestData.reason}). Clucko administration is reviewing your request.
+                    </Text>
+                  </View>
+                </View>
+              ) : refundRequestData?.status === 'rejected' ? (
+                <View>
+                  <View style={[styles.refundStatusCard, { backgroundColor: isDarkMode ? '#2B1718' : '#FEF2F2', borderColor: '#FECACA' }]}>
+                    <Ionicons name="alert-circle" size={20} color="#DC2626" />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: isDarkMode ? '#FCA5A5' : '#B91C1C' }}>
+                        Previous Refund Request Declined
+                      </Text>
+                      <Text style={{ fontSize: 11.5, color: isDarkMode ? '#E2E8F0' : '#991B1B', marginTop: 2 }}>
+                        Reason: {refundRequestData.admin_notes || 'Does not meet refund criteria'}.
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Re-request allowed */}
+                  {(isProTier || isPremiumTier) && subData?.is_active && (
+                    <TouchableOpacity
+                      style={[styles.refundRequestTriggerBtn, { borderColor: colors.border, marginTop: 8 }]}
+                      onPress={() => {
+                        setRefundReason('Accidental Purchase');
+                        setRefundDetails('');
+                        setShowRefundModal(true);
+                      }}
+                    >
+                      <MaterialCommunityIcons name="cash-refund" size={16} color="#EF4444" />
+                      <Text style={[styles.refundRequestTriggerText, { color: colors.textSecondary }]}>
+                        Request a Refund Again
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : refundRequestData?.status === 'approved' ? (
+                <View>
+                  <View style={[styles.refundStatusCard, { backgroundColor: isDarkMode ? '#064E3B22' : '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                    <Ionicons name="checkmark-circle" size={20} color="#059669" />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: isDarkMode ? '#6EE7B7' : '#065F46' }}>
+                        Refund Request Approved
+                      </Text>
+                      <Text style={{ fontSize: 11.5, color: isDarkMode ? '#D1FAE5' : '#047857', marginTop: 2 }}>
+                        ₱{Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} was approved. {refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  {(isProTier || isPremiumTier) && subData?.is_active && (
+                    <TouchableOpacity
+                      style={[styles.refundRequestTriggerBtn, { borderColor: colors.border, marginTop: 8 }]}
+                      onPress={() => {
+                        setRefundReason('Accidental Purchase');
+                        setRefundDetails('');
+                        setShowRefundModal(true);
+                      }}
+                    >
+                      <MaterialCommunityIcons name="cash-refund" size={16} color="#EF4444" />
+                      <Text style={[styles.refundRequestTriggerText, { color: colors.textSecondary }]}>
+                        Request a Refund
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : (isProTier || isPremiumTier) && subData?.is_active ? (
+                <TouchableOpacity
+                  style={[styles.refundRequestTriggerBtn, { borderColor: colors.border }]}
+                  onPress={() => {
+                    setRefundReason('Accidental Purchase');
+                    setRefundDetails('');
+                    setShowRefundModal(true);
+                  }}
+                >
+                  <MaterialCommunityIcons name="cash-refund" size={16} color="#EF4444" />
+                  <Text style={[styles.refundRequestTriggerText, { color: colors.textSecondary }]}>
+                    Request a Refund
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
         </View>
 
         {/* Data Retention Guarantee */}
@@ -535,7 +957,7 @@ export default function SubscriptionScreen() {
                   </View>
 
                   <View style={[styles.priceTagWrap, { backgroundColor: selectedPlan === 'pro' ? (isDarkMode ? '#1E2621' : '#EAF2EC') : (isDarkMode ? '#262626' : '#F5F5F5') }]}>
-                    <Text style={[styles.priceTagAmount, { color: colors.primary }]}>₱479</Text>
+                    <Text style={[styles.priceTagAmount, { color: colors.primary }]}>₱{proPrice.toLocaleString()}</Text>
                     <Text style={[styles.priceTagInterval, { color: colors.textSecondary }]}>for 3 months</Text>
                   </View>
                 </View>
@@ -609,7 +1031,7 @@ export default function SubscriptionScreen() {
                   </View>
 
                   <View style={[styles.priceTagWrap, { backgroundColor: selectedPlan === 'premium' ? '#FEF3C7' : (isDarkMode ? '#262626' : '#F5F5F5') }]}>
-                    <Text style={[styles.priceTagAmount, { color: '#D97706' }]}>₱1,099</Text>
+                    <Text style={[styles.priceTagAmount, { color: '#D97706' }]}>₱{premiumPrice.toLocaleString()}</Text>
                     <Text style={[styles.priceTagInterval, { color: colors.textSecondary }]}>for 1 year</Text>
                   </View>
                 </View>
@@ -988,6 +1410,98 @@ export default function SubscriptionScreen() {
             >
               <Text style={styles.infoNoticeActionBtnText}>OK</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🔄 FORMAL REFUND REQUEST MODAL */}
+      <Modal
+        visible={showRefundModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !submittingRefund && setShowRefundModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.refundModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.modalHeader}>
+              <View style={[styles.modalIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                <MaterialCommunityIcons name="cash-refund" size={26} color="#DC2626" />
+              </View>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Request Subscription Refund</Text>
+              <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+                Submit a formal refund request to the Clucko administration.
+              </Text>
+            </View>
+
+            <Text style={[styles.fieldLabel, { color: colors.text, marginTop: 14 }]}>Select Reason:</Text>
+            <View style={styles.reasonRadioGroup}>
+              {['Accidental Purchase', 'Plan Not Needed / Downsizing', 'Features Not Working as Expected', 'Financial / Budget Reason', 'Other Reason'].map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={[
+                    styles.reasonRadioItem,
+                    { borderColor: refundReason === r ? colors.primary : colors.border },
+                    refundReason === r && { backgroundColor: isDarkMode ? '#1E293B' : '#F0FDF4' }
+                  ]}
+                  onPress={() => setRefundReason(r)}
+                >
+                  <Ionicons
+                    name={refundReason === r ? 'radio-button-on' : 'radio-button-off'}
+                    size={17}
+                    color={refundReason === r ? colors.primary : colors.textSecondary}
+                  />
+                  <Text style={[styles.reasonRadioText, { color: colors.text }]}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.fieldLabel, { color: colors.text, marginTop: 10 }]}>Explanation / Details (Optional):</Text>
+            <TextInput
+              style={[
+                styles.refundTextInput,
+                {
+                  backgroundColor: isDarkMode ? '#1E293B' : '#F8FAFC',
+                  color: colors.text,
+                  borderColor: colors.border
+                }
+              ]}
+              placeholder="Tell us what happened so we can assist..."
+              placeholderTextColor={colors.textLight}
+              multiline
+              numberOfLines={3}
+              value={refundDetails}
+              onChangeText={setRefundDetails}
+            />
+
+            <View style={styles.refundTermsNote}>
+              <Ionicons name="information-circle-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.refundTermsText, { color: colors.textSecondary }]}>
+                Upon admin review and approval, ₱{Number(subData?.price_paid || planAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })} will be refunded, and your account will transition to the Standard Free tier.
+              </Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalConfirmBtn, { backgroundColor: '#DC2626' }]}
+                disabled={submittingRefund}
+                onPress={handleExecuteRefundRequest}
+                activeOpacity={0.85}
+              >
+                {submittingRefund ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmBtnText}>Submit Refund Request</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                disabled={submittingRefund}
+                onPress={() => setShowRefundModal(false)}
+              >
+                <Text style={[styles.modalCancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1677,4 +2191,194 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  // In-App Persistent Pricing Notice Banner
+  pricingNoticeBanner: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 16,
+    flexDirection: 'column',
+    gap: 10,
+  },
+  pricingNoticeTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  pricingNoticeBody: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  pricingNoticeDismiss: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#D97706',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  pricingNoticeDismissText: {
+    color: '#fff',
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  // In-Card Refund Trigger & Status
+  refundStatusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  refundRequestTriggerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  refundRequestTriggerText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  // Refund Modal Card
+  refundModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 22,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+  },
+  fieldLabel: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  reasonRadioGroup: {
+    gap: 6,
+  },
+  reasonRadioItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  reasonRadioText: {
+    fontSize: 12.5,
+    fontWeight: '500',
+  },
+  refundTextInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 13,
+    textAlignVertical: 'top',
+    minHeight: 70,
+  },
+  refundTermsNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+  },
+  refundTermsText: {
+    fontSize: 11,
+    lineHeight: 15,
+    flex: 1,
+  },
+  // Pending GCash Payment Auto-Recovery Styles
+  pendingRecoveryBanner: {
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  pendingRecoveryIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingRecoveryTitle: {
+    fontSize: 14.5,
+    fontWeight: '800',
+  },
+  pendingBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  pendingBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pendingRecoveryBody: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  pendingActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  pendingVerifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#10B981',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  pendingVerifyBtnText: {
+    color: '#fff',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  pendingResumeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  pendingResumeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  pendingCancelBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  pendingCancelBtnText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+  },
 });
+

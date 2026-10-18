@@ -177,6 +177,25 @@ export default function AboutUsModal({ visible, onClose, isDarkMode = false }: A
                   </Text>
                 </View>
 
+                {/* Subscriptions & 7-Day Refund Grace Period Policy */}
+                <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
+                  <Text style={[styles.sectionTitle, { color: primaryBrand }]}>
+                    <Ionicons name="card-outline" size={16} color={primaryBrand} /> Subscriptions &amp; 7-Day Refund Policy
+                  </Text>
+                  <Text style={[styles.bodyText, { color: textSecondary, marginBottom: 8 }]}>
+                    Clucko is committed to customer satisfaction while upholding transparent billing standards:
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>7-Day Refund Grace Period:</Text> Subscribers can request a full refund within seven (7) calendar days of purchase directly inside the app.
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Strict Window Cutoff:</Text> In accordance with platform terms, any transaction exceeding the 7-day grace period is strictly non-refundable and cannot be approved.
+                  </Text>
+                  <Text style={[styles.bulletItem, { color: textSecondary }]}>
+                    • <Text style={{ fontWeight: '700', color: textPrimary }}>Selective Rollback:</Text> When a refund is approved for a recent renewal or stacked purchase, earlier valid plans and flock records remain completely protected without penalty.
+                  </Text>
+                </View>
+
                 {/* Privacy & Data Protection Compliance (RA 10173) */}
                 <View style={[styles.sectionBox, { backgroundColor: cardSectionBg, borderColor: borderCol }]}>
                   <Text style={[styles.sectionTitle, { color: primaryBrand }]}>

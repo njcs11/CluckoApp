@@ -919,14 +919,6 @@ export default function HomeScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <TouchableOpacity
               style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
-              onPress={() => startTour()}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.headerBellBtn, { backgroundColor: colors.card, borderColor: colors.divider }]}
               onPress={() => setShowNotifications(true)}
               activeOpacity={0.75}
             >

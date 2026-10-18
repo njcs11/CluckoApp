@@ -136,7 +136,7 @@ def load_diseases():
     default = {"diseases": [
         {"id":"infectious_coryza","name":"Infectious Coryza","description":"Bacterial respiratory disease","symptoms":["watery_eyes","swollen_eyes","nasal_discharge","facial_swelling"],"affected_parts":["eye"],"severity":"moderate","color":"#f59e0b"},
         {"id":"fowl_pox","name":"Fowl Pox","description":"Viral disease causing lesions","symptoms":["eye_lesions","cloudy_eye","skin_lesions","scabs"],"affected_parts":["eye","skin"],"severity":"high","color":"#ef4444"},
-        {"id":"newcastle_disease","name":"Newcastle Disease","description":"Highly contagious viral disease","symptoms":["drooping_wings","severe_droop","wing_weakness","twisted_neck"],"affected_parts":["wing","posture"],"severity":"critical","color":"#dc2626"},
+        {"id":"newcastle_disease","name":"Newcastle Disease","description":"Highly contagious viral disease","symptoms":["drooping_wings","severe_droop","wing_weakness"],"affected_parts":["wing"],"severity":"critical","color":"#dc2626"},
         {"id":"healthy","name":"Healthy","description":"No disease detected","symptoms":["normal_eye","normal_posture","symmetrical_wings"],"affected_parts":["all"],"severity":"none","color":"#10b981"}
     ]}
     save_diseases(default)
@@ -528,6 +528,8 @@ def serve_dataset_image(module, disease_id, filename):
     return send_from_directory(folder, base_name)
 
 
+
+
 @app.route('/api/dataset/image', methods=['DELETE'])
 @admin_required
 def delete_dataset_image():
@@ -831,7 +833,10 @@ from routes_farms import *
 from routes_notifications import *
 from routes_tasks import *
 from routes_subscriptions import *
+from routes_admin import *
 
 if __name__ == '__main__':
     load_diseases()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('DEBUG', 'False').lower() in ('true', '1')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)

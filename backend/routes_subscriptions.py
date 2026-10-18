@@ -87,6 +87,40 @@ PLANS_CONFIG = {
     }
 }
 
+def reload_plans_from_db():
+    global PLANS_CONFIG
+    try:
+        db = get_db()
+        with db.cursor() as cur:
+            cur.execute('SELECT * FROM subscription_plans_config')
+            rows = cur.fetchall()
+            for r in rows:
+                features = r['features']
+                if isinstance(features, str):
+                    try:
+                        features = json.loads(features)
+                    except Exception:
+                        features = [features]
+                PLANS_CONFIG[r['plan_key']] = {
+                    'name': r['name'],
+                    'price': float(r['price']),
+                    'currency': r.get('currency') or 'PHP',
+                    'duration_days': int(r['duration_days']),
+                    'max_farms': int(r['max_farms']),
+                    'max_chickens_per_farm': int(r['max_chickens_per_farm']),
+                    'max_captures': int(r['max_captures']),
+                    'features': features,
+                    'badge': r.get('badge') or '',
+                }
+        db.close()
+    except Exception as e:
+        print(f"[SUBSCRIPTION] Dynamic plans sync info: {e}")
+
+try:
+    reload_plans_from_db()
+except Exception:
+    pass
+
 PAYMONGO_SECRET_KEY = os.environ.get('PAYMONGO_SECRET_KEY', '')
 PAYMONGO_PUBLIC_KEY = os.environ.get('PAYMONGO_PUBLIC_KEY', '')
 STRIPE_SECRET_KEY   = os.environ.get('STRIPE_SECRET_KEY', '')
@@ -266,6 +300,7 @@ def get_effective_subscription(user_id, cur, db):
 @app.route('/api/subscriptions/my-plan', methods=['GET'])
 @token_required
 def get_my_plan():
+    reload_plans_from_db()
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -291,6 +326,175 @@ def get_my_plan():
         db.close()
 
 
+@app.route('/api/subscriptions/request-refund', methods=['POST'])
+@token_required
+def submit_refund_request():
+    """Allows farm owners to formally submit a refund request for their active paid subscription."""
+    d = request.json or {}
+    reason = (d.get('reason') or '').strip()
+    details = (d.get('details') or '').strip()
+
+    if not reason:
+        return jsonify({'error': 'Please provide a reason for your refund request.'}), 400
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT id, role, email FROM users WHERE id = %s', (request.user_id,))
+            user = cur.fetchone()
+            if not user or user.get('role') != 'owner':
+                return jsonify({'error': 'Only farm owners can request subscription refunds.'}), 403
+
+            cur.execute('''
+                SELECT id, amount, plan, status, created_at
+                FROM subscription_transactions
+                WHERE user_id = %s AND status = 'paid'
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', (request.user_id,))
+            tx = cur.fetchone()
+
+            if not tx:
+                return jsonify({'error': 'No eligible paid subscription transaction found for refund.'}), 404
+
+            # Enforce 7-Day Refund Window Standard Rule
+            now = datetime.utcnow()
+            tx_age_days = (now - tx['created_at']).total_seconds() / 86400.0
+            if tx_age_days > 7.0:
+                return jsonify({
+                    'error': f'Refund window expired. This transaction was completed {int(tx_age_days)} days ago. Under platform policy, refunds can only be requested within 7 days of purchase.'
+                }), 400
+
+            cur.execute('''
+                SELECT id FROM subscription_refund_requests
+                WHERE user_id = %s AND status = 'pending'
+            ''', (request.user_id,))
+            existing_user_pending = cur.fetchone()
+            if existing_user_pending:
+                return jsonify({'error': 'You already have an active pending refund request under review. Duplicate submissions are not allowed.'}), 400
+
+            cur.execute('''
+                SELECT id FROM subscription_refund_requests
+                WHERE transaction_id = %s AND status = 'pending'
+            ''', (tx['id'],))
+            existing = cur.fetchone()
+            if existing:
+                return jsonify({'error': 'You already have an active pending refund request for this transaction.'}), 400
+
+            cur.execute('''
+                INSERT INTO subscription_refund_requests (transaction_id, user_id, reason, details, status)
+                VALUES (%s, %s, %s, %s, 'pending')
+                RETURNING id
+            ''', (tx['id'], request.user_id, reason, details))
+            req_id = cur.fetchone()['id']
+            db.commit()
+
+            return jsonify({
+                'success': True,
+                'message': 'Your refund request has been submitted to the platform administration for review.',
+                'request_id': req_id
+            })
+    finally:
+        db.close()
+
+
+@app.route('/api/subscriptions/my-refund-status', methods=['GET'])
+@token_required
+def get_my_refund_status():
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('''
+                SELECT srr.id, srr.reason, srr.details, srr.status, srr.admin_notes, srr.created_at, st.amount, st.plan
+                FROM subscription_refund_requests srr
+                JOIN subscription_transactions st ON st.id = srr.transaction_id
+                WHERE srr.user_id = %s
+                ORDER BY srr.created_at DESC
+                LIMIT 1
+            ''', (request.user_id,))
+            req_info = cur.fetchone()
+            return jsonify({'success': True, 'refund_request': req_info})
+    finally:
+        db.close()
+
+
+# ─── GET /api/subscriptions/pending-checkout ─────────────────────────────────
+@app.route('/api/subscriptions/pending-checkout', methods=['GET'])
+@token_required
+def get_pending_checkout():
+    """
+    Checks if the user has an unfinished / pending GCash checkout session.
+    Allows user to resume payment, check verification status, or complete plan upgrade.
+    """
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('''
+                SELECT id, plan, amount, currency, payment_gateway, payment_method, 
+                       checkout_session_id, checkout_url, status, created_at
+                FROM subscription_transactions
+                WHERE user_id = %s AND status = 'pending'
+                  AND created_at >= NOW() - INTERVAL '24 HOUR'
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', (request.user_id,))
+            tx = cur.fetchone()
+            if not tx:
+                return jsonify({'success': True, 'has_pending': False, 'transaction': None})
+
+            plan_key = tx['plan']
+            plan_info = PLANS_CONFIG.get(plan_key, {'name': plan_key.capitalize(), 'duration_days': 30})
+            
+            return jsonify({
+                'success': True,
+                'has_pending': True,
+                'transaction': {
+                    'id': tx['id'],
+                    'plan': tx['plan'],
+                    'plan_name': plan_info.get('name', tx['plan'].capitalize()),
+                    'amount': float(tx['amount']),
+                    'currency': tx['currency'] or 'PHP',
+                    'gateway': tx['payment_gateway'],
+                    'payment_method': tx['payment_method'],
+                    'session_id': tx['checkout_session_id'],
+                    'checkout_url': tx['checkout_url'],
+                    'created_at': tx['created_at'].isoformat() if tx['created_at'] else None
+                }
+            })
+    finally:
+        db.close()
+
+
+# ─── POST /api/subscriptions/cancel-pending-checkout ─────────────────────────
+@app.route('/api/subscriptions/cancel-pending-checkout', methods=['POST'])
+@token_required
+def cancel_pending_checkout():
+    """
+    Allows user to explicitly cancel an abandoned pending checkout.
+    """
+    d = request.json or {}
+    session_id = d.get('session_id')
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            if session_id:
+                cur.execute('''
+                    UPDATE subscription_transactions
+                    SET status = 'cancelled'
+                    WHERE user_id = %s AND checkout_session_id = %s AND status = 'pending'
+                ''', (request.user_id, session_id))
+            else:
+                cur.execute('''
+                    UPDATE subscription_transactions
+                    SET status = 'cancelled'
+                    WHERE user_id = %s AND status = 'pending'
+                ''', (request.user_id,))
+            db.commit()
+            return jsonify({'success': True, 'message': 'Pending checkout cancelled.'})
+    finally:
+        db.close()
+
+
 # ─── POST /api/subscriptions/checkout ────────────────────────────────────────
 @app.route('/api/subscriptions/checkout', methods=['POST'])
 @token_required
@@ -299,6 +503,7 @@ def create_checkout():
     Creates a payment checkout session using PayMongo (GCash, Maya, Card)
     or Stripe. Supports Sandbox / Instant Test checkout for development & demo.
     """
+    reload_plans_from_db()
     d = request.json or {}
     plan_key = d.get('plan', 'pro').lower()
     gateway = d.get('gateway', 'paymongo').lower() # 'paymongo' | 'stripe'

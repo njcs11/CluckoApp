@@ -1,6 +1,7 @@
 import { useDarkMode } from '@/context/DarkModeContext';
 import { NotificationItem } from '@/context/NotificationContext';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import ChickenIcon from './ChickenIcon';
 import FarmIcon from './FarmIcon';
@@ -135,6 +136,7 @@ export default function NotificationsListModal({
   ).current;
 
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleClose = () => {
     Animated.parallel([
@@ -266,6 +268,11 @@ export default function NotificationsListModal({
               {notifications.map((notification) => {
                 const mainIcon = getMainIcon(notification, colors.primary);
                 const badge = getStatusBadge(notification.type, colors.primary);
+                const isExpanded = expandedId === notification.id;
+                const titleLower = (notification.title || '').toLowerCase();
+                const msgLower = (notification.message || '').toLowerCase();
+                const isBilling = (notification.type as string) === 'billing' || titleLower.includes('refund') || titleLower.includes('subscription') || titleLower.includes('plan') || msgLower.includes('subscription') || msgLower.includes('refund');
+
                 return (
                   <TouchableOpacity
                     key={notification.id}
@@ -277,11 +284,18 @@ export default function NotificationsListModal({
                             ? colors.card
                             : '#fff'
                           : colors.primary + '0D',
-                        borderColor: colors.divider,
+                        borderColor: isExpanded ? colors.primary : colors.divider,
                       },
                     ]}
-                    activeOpacity={0.75}
-                    onPress={() => onPressNotification(notification)}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      if (isExpanded) {
+                        setExpandedId(null);
+                      } else {
+                        setExpandedId(notification.id);
+                        onPressNotification(notification);
+                      }
+                    }}
                   >
                     <View style={styles.cardIconWrap}>
                       <View style={[styles.cardIcon, { backgroundColor: mainIcon.bg }]}>
@@ -293,24 +307,72 @@ export default function NotificationsListModal({
                     </View>
 
                     <View style={styles.cardBody}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+                      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={isExpanded ? undefined : 1}>
                         {notification.title}
                       </Text>
-                      <Text style={[styles.cardMessage, { color: colors.textSecondary }]} numberOfLines={2}>
+                      <Text
+                        style={[
+                          styles.cardMessage,
+                          { color: colors.textSecondary },
+                          isExpanded && { lineHeight: 19, fontSize: 13, marginTop: 4 }
+                        ]}
+                        numberOfLines={isExpanded ? undefined : 2}
+                      >
                         {notification.message}
                       </Text>
+
+                      {isExpanded && (
+                        <View style={styles.expandedDetailBlock}>
+                          {isBilling && (
+                            <TouchableOpacity
+                              style={[styles.notifDeepLinkBtn, { backgroundColor: colors.primary }]}
+                              onPress={() => {
+                                handleClose();
+                                router.push('/subscription');
+                              }}
+                              activeOpacity={0.85}
+                            >
+                              <Ionicons name="card-outline" size={13} color="#fff" />
+                              <Text style={styles.notifDeepLinkText}>Open Subscription & Plans</Text>
+                              <Ionicons name="arrow-forward" size={12} color="#fff" />
+                            </TouchableOpacity>
+                          )}
+
+                          {notification.chickenId && (
+                            <TouchableOpacity
+                              style={[styles.notifDeepLinkBtn, { backgroundColor: '#2D5541' }]}
+                              onPress={() => {
+                                handleClose();
+                                router.push(`/chicken/${notification.chickenId}`);
+                              }}
+                              activeOpacity={0.85}
+                            >
+                              <ChickenIcon size={13} color="#fff" />
+                              <Text style={styles.notifDeepLinkText}>View Chicken Profile</Text>
+                              <Ionicons name="arrow-forward" size={12} color="#fff" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.cardRight}>
                       <Text style={[styles.cardTime, { color: colors.textLight }]}>
                         {formatRelative(notification.timestamp)}
                       </Text>
-                      <TouchableOpacity
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        onPress={() => onDismissOne(notification.id)}
-                      >
-                        <Ionicons name="close" size={17} color={colors.textLight} />
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons 
+                          name={isExpanded ? "chevron-up" : "chevron-down"} 
+                          size={15} 
+                          color={colors.textLight} 
+                        />
+                        <TouchableOpacity
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          onPress={() => onDismissOne(notification.id)}
+                        >
+                          <Ionicons name="close" size={16} color={colors.textLight} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </TouchableOpacity>
                 );
@@ -425,6 +487,22 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, marginRight: 8 },
   cardTitle: { fontSize: 14.5, fontWeight: '700', marginBottom: 2 },
   cardMessage: { fontSize: 12.5, lineHeight: 17 },
+  expandedDetailBlock: { marginTop: 8, gap: 6 },
+  notifDeepLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  notifDeepLinkText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   cardRight: { alignItems: 'flex-end', gap: 10 },
   cardTime: { fontSize: 11, fontWeight: '500' },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 },

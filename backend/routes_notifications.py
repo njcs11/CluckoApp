@@ -72,6 +72,10 @@ def get_notifications():
                     ON nr.notification_id = n.id AND nr.user_id = %s
                 WHERE n.farm_id IN ({placeholders})
                   AND (
+                      -- Billing & Pricing notices are strictly reserved for Farm Owners
+                      n.type != 'billing' OR f.owner_id = %s
+                  )
+                  AND (
                       -- General farm notifications (disease alerts, scans, tasks, chicken additions)
                       (n.title NOT LIKE 'Welcome Back%%' AND n.title NOT LIKE 'Welcome to Clucko%%')
                       -- OR personal login / greeting notifications (only seen by that user)
@@ -82,7 +86,7 @@ def get_notifications():
                 ORDER BY n.created_at DESC
                 LIMIT 50
             '''
-            cur.execute(query, (request.user_id, *farm_ids, request.user_id, request.user_id))
+            cur.execute(query, (request.user_id, *farm_ids, request.user_id, request.user_id, request.user_id))
             rows = cur.fetchall()
 
             # Format rows
