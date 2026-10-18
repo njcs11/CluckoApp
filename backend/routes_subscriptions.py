@@ -552,6 +552,7 @@ def create_checkout():
                                 "send_email_receipt": True,
                                 "show_description": True,
                                 "show_line_items": True,
+                                "statement_descriptor": "CLUCKO APP",
                                 "line_items": [
                                     {
                                         "currency": "PHP",

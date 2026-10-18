@@ -1023,6 +1023,71 @@ def send_reset_code_api():
         if db_reset:
             db_reset.close()
 
+    # 1. First priority: Direct SMTP dispatch via Gmail (e.g. cluckodevteam@gmail.com)
+    smtp_user, smtp_password, smtp_host, smtp_port, smtp_from_name = get_smtp_credentials()
+    if smtp_user and smtp_password:
+        try:
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = f"Your Clucko Verification Code: {code}"
+            msg['From'] = f"{smtp_from_name} <{smtp_user}>"
+            msg['To'] = email
+
+            text_body = (
+                f"Hello,\n\n"
+                f"We received a request to reset your Clucko account password.\n\n"
+                f"Your 6-digit verification code is:\n"
+                f"   {code}\n\n"
+                f"This code will expire in 15 minutes. If you did not request this code, you can safely ignore this email.\n\n"
+                f"Best regards,\n"
+                f"The Clucko Dev Team"
+            )
+
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f6f8; margin: 0; padding: 24px;">
+              <div style="max-width: 500px; margin: 0 auto; background: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06); border: 1px solid #e5e7eb;">
+                <div style="background: #1E3D2D; padding: 28px 24px; text-align: center; color: #ffffff;">
+                  <h1 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px;">Clucko Security Verification</h1>
+                  <p style="margin: 6px 0 0 0; font-size: 13px; color: #C8E6C9;">Password Reset Request</p>
+                </div>
+                <div style="padding: 28px 24px; color: #374151; font-size: 14.5px; line-height: 1.6;">
+                  <p style="margin-top: 0;">Hello,</p>
+                  <p>You requested to reset the password for your Clucko account. Please enter the following 6-digit verification code:</p>
+                  <div style="background: #F0FDF4; border: 1.5px dashed #86EFAC; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0;">
+                    <span style="font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #15803D; font-family: monospace;">{code}</span>
+                  </div>
+                  <p style="font-size: 13px; color: #6B7280; margin-bottom: 0;">This code is valid for <strong>15 minutes</strong>. If you did not initiate this request, please disregard this email.</p>
+                </div>
+                <div style="background: #F9FAFB; padding: 14px 24px; text-align: center; font-size: 11.5px; color: #9CA3AF; border-top: 1px solid #E5E7EB;">
+                  Clucko Gamefowl Health AI System • Davao City, Philippines
+                </div>
+              </div>
+            </body>
+            </html>
+            """
+
+            part1 = MIMEText(text_body, 'plain')
+            part2 = MIMEText(html_body, 'html')
+            msg.attach(part1)
+            msg.attach(part2)
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, email, msg.as_string())
+
+            print(f"[AUTH] Reset code {code} dispatched via direct SMTP ({smtp_user}) to {email}")
+            return jsonify({'success': True, 'message': 'Verification code sent to email'})
+        except Exception as smtp_err:
+            print(f"[AUTH] Direct SMTP dispatch for reset code failed: {smtp_err}, falling back to EmailJS")
+
+    # 2. Second priority: EmailJS fallback
     try:
         resp = requests.post(
             'https://api.emailjs.com/api/v1.0/email/send',
