@@ -2,8 +2,8 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X, ShieldAlert } from 'lucide-react';
-import { CluckoBrandBadge, DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
+import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X } from 'lucide-react';
+import { DynamicModuleIcon } from '../components/icons';
 import { useDetect } from '../context/DetectContext';
 import './DetectPage.css';
 

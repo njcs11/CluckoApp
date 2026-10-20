@@ -398,14 +398,16 @@ export default function AdminUsersPage() {
 
   return (
     <div className="admin-users-container">
+      {/* Breadcrumb Row */}
+      <div className="breadcrumb-row">
+        <span className="crumb-root">Platform Administration</span>
+        <span className="crumb-sep">/</span>
+        <span className="crumb-current">User Accounts</span>
+      </div>
+
       {/* Top Header */}
       <div className="admin-page-header">
-        <div>
-          <div className="breadcrumb-row">
-            <span className="crumb-root">Platform Administration</span>
-            <span className="crumb-sep">/</span>
-            <span className="crumb-current">User Accounts</span>
-          </div>
+        <div className="admin-title-wrap">
           <h1 className="admin-page-title">User & Account Management</h1>
           <p className="admin-page-sub">
             Centralized directory of flock owners, caretakers, and administrators. Manage profile records, credentials, and access states.

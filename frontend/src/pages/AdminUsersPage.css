@@ -45,23 +45,45 @@
   background: var(--accent-green);
 }
 
-/* Filter & Search Bar */
-.admin-filter-bar {
+/* Page Header & Upright Action Buttons */
+.admin-page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
+  width: 100%;
+}
+
+.admin-title-wrap {
+  flex: 1;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Filter & Search Bar — Strictly 1 Line on Desktop */
+.admin-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 16px;
-  flex-wrap: wrap;
+  padding: 10px 14px;
+  flex-wrap: nowrap;
 }
 
 .search-input-wrap {
   position: relative;
-  flex: 1;
-  min-width: 280px;
+  flex: 0 1 240px;
+  min-width: 180px;
+  max-width: 260px;
 }
 
 .search-icon {
@@ -74,12 +96,12 @@
 
 .search-input {
   width: 100%;
-  padding: 9px 36px 9px 38px;
+  padding: 8px 32px 8px 36px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  font-size: 13.5px;
+  font-size: 13px;
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -104,20 +126,24 @@
 .filters-group {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-wrap: nowrap;
+  flex: 1;
+  justify-content: flex-start;
 }
 
 .filter-select-wrap {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .filter-label {
   font-size: 12px;
   color: var(--text-muted);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .filter-select {
@@ -125,10 +151,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12.5px;
   padding: 7px 10px;
   outline: none;
   cursor: pointer;
+  max-width: 220px;
 }
 
 .filter-select:focus {

@@ -99,9 +99,8 @@ export default function AccountSuspendedModal() {
             <View style={styles.iconCircle}>
               <Ionicons name="shield-outline" size={32} color="#DC2626" />
             </View>
-          </View>
 
-          <Text style={styles.title}>Account Access Suspended</Text>
+            <Text style={styles.title}>Account Access Suspended</Text>
           <Text style={styles.subtitle}>
             Your account has been temporarily restricted by Clucko Platform Administration due to a guideline conflict.
           </Text>
