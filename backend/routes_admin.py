@@ -672,9 +672,18 @@ def get_admin_users():
             cur.execute(query, params + [limit, offset])
             users = cur.fetchall()
 
+            # Lightweight all accounts directory list for instant account filter dropdown
+            cur.execute('''
+                SELECT id, first_name, last_name, email, role, is_active
+                FROM users
+                ORDER BY first_name ASC, last_name ASC
+            ''')
+            all_accounts = cur.fetchall()
+
             return jsonify({
                 'success': True,
                 'users': users,
+                'all_accounts': all_accounts,
                 'total': total,
                 'page': page,
                 'pages': (total + limit - 1) // limit if total > 0 else 1,
@@ -900,14 +909,14 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
 
             sent = False
             try:
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=4) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_password)
                     server.sendmail(smtp_user, to_email, msg.as_string())
                 sent = True
             except Exception as e587:
                 try:
-                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as server:
+                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=4) as server:
                         server.login(smtp_user, smtp_password)
                         server.sendmail(smtp_user, to_email, msg.as_string())
                     sent = True
@@ -920,37 +929,53 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
         except Exception as smtp_err:
             print(f"[ADMIN] SMTP dispatch to {to_email} failed: {smtp_err}")
 
-    # Fallback: EmailJS
+    # Fallback: EmailJS (Try custom template first, then verified active template_u0b0yl9)
     try:
         import requests
         emailjs_service = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
         emailjs_template = os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID', 'template_welcome')
+        emailjs_verified_template = os.environ.get('EMAILJS_TEMPLATE_ID', 'template_u0b0yl9')
         emailjs_user = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
-        payload = {
-            'service_id': emailjs_service,
-            'template_id': emailjs_template,
-            'user_id': emailjs_user,
-            'template_params': {
-                'to_email': to_email,
-                'email': to_email,
-                'user_name': admin_full_name,
-                'name': admin_full_name,
-                'temp_password': temp_password,
-                'role': role_display,
-                'login_url': login_url,
-                'subject': subject,
-                'message': text_content,
-            }
-        }
-        resp = requests.post(
-            'https://api.emailjs.com/api/v1.0/email/send',
-            headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
-            json=payload,
-            timeout=10,
-        )
+
+        def _send_via_emailjs(t_id):
+            return requests.post(
+                'https://api.emailjs.com/api/v1.0/email/send',
+                headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
+                json={
+                    'service_id': emailjs_service,
+                    'template_id': t_id,
+                    'user_id': emailjs_user,
+                    'template_params': {
+                        'to_email': to_email,
+                        'email': to_email,
+                        'user_name': admin_full_name,
+                        'name': admin_full_name,
+                        'code': f"Temporary Password: {temp_password} | Portal: {login_url}",
+                        'temp_password': temp_password,
+                        'password': temp_password,
+                        'role': role_display,
+                        'login_url': login_url,
+                        'subject': subject,
+                        'message': text_content,
+                    }
+                },
+                timeout=8,
+            )
+
+        resp = None
+        if emailjs_template and emailjs_template != 'template_welcome':
+            resp = _send_via_emailjs(emailjs_template)
+            if resp.status_code == 200:
+                print(f"[ADMIN] Welcome email sent via custom EmailJS ({emailjs_template}) to {to_email}")
+                return True
+
+        # Fallback to verified active template_u0b0yl9
+        resp = _send_via_emailjs(emailjs_verified_template)
         if resp.status_code == 200:
-            print(f"[ADMIN] Welcome email sent via EmailJS fallback to {to_email}")
+            print(f"[ADMIN] Welcome email sent via verified EmailJS ({emailjs_verified_template}) to {to_email}")
             return True
+        else:
+            print(f"[ADMIN] EmailJS returned status: {resp.status_code}, detail: {resp.text}")
     except Exception as ejs_err:
         print(f"[ADMIN] EmailJS fallback failed: {ejs_err}")
 

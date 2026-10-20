@@ -308,6 +308,19 @@ def get_my_plan():
             if not sub_info:
                 return jsonify({'error': 'User not found'}), 404
 
+            # Fetch recent announcements/notifications for user (including farm & broadcast notices)
+            cur.execute('''
+                SELECT n.id, n.title, n.message, n.type, n.created_at
+                FROM notifications n
+                LEFT JOIN farms f ON f.id = n.farm_id
+                WHERE n.user_id = %s 
+                   OR f.owner_id = %s
+                   OR n.type IN ('billing', 'broadcast', 'announcement')
+                ORDER BY n.created_at DESC
+                LIMIT 10
+            ''', (request.user_id, request.user_id))
+            recent_notifs = cur.fetchall()
+
             return jsonify({
                 'success': True,
                 'subscription': sub_info,
@@ -316,6 +329,7 @@ def get_my_plan():
                     'premium': PLANS_CONFIG['premium'],
                     'free_trial': PLANS_CONFIG['free_trial'],
                 },
+                'notifications': recent_notifs,
                 'payment_gateways': {
                     'paymongo_available': True,
                     'stripe_available': True,

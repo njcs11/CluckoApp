@@ -1,10 +1,24 @@
-.detect-page { max-width: 1200px; }
+.detect-page { 
+  max-width: 1200px; 
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
 
 .detect-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 24px;
   align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .detect-grid {
+    grid-template-columns: 1fr !important;
+    gap: 20px;
+  }
 }
 
 /* Camera */
@@ -513,4 +527,51 @@
   border: 1px solid rgba(74, 222, 128, 0.15);
   padding: 10px 14px;
   border-radius: 6px;
+}
+
+/* ── Mobile Polish & Touch Ergonomics (Impeccable & Tactile UI) ── */
+@media (max-width: 640px) {
+  .detect-page {
+    padding: 0 2px;
+  }
+  
+  .detect-hero-stage {
+    padding: 20px 14px;
+  }
+  
+  .detect-hero-title {
+    font-size: 19px;
+  }
+  
+  .detect-hero-sub {
+    font-size: 12.5px;
+    margin-bottom: 16px;
+  }
+
+  .detect-feature-card {
+    padding: 10px 12px;
+  }
+
+  .camera-view {
+    margin-bottom: 12px;
+  }
+
+  .camera-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .camera-actions .btn {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 13px;
+    justify-content: center;
+    border-radius: 8px;
+  }
+
+  .gradcam-overlay-img {
+    max-height: 260px;
+  }
 }

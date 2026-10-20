@@ -139,11 +139,44 @@ export const apiSubmitAppeal = async (email: string, reason: string, appealMessa
   const res = await fetch(`${API_URL}/api/auth/appeal`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, reason, appeal_message: appealMessage }),
+    body: JSON.stringify({
+      email,
+      reason,
+      appeal_text: appealMessage,
+      appeal_message: appealMessage,
+      message: appealMessage,
+    }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || "Failed to submit appeal");
   return json;
+};
+
+export const apiCheckHeartbeatStatus = async () => {
+  try {
+    const token = await getToken();
+    if (!token) return null;
+    const API_URL = await getApiUrl();
+    const res = await fetch(`${API_URL}/api/auth/check-status`, {
+      headers: await headers(),
+    });
+    if (res.status === 403) {
+      const json = await res.json().catch(() => ({}));
+      if (json && json.suspended) {
+        const userDataStr = await AsyncStorage.getItem("userData");
+        let email = "";
+        try {
+          if (userDataStr) email = JSON.parse(userDataStr).email || "";
+        } catch {}
+        await clearStaleSession();
+        triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
+        return { suspended: true, reason: json.reason };
+      }
+    }
+    return { ok: res.ok };
+  } catch (e) {
+    return null;
+  }
 };
 
 const headers = async () => {

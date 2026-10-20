@@ -5,9 +5,17 @@ import InteractiveProductTour from '../components/ui/InteractiveProductTour';
 import AccountSuspendedModal from '../components/ui/AccountSuspendedModal';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect } from 'react';
+import { apiCheckHeartbeatStatus } from '../lib/api';
 
 export default function RootLayout() {
+  useEffect(() => {
+    // Proactively verify session status every 5 seconds to instantly lock out and show appeal modal if account is suspended
+    const interval = setInterval(() => {
+      apiCheckHeartbeatStatus();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
   return (
     <DarkModeProvider>
       <NotificationProvider>

@@ -551,6 +551,9 @@
 }
 
 @media (max-width: 768px) {
+  .admin-subs-container {
+    padding: 16px 12px 32px;
+  }
   .account-hero-banner {
     flex-direction: column;
     align-items: flex-start;

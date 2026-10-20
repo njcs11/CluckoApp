@@ -226,6 +226,9 @@
 }
 
 @media (max-width: 768px) {
+  .admin-audit-container {
+    padding: 16px 12px 32px;
+  }
   .table-pagination-footer {
     flex-direction: column;
     align-items: stretch;

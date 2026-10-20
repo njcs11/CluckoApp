@@ -181,6 +181,10 @@
 }
 
 @media (max-width: 640px) {
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
   .module-choice-grid {
     grid-template-columns: 1fr;
   }

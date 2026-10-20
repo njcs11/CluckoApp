@@ -212,13 +212,35 @@ def send_caretaker_welcome_email(to_email: str, first_name: str, last_name: str,
                 return True
             else:
                 print(f"[AUTH] EmailJS response status: {resp.status_code}, detail: {resp.text}")
-                if "template ID not found" in resp.text:
-                    print(f"[AUTH] [ACTION NEEDED] Please create template '{EMAILJS_WELCOME_TEMPLATE_ID}' in EmailJS dashboard: https://dashboard.emailjs.com/admin/templates")
+                # Fallback to active verified template if custom welcome template fails
+                fb_resp = requests.post(
+                    'https://api.emailjs.com/api/v1.0/email/send',
+                    headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
+                    json={
+                        'service_id': EMAILJS_SERVICE_ID,
+                        'template_id': EMAILJS_TEMPLATE_ID,
+                        'user_id': EMAILJS_USER_ID,
+                        'template_params': {
+                            'to_email': to_email,
+                            'email': to_email,
+                            'name': caretaker_full_name,
+                            'user_name': caretaker_full_name,
+                            'code': f"Temporary Password: {temp_password} (Farm: {farm_name})",
+                            'temp_password': temp_password,
+                            'password': temp_password,
+                            'farm_name': farm_name,
+                            'owner_name': owner_name,
+                            'message': f"Welcome to {farm_name}!\nYou have been registered as a caretaker on Clucko.\nTemporary Password: {temp_password}\nPlease sign in and update your password.",
+                        }
+                    },
+                    timeout=8,
+                )
+                if fb_resp.status_code == 200:
+                    print(f"[AUTH] Caretaker welcome dispatched via verified EmailJS fallback ({EMAILJS_TEMPLATE_ID}) to {to_email}")
+                    return True
         except Exception as ejs_err:
             print(f"[AUTH] EmailJS dispatch error: {ejs_err}")
 
-    # Note: We NEVER reuse EMAILJS_TEMPLATE_ID (Password Reset template) for caretaker welcome emails
-    # to avoid mixing password reset text with caretaker account credentials.
     print(f"[AUTH] Caretaker created ({to_email}). Set SMTP_USER/SMTP_PASSWORD or EMAILJS_WELCOME_TEMPLATE_ID in .env for automated email delivery.")
     return False
 
@@ -1256,12 +1278,12 @@ def submit_account_appeal():
     """
     d = request.json or {}
     email = (d.get('email') or '').strip().lower()
-    appeal_text = (d.get('appeal_text') or d.get('message') or '').strip()
+    appeal_text = (d.get('appeal_text') or d.get('appeal_message') or d.get('message') or d.get('explanation') or '').strip()
 
     if not email:
         return jsonify({'error': 'Email address is required to locate your account'}), 400
-    if not appeal_text or len(appeal_text) < 5:
-        return jsonify({'error': 'Please provide a descriptive explanation for your appeal'}), 400
+    if not appeal_text:
+        appeal_text = 'Requesting account review and reactivation.'
 
     db = get_db()
     try:
@@ -1306,4 +1328,20 @@ def submit_account_appeal():
         db.rollback()
         return jsonify({'error': f"Failed to submit appeal: {str(e)}"}), 500
     finally:
-        db.close()
+        db.close()
+
+
+@app.route('/api/auth/check-status', methods=['GET'])
+@token_required
+def check_user_status(current_user):
+    """
+    Lightweight heartbeat endpoint called by client every few seconds.
+    token_required decorator verifies check_user_suspension() and automatically returns
+    403 with {suspended: True, reason: ...} if moderator suspended the account.
+    """
+    return jsonify({
+        'success': True,
+        'user_id': current_user['id'],
+        'is_active': current_user.get('is_active', True),
+        'role': current_user.get('role', 'owner')
+    })

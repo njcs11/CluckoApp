@@ -33,6 +33,7 @@ import {
   apiGetMyRefundStatus,
   apiGetPendingCheckout,
   apiCancelPendingCheckout,
+  apiGetNotifications,
 } from '../lib/api';
 import { resizeAndCompress, photoUriToBase64 } from '@/utils/photoStorage';
 
@@ -86,6 +87,8 @@ export default function SubscriptionScreen() {
   const [dismissedPriceBanner, setDismissedPriceBanner] = useState(false);
   const [dismissedRejectBanner, setDismissedRejectBanner] = useState(false);
   const [dismissedApproveBanner, setDismissedApproveBanner] = useState(false);
+  const [serverNotifs, setServerNotifs] = useState<any[]>([]);
+  const [dismissedNotifIds, setDismissedNotifIds] = useState<number[]>([]);
 
   // Playing-card style banner stack animation
   const bannerSwipeAnim = useRef(new Animated.Value(0)).current;
@@ -188,6 +191,41 @@ export default function SubscriptionScreen() {
         setSubData(res.subscription);
         if (res.available_plans) {
           setAvailablePlans(res.available_plans);
+        }
+        // Collect notifications from plan response and notifications API
+        let combinedNotifs: any[] = [];
+        if (res.notifications && Array.isArray(res.notifications)) {
+          combinedNotifs = [...res.notifications];
+        }
+        try {
+          const allNotifs = await apiGetNotifications();
+          if (Array.isArray(allNotifs)) {
+            const notifMap = new Map();
+            combinedNotifs.forEach((n: any) => notifMap.set(n.id, n));
+            allNotifs.forEach((n: any) => {
+              // Prioritize billing, announcements, broadcasts, warnings
+              if (!notifMap.has(n.id) && (n.type === 'billing' || n.type === 'broadcast' || n.type === 'announcement' || n.type === 'warning' || n.title?.toLowerCase().includes('plan') || n.title?.toLowerCase().includes('subscription') || n.title?.toLowerCase().includes('update'))) {
+                notifMap.set(n.id, n);
+              }
+            });
+            combinedNotifs = Array.from(notifMap.values());
+          }
+        } catch (ne) {
+          console.warn('Failed to fetch general notifications:', ne);
+        }
+
+        if (combinedNotifs.length > 0) {
+          setServerNotifs(combinedNotifs);
+          const checks = await Promise.all(
+            combinedNotifs.map((n: any) =>
+              AsyncStorage.getItem(`@clucko_dismissed_notif_${n.id}`)
+            )
+          );
+          const dismissed: number[] = [];
+          combinedNotifs.forEach((n: any, idx: number) => {
+            if (checks[idx] === 'true') dismissed.push(n.id);
+          });
+          setDismissedNotifIds(dismissed);
         }
         // Default selection logic:
         if (res.subscription.plan === 'premium') {
@@ -668,6 +706,34 @@ export default function SubscriptionScreen() {
                 setDismissedPriceBanner(true);
                 await AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
               },
+            });
+          }
+
+          // Broadcast, system, and account notifications from admin/server
+          if (serverNotifs && serverNotifs.length > 0) {
+            serverNotifs.forEach((n: any) => {
+              if (dismissedNotifIds.includes(n.id)) return;
+              const isWarn = n.type === 'warning' || n.type === 'alert' || n.type === 'error';
+              const isSuccess = n.type === 'success';
+              const isBilling = n.type === 'billing' || n.type === 'subscription';
+
+              activeBanners.push({
+                id: `server_notif_${n.id}`,
+                title: n.title || 'Platform Announcement',
+                body: n.message || '',
+                icon: (isWarn ? 'alert-circle' : isSuccess ? 'checkmark-circle' : isBilling ? 'card' : 'notifications') as any,
+                iconColor: isWarn ? '#DC2626' : isSuccess ? '#059669' : isBilling ? '#2563EB' : '#D97706',
+                bgColor: isDarkMode ? (isWarn ? '#2D1718' : isSuccess ? '#064E3B28' : isBilling ? '#172033' : '#1E293B') : (isWarn ? '#FEF2F2' : isSuccess ? '#ECFDF5' : isBilling ? '#EFF6FF' : '#FEF3C7'),
+                borderColor: isWarn ? '#EF4444' : isSuccess ? '#10B981' : isBilling ? '#3B82F6' : '#F59E0B',
+                titleColor: isDarkMode ? (isWarn ? '#FCA5A5' : isSuccess ? '#6EE7B7' : isBilling ? '#93C5FD' : '#FDE68A') : (isWarn ? '#B91C1C' : isSuccess ? '#065F46' : isBilling ? '#1E40AF' : '#92400E'),
+                textColor: isDarkMode ? '#CBD5E1' : (isWarn ? '#7F1D1D' : isSuccess ? '#047857' : isBilling ? '#1E3A8A' : '#78350F'),
+                dismissBg: isDarkMode ? '#334155' : (isWarn ? '#FEE2E2' : isSuccess ? '#D1FAE5' : isBilling ? '#DBEAFE' : '#FDE68A'),
+                dismissTextColor: isDarkMode ? '#F8FAFC' : (isWarn ? '#991B1B' : isSuccess ? '#047857' : isBilling ? '#1E40AF' : '#92400E'),
+                onDismiss: async () => {
+                  setDismissedNotifIds((prev) => [...prev, n.id]);
+                  await AsyncStorage.setItem(`@clucko_dismissed_notif_${n.id}`, 'true');
+                },
+              });
             });
           }
 

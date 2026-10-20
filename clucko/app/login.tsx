@@ -279,6 +279,9 @@ export default function LoginScreen() {
       });
       router.replace('/(tabs)/home');
     } catch (err: any) {
+      if (err?.suspended || err?.message?.toLowerCase().includes('suspended')) {
+        return;
+      }
       triggerShake();
       const rawMsg = err?.message || '';
       const lower = rawMsg.toLowerCase();
@@ -319,12 +322,16 @@ export default function LoginScreen() {
         });
         router.replace('/(tabs)/home');
       } else if (res.error && res.error !== 'Sign in was cancelled.') {
-        triggerShake();
-        displayErrorToast(res.error);
+        if (!res.error.toLowerCase().includes('suspended') && !res.error.toLowerCase().includes('lockout')) {
+          triggerShake();
+          displayErrorToast(res.error);
+        }
       }
     } catch (err: any) {
-      triggerShake();
-      displayErrorToast(err?.message || 'Could not complete Google Sign-In.');
+      if (!err?.message?.toLowerCase().includes('suspended') && !err?.suspended) {
+        triggerShake();
+        displayErrorToast(err?.message || 'Could not complete Google Sign-In.');
+      }
     } finally {
       setGoogleLoading(false);
     }

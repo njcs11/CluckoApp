@@ -27,6 +27,8 @@ export default function AdminUsersPage() {
   const [sortDir, setSortDir] = useState('desc');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortMenuRef = useRef(null);
+  const [accountFilter, setAccountFilter] = useState('all');
+  const [allAccounts, setAllAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Bulk Actions
@@ -75,6 +77,7 @@ export default function AdminUsersPage() {
       });
       if (res.data && res.data.success) {
         setUsers(res.data.users || []);
+        if (res.data.all_accounts) setAllAccounts(res.data.all_accounts);
         setTotal(res.data.total || 0);
         setPages(res.data.pages || 1);
         if (res.data.stats) setStats(res.data.stats);
@@ -84,6 +87,34 @@ export default function AdminUsersPage() {
       // Suppress alarming toast on initial cold load; let skeleton loader wait gracefully
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAccountFilterChange = (val) => {
+    setAccountFilter(val);
+    setPage(1);
+    if (val === 'all') {
+      setRoleFilter('all');
+      setStatusFilter('all');
+      setSearch('');
+    } else if (val === 'role_owner') {
+      setRoleFilter('owner');
+      setSearch('');
+    } else if (val === 'role_caretaker') {
+      setRoleFilter('caretaker');
+      setSearch('');
+    } else if (val === 'role_admin') {
+      setRoleFilter('admin');
+      setSearch('');
+    } else if (val === 'status_active') {
+      setStatusFilter('active');
+      setSearch('');
+    } else if (val === 'status_suspended') {
+      setStatusFilter('suspended');
+      setSearch('');
+    } else if (val.startsWith('user_')) {
+      const uEmail = val.replace('user_', '');
+      setSearch(uEmail);
     }
   };
 
@@ -512,27 +543,56 @@ export default function AdminUsersPage() {
             </select>
           </div>
 
-          {/* Sort Popover Button */}
-          <div className="filter-select-wrap" ref={sortMenuRef} style={{ position: 'relative' }}>
-            <label className="filter-label">Sort:</label>
+          {/* Account Filter Dropdown */}
+          <div className="filter-select-wrap">
+            <label className="filter-label">Account:</label>
+            <select 
+              value={accountFilter} 
+              onChange={(e) => handleAccountFilterChange(e.target.value)}
+              className="filter-select"
+            >
+              <option value="all">All Accounts ({stats.total || allAccounts.length || users.length})</option>
+              <optgroup label="Filter by Role">
+                <option value="role_owner">Farm Owners ({stats.owners || 0})</option>
+                <option value="role_caretaker">Caretakers ({stats.caretakers || 0})</option>
+                <option value="role_admin">Administrators</option>
+              </optgroup>
+              <optgroup label="Filter by Status">
+                <option value="status_active">Active Accounts ({stats.active || 0})</option>
+                <option value="status_suspended">Suspended Accounts ({stats.suspended || 0})</option>
+              </optgroup>
+              {allAccounts.length > 0 && (
+                <optgroup label="Direct Account Selector">
+                  {allAccounts.map((acc) => (
+                    <option key={acc.id} value={`user_${acc.email}`}>
+                      {acc.first_name} {acc.last_name || ''} ({acc.email})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
+          {/* Sort Popover Icon Button */}
+          <div className="sort-icon-wrap" ref={sortMenuRef} style={{ position: 'relative' }}>
             <button 
               type="button"
-              className="sort-popover-trigger-btn"
+              className={`sort-icon-btn ${sortMenuOpen ? 'active' : ''}`}
               onClick={() => setSortMenuOpen(!sortMenuOpen)}
-              title="Click to change sorting order"
+              title={`Sort Accounts: ${
+                sortBy === 'created_at' && sortDir === 'desc' ? 'Joined Date (Newest)' :
+                sortBy === 'created_at' && sortDir === 'asc' ? 'Joined Date (Oldest)' :
+                sortBy === 'first_name' && sortDir === 'asc' ? 'Name (A → Z)' :
+                sortBy === 'first_name' && sortDir === 'desc' ? 'Name (Z → A)' :
+                sortBy === 'last_active_at' ? 'Recently Active' : 'Email (A → Z)'
+              }`}
+              aria-label="Sort accounts"
             >
-              <ArrowUpDown size={13} />
-              <span>
-                {sortBy === 'created_at' && sortDir === 'desc' && 'Joined Date (Newest)'}
-                {sortBy === 'created_at' && sortDir === 'asc' && 'Joined Date (Oldest)'}
-                {sortBy === 'first_name' && sortDir === 'asc' && 'Name (A → Z)'}
-                {sortBy === 'first_name' && sortDir === 'desc' && 'Name (Z → A)'}
-                {sortBy === 'last_active_at' && 'Recently Active'}
-                {sortBy === 'email' && 'Email (A → Z)'}
-              </span>
+              <ArrowUpDown size={15} />
             </button>
             {sortMenuOpen && (
               <div className="sort-popover-menu">
+                <div className="sort-popover-header">Sort Accounts</div>
                 {[
                   { id: 'created_desc', label: 'Joined Date (Newest)', by: 'created_at', dir: 'desc' },
                   { id: 'created_asc', label: 'Joined Date (Oldest)', by: 'created_at', dir: 'asc' },

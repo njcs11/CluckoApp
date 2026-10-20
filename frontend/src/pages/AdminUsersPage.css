@@ -901,24 +901,44 @@
 }
 
 /* Sort Popover Button & Menu */
-.sort-popover-trigger-btn {
+.sort-icon-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.sort-icon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  color: var(--text-primary);
-  font-size: 13px;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
 }
 
-.sort-popover-trigger-btn:hover {
+.sort-icon-btn:hover,
+.sort-icon-btn.active {
   border-color: var(--accent-green);
   background: var(--bg-card);
+  color: var(--accent-green);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.22);
+  transform: translateY(-1px);
+}
+
+.sort-popover-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  padding: 6px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
 }
 
 .sort-popover-menu {
@@ -972,4 +992,82 @@
   accent-color: var(--accent-green);
   cursor: pointer;
   display: inline-block !important;
+}
+
+/* ─── Responsive Queries (Impeccable & Tactile UI) ─── */
+@media (max-width: 900px) {
+  .admin-users-container {
+    padding: 20px 16px 36px;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .admin-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .admin-header-actions .admin-btn {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+    min-height: 42px;
+  }
+
+  .admin-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .search-input-wrap {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .filters-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .filter-select-wrap {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 110px;
+  }
+
+  .filter-select {
+    width: 100%;
+  }
+
+  .sort-icon-wrap {
+    align-self: center;
+  }
+
+  .bulk-actions-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .bulk-buttons {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .bulk-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 38px;
+  }
 }

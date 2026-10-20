@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Modal,
   View,
@@ -25,9 +26,18 @@ export default function AccountSuspendedModal() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    setOnAccountSuspended((suspensionReason: string, userEmail?: string) => {
+    setOnAccountSuspended(async (suspensionReason: string, userEmail?: string) => {
       setReason(suspensionReason || 'Terms of Service: Community guidelines conflict');
-      if (userEmail) setEmail(userEmail);
+      let targetEmail = userEmail || '';
+      if (!targetEmail) {
+        try {
+          const storedEmail = await AsyncStorage.getItem('userEmail');
+          const userDataStr = await AsyncStorage.getItem('userData');
+          if (storedEmail) targetEmail = storedEmail;
+          else if (userDataStr) targetEmail = JSON.parse(userDataStr).email || '';
+        } catch {}
+      }
+      setEmail(targetEmail);
       setAppealMessage('');
       setAppealSubmitted(false);
       setErrorMessage('');
@@ -36,19 +46,17 @@ export default function AccountSuspendedModal() {
   }, []);
 
   const handleSubmitAppeal = async () => {
-    if (!email.trim()) {
+    const finalEmail = (email || '').trim();
+    if (!finalEmail) {
       setErrorMessage('Please enter your account email address.');
       return;
     }
-    if (!appealMessage.trim() || appealMessage.trim().length < 10) {
-      setErrorMessage('Please provide a brief explanation or appeal statement (at least 10 characters).');
-      return;
-    }
 
+    const messageToSend = appealMessage.trim() || 'Requesting account review and reactivation.';
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      await apiSubmitAppeal(email.trim(), reason, appealMessage.trim());
+      await apiSubmitAppeal(finalEmail, reason, messageToSend);
       setAppealSubmitted(true);
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to submit appeal. Please try again.');

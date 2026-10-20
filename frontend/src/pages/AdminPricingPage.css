@@ -247,6 +247,9 @@
 }
 
 @media (max-width: 800px) {
+  .admin-pricing-container {
+    padding: 16px 12px 32px;
+  }
   .broadcast-grid {
     grid-template-columns: 1fr;
   }
