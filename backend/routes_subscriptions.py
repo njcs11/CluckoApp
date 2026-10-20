@@ -308,16 +308,21 @@ def get_my_plan():
             if not sub_info:
                 return jsonify({'error': 'User not found'}), 404
 
-            # Fetch recent announcements/notifications for user (including farm & broadcast notices)
+            # Fetch strictly subscription, pricing, and billing announcements for user
             cur.execute('''
                 SELECT n.id, n.title, n.message, n.type, n.created_at
                 FROM notifications n
                 LEFT JOIN farms f ON f.id = n.farm_id
-                WHERE n.user_id = %s 
-                   OR f.owner_id = %s
-                   OR n.type IN ('billing', 'broadcast', 'announcement')
+                WHERE (n.user_id = %s OR f.owner_id = %s)
+                  AND (
+                      n.type IN ('billing', 'subscription')
+                      OR n.title ILIKE '%%pricing%%'
+                      OR n.title ILIKE '%%plan%%'
+                      OR n.title ILIKE '%%subscription%%'
+                      OR n.title ILIKE '%%refund%%'
+                  )
                 ORDER BY n.created_at DESC
-                LIMIT 10
+                LIMIT 5
             ''', (request.user_id, request.user_id))
             recent_notifs = cur.fetchall()
 

@@ -96,9 +96,14 @@ export const clearStaleSession = async () => {
   try {
     await AsyncStorage.multiRemove([
       "token",
+      "userToken",
       "user_id",
       "userData",
+      "user",
+      "userRole",
       "user_role",
+      "userEmail",
+      "farmId",
       "isLoggedIn",
     ]);
   } catch (e) {

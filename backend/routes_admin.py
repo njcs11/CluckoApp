@@ -608,6 +608,14 @@ def get_admin_users():
     elif status_filter == 'suspended':
         conditions.append("u.is_active = FALSE")
 
+    user_id_param = request.args.get('user_id')
+    if user_id_param and user_id_param != 'all':
+        try:
+            conditions.append("u.id = %s")
+            params.append(int(user_id_param))
+        except ValueError:
+            pass
+
     where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     db = get_db()
@@ -929,28 +937,28 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
         except Exception as smtp_err:
             print(f"[ADMIN] SMTP dispatch to {to_email} failed: {smtp_err}")
 
-    # Fallback: EmailJS (Try custom template first, then verified active template_u0b0yl9)
+    # Dedicated Admin Invite / Welcome Email via EmailJS
+    # NOTE: Never fallback to template_u0b0yl9 because that is strictly for password reset!
     try:
         import requests
         emailjs_service = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
-        emailjs_template = os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID', 'template_welcome')
-        emailjs_verified_template = os.environ.get('EMAILJS_TEMPLATE_ID', 'template_u0b0yl9')
+        # Only use a dedicated welcome/invite template if explicitly set and not equal to reset password template
+        emailjs_invite_template = os.environ.get('EMAILJS_INVITE_TEMPLATE_ID') or os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID')
         emailjs_user = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
 
-        def _send_via_emailjs(t_id):
-            return requests.post(
+        if emailjs_invite_template and emailjs_invite_template not in ('template_u0b0yl9', 'template_welcome'):
+            resp = requests.post(
                 'https://api.emailjs.com/api/v1.0/email/send',
                 headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
                 json={
                     'service_id': emailjs_service,
-                    'template_id': t_id,
+                    'template_id': emailjs_invite_template,
                     'user_id': emailjs_user,
                     'template_params': {
                         'to_email': to_email,
                         'email': to_email,
                         'user_name': admin_full_name,
                         'name': admin_full_name,
-                        'code': f"Temporary Password: {temp_password} | Portal: {login_url}",
                         'temp_password': temp_password,
                         'password': temp_password,
                         'role': role_display,
@@ -961,25 +969,17 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
                 },
                 timeout=8,
             )
-
-        resp = None
-        if emailjs_template and emailjs_template != 'template_welcome':
-            resp = _send_via_emailjs(emailjs_template)
             if resp.status_code == 200:
-                print(f"[ADMIN] Welcome email sent via custom EmailJS ({emailjs_template}) to {to_email}")
+                print(f"[ADMIN] Dedicated welcome email dispatched via EmailJS ({emailjs_invite_template}) to {to_email}")
                 return True
-
-        # Fallback to verified active template_u0b0yl9
-        resp = _send_via_emailjs(emailjs_verified_template)
-        if resp.status_code == 200:
-            print(f"[ADMIN] Welcome email sent via verified EmailJS ({emailjs_verified_template}) to {to_email}")
-            return True
+            else:
+                print(f"[ADMIN] EmailJS returned status: {resp.status_code}, detail: {resp.text}")
         else:
-            print(f"[ADMIN] EmailJS returned status: {resp.status_code}, detail: {resp.text}")
+            print(f"[ADMIN] No dedicated invite template configured. Password reset template template_u0b0yl9 must NEVER be used for admin invites.")
     except Exception as ejs_err:
-        print(f"[ADMIN] EmailJS fallback failed: {ejs_err}")
+        print(f"[ADMIN] Dedicated EmailJS invite dispatch failed: {ejs_err}")
 
-    print(f"[ADMIN] Welcome email simulated for {to_email}")
+    print(f"[ADMIN] Admin invite credentials prepared for on-screen modal display for {to_email}")
     return False
 
 
@@ -1092,6 +1092,7 @@ def create_admin_user():
                 'message': f"Account for {email} ({role.upper()}) created successfully." + (" Credentials sent to user's email!" if email_sent else ""),
                 'user': new_user,
                 'temporary_password': temp_password,
+                'login_url': 'https://clucko-app.vercel.app/admin/login?portal=admin',
                 'email_sent': email_sent
             })
     finally:

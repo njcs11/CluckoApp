@@ -29,19 +29,23 @@ export default function AccountSuspendedModal() {
     setOnAccountSuspended(async (suspensionReason: string, userEmail?: string) => {
       setReason(suspensionReason || 'Terms of Service: Community guidelines conflict');
       let targetEmail = userEmail || '';
-      if (!targetEmail) {
-        try {
-          const storedEmail = await AsyncStorage.getItem('userEmail');
-          const userDataStr = await AsyncStorage.getItem('userData');
-          if (storedEmail) targetEmail = storedEmail;
-          else if (userDataStr) targetEmail = JSON.parse(userDataStr).email || '';
-        } catch {}
-      }
+      try {
+        const storedEmail = await AsyncStorage.getItem('userEmail');
+        const userDataStr = await AsyncStorage.getItem('userData');
+        if (storedEmail) targetEmail = storedEmail;
+        else if (userDataStr) targetEmail = JSON.parse(userDataStr).email || '';
+      } catch {}
       setEmail(targetEmail);
       setAppealMessage('');
       setAppealSubmitted(false);
       setErrorMessage('');
       setVisible(true);
+
+      // Instantly clear session and redirect background away from flock data
+      try {
+        await AsyncStorage.multiRemove(['userToken', 'userData', 'userRole', 'farmId']);
+        router.replace('/login');
+      } catch {}
     });
   }, []);
 
@@ -65,24 +69,36 @@ export default function AccountSuspendedModal() {
     }
   };
 
-  const handleCloseAndGoToLogin = () => {
+  const handleCloseAndGoToLogin = async () => {
     setVisible(false);
     setAppealSubmitted(false);
+    try {
+      await AsyncStorage.multiRemove(['userToken', 'userData', 'userRole', 'farmId']);
+    } catch {}
     router.replace('/login');
   };
 
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCloseAndGoToLogin}>
-      <KeyboardAvoidingView
-        style={styles.backdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.card}>
-          {/* Header Warning Icon */}
-          <View style={styles.iconCircle}>
-            <Ionicons name="shield-outline" size={32} color="#DC2626" />
+    <Modal
+      visible={visible}
+      transparent={false}
+      presentationStyle="fullScreen"
+      statusBarTranslucent={false}
+      animationType="fade"
+      onRequestClose={handleCloseAndGoToLogin}
+    >
+      <View style={styles.fullscreenRoot}>
+        <KeyboardAvoidingView
+          style={styles.backdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.card}>
+            {/* Header Warning Icon */}
+            <View style={styles.iconCircle}>
+              <Ionicons name="shield-outline" size={32} color="#DC2626" />
+            </View>
           </View>
 
           <Text style={styles.title}>Account Access Suspended</Text>
@@ -155,16 +171,21 @@ export default function AccountSuspendedModal() {
               </TouchableOpacity>
             </ScrollView>
           )}
-        </View>
-      </KeyboardAvoidingView>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  fullscreenRoot: {
+    flex: 1,
+    backgroundColor: '#070A12',
+  },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: '#070A12',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,

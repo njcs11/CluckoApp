@@ -72,12 +72,15 @@ export default function AdminUsersPage() {
           role: roleFilter,
           status: statusFilter,
           sort_by: sortBy,
-          sort_dir: sortDir
+          sort_dir: sortDir,
+          user_id: accountFilter
         }
       });
       if (res.data && res.data.success) {
         setUsers(res.data.users || []);
-        if (res.data.all_accounts) setAllAccounts(res.data.all_accounts);
+        if (res.data.all_accounts && res.data.all_accounts.length > 0) {
+          setAllAccounts(res.data.all_accounts);
+        }
         setTotal(res.data.total || 0);
         setPages(res.data.pages || 1);
         if (res.data.stats) setStats(res.data.stats);
@@ -93,30 +96,17 @@ export default function AdminUsersPage() {
   const handleAccountFilterChange = (val) => {
     setAccountFilter(val);
     setPage(1);
-    if (val === 'all') {
-      setRoleFilter('all');
-      setStatusFilter('all');
-      setSearch('');
-    } else if (val === 'role_owner') {
-      setRoleFilter('owner');
-      setSearch('');
-    } else if (val === 'role_caretaker') {
-      setRoleFilter('caretaker');
-      setSearch('');
-    } else if (val === 'role_admin') {
-      setRoleFilter('admin');
-      setSearch('');
-    } else if (val === 'status_active') {
-      setStatusFilter('active');
-      setSearch('');
-    } else if (val === 'status_suspended') {
-      setStatusFilter('suspended');
-      setSearch('');
-    } else if (val.startsWith('user_')) {
-      const uEmail = val.replace('user_', '');
-      setSearch(uEmail);
-    }
   };
+
+  useEffect(() => {
+    // Initial fetch of full accounts directory
+    axios.get('/api/admin/users', { params: { limit: 100 } })
+      .then(r => {
+        if (r.data && r.data.all_accounts) setAllAccounts(r.data.all_accounts);
+        else if (r.data && r.data.users) setAllAccounts(r.data.users);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchAppeals = async () => {
     setAppealsLoading(true);
@@ -149,7 +139,7 @@ export default function AdminUsersPage() {
   useEffect(() => {
     fetchUsers();
     fetchAppeals();
-  }, [page, limit, roleFilter, statusFilter, sortBy, sortDir]);
+  }, [page, limit, roleFilter, statusFilter, accountFilter, sortBy, sortDir]);
 
   // Click outside listener for sort dropdown
   useEffect(() => {
@@ -543,7 +533,7 @@ export default function AdminUsersPage() {
             </select>
           </div>
 
-          {/* Account Filter Dropdown */}
+          {/* Account Filter Dropdown — Direct Individual User Accounts */}
           <div className="filter-select-wrap">
             <label className="filter-label">Account:</label>
             <select 
@@ -551,25 +541,17 @@ export default function AdminUsersPage() {
               onChange={(e) => handleAccountFilterChange(e.target.value)}
               className="filter-select"
             >
-              <option value="all">All Accounts ({stats.total || allAccounts.length || users.length})</option>
-              <optgroup label="Filter by Role">
-                <option value="role_owner">Farm Owners ({stats.owners || 0})</option>
-                <option value="role_caretaker">Caretakers ({stats.caretakers || 0})</option>
-                <option value="role_admin">Administrators</option>
-              </optgroup>
-              <optgroup label="Filter by Status">
-                <option value="status_active">Active Accounts ({stats.active || 0})</option>
-                <option value="status_suspended">Suspended Accounts ({stats.suspended || 0})</option>
-              </optgroup>
-              {allAccounts.length > 0 && (
-                <optgroup label="Direct Account Selector">
-                  {allAccounts.map((acc) => (
-                    <option key={acc.id} value={`user_${acc.email}`}>
-                      {acc.first_name} {acc.last_name || ''} ({acc.email})
-                    </option>
-                  ))}
-                </optgroup>
-              )}
+              <option value="all">All Accounts ({allAccounts.length || stats.total || users.length})</option>
+              {(allAccounts.length > 0 ? allAccounts : users).map((acc) => {
+                const roleLabel = acc.role === 'admin' ? 'Admin' : acc.role === 'owner' ? 'Owner' : 'Caretaker';
+                const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || acc.email;
+                const statusTag = acc.is_active === false ? ' [Suspended]' : '';
+                return (
+                  <option key={acc.id} value={acc.id}>
+                    {fullName} ({acc.email}) — {roleLabel}{statusTag}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -1397,41 +1379,81 @@ export default function AdminUsersPage() {
 
             {createdAccountResult ? (
               <div style={{ marginTop: 20 }}>
-                <div style={{ padding: 16, background: '#E8F5E9', border: '1px solid #A5D6A7', borderRadius: 8, marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#2E7D32', fontWeight: 600, marginBottom: 6 }}>
-                    <Check size={18} /> Account Created Successfully!
+                <div style={{ padding: 16, background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: 10, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-green)', fontWeight: 600, marginBottom: 6 }}>
+                    <Check size={18} /> Admin Account Created Successfully!
                   </div>
-                  <p style={{ margin: 0, fontSize: '0.88rem', color: '#1B5E20' }}>
-                    The <strong>{createdAccountResult.role.toUpperCase()}</strong> account for <strong>{createdAccountResult.email}</strong> is now active.
+                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    The <strong>{createdAccountResult.role.toUpperCase()}</strong> account for <strong>{createdAccountResult.email}</strong> is now active in the platform directory.
                   </p>
-                  <p style={{ margin: '6px 0 0 0', fontSize: '0.82rem', color: createdAccountResult.email_sent ? '#2E7D32' : '#78350F' }}>
+                  <p style={{ margin: '8px 0 0 0', fontSize: '0.82rem', color: createdAccountResult.email_sent ? '#22C55E' : 'var(--text-secondary)' }}>
                     {createdAccountResult.email_sent 
-                      ? '📧 Automated Delivery: An onboarding welcome email with their login credentials and direct sign-in link has been sent to their inbox!'
-                      : '📧 Email Delivery: Account created. (Please manually share credentials below or ensure SMTP is online).'}
+                      ? '📧 Automated Delivery: Custom invitation email dispatched successfully.'
+                      : '📋 Instant Credential Sharing: Copy the temporary credentials below to share directly with the administrator.'}
                   </p>
                 </div>
 
-                <div style={{ background: 'var(--bg-secondary, #f8fafc)', padding: 14, borderRadius: 8, border: '1px solid var(--border-color, #e2e8f0)', marginBottom: 16 }}>
+                {/* Temporary Password Box */}
+                <div style={{ background: 'var(--bg-secondary, #1e293b)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 12 }}>
                   <label style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', fontWeight: 600 }}>
-                    Temporary Login Credentials
+                    Temporary Password
                   </label>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, padding: '10px 12px', background: '#fff', borderRadius: 6, border: '1px dashed #cbd5e1' }}>
-                    <code style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, padding: '10px 12px', background: 'var(--bg-panel, #0f172a)', borderRadius: 8, border: '1px dashed var(--border)' }}>
+                    <code style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--accent-green)', letterSpacing: 0.5 }}>
                       {createdAccountResult.temporary_password}
                     </code>
                     <button
                       type="button"
                       className="admin-btn secondary"
-                      style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
                       onClick={() => copyToClipboard(createdAccountResult.temporary_password)}
                     >
-                      <Copy size={13} /> Copy
+                      <Copy size={13} /> Copy Password
                     </button>
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-                    Share this temporary password with the new administrator. They can log in immediately at the Admin Login Gate.
-                  </p>
                 </div>
+
+                {/* Portal Link Box */}
+                <div style={{ background: 'var(--bg-secondary, #1e293b)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 16 }}>
+                  <label style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', fontWeight: 600 }}>
+                    Admin Sign-In Portal URL
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, padding: '10px 12px', background: 'var(--bg-panel, #0f172a)', borderRadius: 8, border: '1px dashed var(--border)' }}>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+                      https://clucko-app.vercel.app/admin/login?portal=admin
+                    </span>
+                    <button
+                      type="button"
+                      className="admin-btn secondary"
+                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                      onClick={() => copyToClipboard('https://clucko-app.vercel.app/admin/login?portal=admin')}
+                    >
+                      <Copy size={13} /> Copy URL
+                    </button>
+                  </div>
+                </div>
+
+                {/* 1-Click Copy Complete Invitation Message */}
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    marginBottom: 16,
+                    padding: '10px 16px',
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    color: 'var(--accent-green)',
+                    border: '1px solid var(--accent-green-border)'
+                  }}
+                  onClick={() => {
+                    const inviteMsg = `🐣 Clucko Platform Administration Invitation\nYou have been invited as an Administrator on Clucko.\n\nAdmin Portal: https://clucko-app.vercel.app/admin/login?portal=admin\nEmail: ${createdAccountResult.email}\nTemporary Password: ${createdAccountResult.temporary_password}\n\nPlease sign in and set your new password immediately.`;
+                    copyToClipboard(inviteMsg);
+                  }}
+                >
+                  <Copy size={15} />
+                  <span>Copy Complete Invitation Message</span>
+                </button>
 
                 <div className="modal-actions-row">
                   <button

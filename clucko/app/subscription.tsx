@@ -192,37 +192,24 @@ export default function SubscriptionScreen() {
         if (res.available_plans) {
           setAvailablePlans(res.available_plans);
         }
-        // Collect notifications from plan response and notifications API
-        let combinedNotifs: any[] = [];
         if (res.notifications && Array.isArray(res.notifications)) {
-          combinedNotifs = [...res.notifications];
-        }
-        try {
-          const allNotifs = await apiGetNotifications();
-          if (Array.isArray(allNotifs)) {
-            const notifMap = new Map();
-            combinedNotifs.forEach((n: any) => notifMap.set(n.id, n));
-            allNotifs.forEach((n: any) => {
-              // Prioritize billing, announcements, broadcasts, warnings
-              if (!notifMap.has(n.id) && (n.type === 'billing' || n.type === 'broadcast' || n.type === 'announcement' || n.type === 'warning' || n.title?.toLowerCase().includes('plan') || n.title?.toLowerCase().includes('subscription') || n.title?.toLowerCase().includes('update'))) {
-                notifMap.set(n.id, n);
-              }
-            });
-            combinedNotifs = Array.from(notifMap.values());
-          }
-        } catch (ne) {
-          console.warn('Failed to fetch general notifications:', ne);
-        }
-
-        if (combinedNotifs.length > 0) {
-          setServerNotifs(combinedNotifs);
+          // Strictly subscription, pricing, plan, and billing announcements ONLY
+          const subNotifs = res.notifications.filter((n: any) => {
+            const title = (n.title || '').toLowerCase();
+            const type = (n.type || '').toLowerCase();
+            if (title.includes('caretaker') || title.includes('chicken') || title.includes('scan') || title.includes('task') || title.includes('welcome')) {
+              return false;
+            }
+            return type === 'billing' || type === 'subscription' || title.includes('pricing') || title.includes('plan') || title.includes('refund');
+          });
+          setServerNotifs(subNotifs);
           const checks = await Promise.all(
-            combinedNotifs.map((n: any) =>
+            subNotifs.map((n: any) =>
               AsyncStorage.getItem(`@clucko_dismissed_notif_${n.id}`)
             )
           );
           const dismissed: number[] = [];
-          combinedNotifs.forEach((n: any, idx: number) => {
+          subNotifs.forEach((n: any, idx: number) => {
             if (checks[idx] === 'true') dismissed.push(n.id);
           });
           setDismissedNotifIds(dismissed);
@@ -648,183 +635,110 @@ export default function SubscriptionScreen() {
           </View>
         )}
 
-        {/* Playing Card Deck Alert Stack */}
-        {(() => {
-          const activeBanners: any[] = [];
-          if (refundRequestData?.status === 'approved' && !dismissedApproveBanner) {
-            activeBanners.push({
-              id: `refund_app_${refundRequestData.id}`,
-              title: 'Notice: Refund Request Approved',
-              body: `Your refund request for ₱${Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} has been approved and processed. ${refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : 'The transaction was refunded and your subscription ledger updated.'}`,
-              icon: 'checkmark-circle' as const,
-              iconColor: '#059669',
-              bgColor: isDarkMode ? '#064E3B28' : '#ECFDF5',
-              borderColor: '#10B981',
-              titleColor: isDarkMode ? '#6EE7B7' : '#065F46',
-              textColor: isDarkMode ? '#E2E8F0' : '#047857',
-              dismissBg: isDarkMode ? '#064E3B' : '#D1FAE5',
-              dismissTextColor: isDarkMode ? '#A7F3D0' : '#047857',
-              onDismiss: async () => {
-                setDismissedApproveBanner(true);
-                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_approved`, 'true');
-              },
-            });
-          }
-          if (refundRequestData?.status === 'rejected' && !dismissedRejectBanner) {
-            activeBanners.push({
-              id: `refund_rej_${refundRequestData.id}`,
-              title: 'Notice: Refund Request Declined',
-              body: `Your previous refund request was reviewed and declined. Reason: ${refundRequestData.admin_notes || 'Does not qualify under standard refund terms'}. If you have valid grounds or wish to adjust your reason, you can submit a new request below.`,
-              icon: 'close-circle' as const,
-              iconColor: '#DC2626',
-              bgColor: isDarkMode ? '#2D1718' : '#FEF2F2',
-              borderColor: '#EF4444',
-              titleColor: isDarkMode ? '#FCA5A5' : '#B91C1C',
-              textColor: isDarkMode ? '#E2E8F0' : '#7F1D1D',
-              dismissBg: isDarkMode ? '#450A0A' : '#FEE2E2',
-              dismissTextColor: isDarkMode ? '#FCA5A5' : '#991B1B',
-              onDismiss: async () => {
-                setDismissedRejectBanner(true);
-                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_rejected`, 'true');
-              },
-            });
-          }
-          if (!dismissedPriceBanner) {
-            activeBanners.push({
-              id: 'pricing_notice',
-              title: 'Notice: Subscription Pricing Update',
-              body: `Pro Plan is now ₱${proPrice}/3mo and Premium Plan is ₱${premiumPrice}/yr. All active subscriptions maintain their valid duration without price change until next renewal.`,
-              icon: 'notifications' as const,
-              iconColor: '#D97706',
-              bgColor: isDarkMode ? '#1E293B' : '#FEF3C7',
-              borderColor: '#F59E0B',
-              titleColor: isDarkMode ? '#FDE68A' : '#92400E',
-              textColor: isDarkMode ? '#CBD5E1' : '#78350F',
-              dismissBg: isDarkMode ? '#334155' : '#FDE68A',
-              dismissTextColor: isDarkMode ? '#FDE68A' : '#92400E',
-              onDismiss: async () => {
-                setDismissedPriceBanner(true);
-                await AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
-              },
-            });
-          }
-
-          // Broadcast, system, and account notifications from admin/server
-          if (serverNotifs && serverNotifs.length > 0) {
-            serverNotifs.forEach((n: any) => {
-              if (dismissedNotifIds.includes(n.id)) return;
-              const isWarn = n.type === 'warning' || n.type === 'alert' || n.type === 'error';
-              const isSuccess = n.type === 'success';
-              const isBilling = n.type === 'billing' || n.type === 'subscription';
-
-              activeBanners.push({
-                id: `server_notif_${n.id}`,
-                title: n.title || 'Platform Announcement',
-                body: n.message || '',
-                icon: (isWarn ? 'alert-circle' : isSuccess ? 'checkmark-circle' : isBilling ? 'card' : 'notifications') as any,
-                iconColor: isWarn ? '#DC2626' : isSuccess ? '#059669' : isBilling ? '#2563EB' : '#D97706',
-                bgColor: isDarkMode ? (isWarn ? '#2D1718' : isSuccess ? '#064E3B28' : isBilling ? '#172033' : '#1E293B') : (isWarn ? '#FEF2F2' : isSuccess ? '#ECFDF5' : isBilling ? '#EFF6FF' : '#FEF3C7'),
-                borderColor: isWarn ? '#EF4444' : isSuccess ? '#10B981' : isBilling ? '#3B82F6' : '#F59E0B',
-                titleColor: isDarkMode ? (isWarn ? '#FCA5A5' : isSuccess ? '#6EE7B7' : isBilling ? '#93C5FD' : '#FDE68A') : (isWarn ? '#B91C1C' : isSuccess ? '#065F46' : isBilling ? '#1E40AF' : '#92400E'),
-                textColor: isDarkMode ? '#CBD5E1' : (isWarn ? '#7F1D1D' : isSuccess ? '#047857' : isBilling ? '#1E3A8A' : '#78350F'),
-                dismissBg: isDarkMode ? '#334155' : (isWarn ? '#FEE2E2' : isSuccess ? '#D1FAE5' : isBilling ? '#DBEAFE' : '#FDE68A'),
-                dismissTextColor: isDarkMode ? '#F8FAFC' : (isWarn ? '#991B1B' : isSuccess ? '#047857' : isBilling ? '#1E40AF' : '#92400E'),
-                onDismiss: async () => {
-                  setDismissedNotifIds((prev) => [...prev, n.id]);
-                  await AsyncStorage.setItem(`@clucko_dismissed_notif_${n.id}`, 'true');
-                },
-              });
-            });
-          }
-
-          if (activeBanners.length === 0) return null;
-
-          return (
-            <View style={{ marginBottom: 16 }}>
-              {activeBanners.length > 1 && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginHorizontal: 20 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Ionicons name="albums-outline" size={13} color={isDarkMode ? '#94A3B8' : '#64748B'} />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: isDarkMode ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      Alert Notice Deck (1 of {activeBanners.length})
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 10, color: isDarkMode ? '#64748B' : '#94A3B8' }}>
-                    Tap Acknowledge to swipe card
-                  </Text>
-                </View>
-              )}
-
-              <View style={{ position: 'relative' }}>
-                {/* Back Deck Card (Preview of next notification) */}
-                {activeBanners.length > 1 && (
-                  <View
-                    style={[
-                      styles.pricingNoticeBanner,
-                      {
-                        position: 'absolute',
-                        top: 6,
-                        left: 24,
-                        right: 16,
-                        bottom: -6,
-                        zIndex: 1,
-                        opacity: 0.55,
-                        backgroundColor: activeBanners[1].bgColor,
-                        borderColor: activeBanners[1].borderColor,
-                        transform: [{ scale: 0.96 }],
-                      },
-                    ]}
-                    pointerEvents="none"
-                  />
-                )}
-
-                {/* Front Active Card (Top of Deck with Swipe-Left Animation) */}
-                <Animated.View
-                  style={[
-                    styles.pricingNoticeBanner,
-                    {
-                      zIndex: 2,
-                      backgroundColor: activeBanners[0].bgColor,
-                      borderColor: activeBanners[0].borderColor,
-                      opacity: bannerOpacityAnim,
-                      transform: [{ translateX: bannerSwipeAnim }],
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 4 },
-                      shadowOpacity: 0.15,
-                      shadowRadius: 6,
-                      elevation: 4,
-                    },
-                  ]}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
-                    <Ionicons
-                      name={activeBanners[0].icon}
-                      size={20}
-                      color={activeBanners[0].iconColor}
-                      style={{ marginTop: 2, marginRight: 8 }}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.pricingNoticeTitle, { color: activeBanners[0].titleColor }]}>
-                        {activeBanners[0].title}
-                      </Text>
-                      <Text style={[styles.pricingNoticeBody, { color: activeBanners[0].textColor }]}>
-                        {activeBanners[0].body}
-                      </Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.pricingNoticeDismiss, { backgroundColor: activeBanners[0].dismissBg }]}
-                    onPress={() => handleDismissBannerCard(activeBanners[0])}
-                  >
-                    <Text style={[styles.pricingNoticeDismissText, { color: activeBanners[0].dismissTextColor }]}>
-                      Acknowledge
-                    </Text>
-                  </TouchableOpacity>
-                </Animated.View>
+        {/* ─── Subscription & Pricing Notice Banners (Clean Native UI) ─── */}
+        {refundRequestData?.status === 'approved' && !dismissedApproveBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#064E3B28' : '#ECFDF5', borderColor: '#10B981' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <Ionicons name="checkmark-circle" size={20} color="#059669" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#6EE7B7' : '#065F46' }]}>
+                  Notice: Refund Request Approved
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#047857' }]}>
+                  {`Your refund request for ₱${Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} has been approved and processed. ${refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : 'The transaction was refunded and your subscription ledger updated.'}`}
+                </Text>
               </View>
             </View>
+            <TouchableOpacity
+              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#064E3B' : '#D1FAE5' }]}
+              onPress={async () => {
+                setDismissedApproveBanner(true);
+                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_approved`, 'true');
+              }}
+            >
+              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#A7F3D0' : '#047857' }]}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {refundRequestData?.status === 'rejected' && !dismissedRejectBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#2D1718' : '#FEF2F2', borderColor: '#EF4444' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <Ionicons name="close-circle" size={20} color="#DC2626" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FCA5A5' : '#B91C1C' }]}>
+                  Notice: Refund Request Declined
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#7F1D1D' }]}>
+                  {`Your previous refund request was reviewed and declined. Reason: ${refundRequestData.admin_notes || 'Does not qualify under standard refund terms'}.`}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#450A0A' : '#FEE2E2' }]}
+              onPress={async () => {
+                setDismissedRejectBanner(true);
+                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_rejected`, 'true');
+              }}
+            >
+              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#FCA5A5' : '#991B1B' }]}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!dismissedPriceBanner && (
+          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#1E293B' : '#FEF3C7', borderColor: '#F59E0B' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <Ionicons name="notifications" size={20} color="#D97706" style={{ marginTop: 2, marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>
+                  Notice: Subscription Pricing Update
+                </Text>
+                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#CBD5E1' : '#78350F' }]}>
+                  {`Pro Plan is now ₱${proPrice}/3mo and Premium Plan is ₱${premiumPrice}/yr. All active subscriptions maintain their valid duration without price change until next renewal.`}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#334155' : '#FDE68A' }]}
+              onPress={async () => {
+                setDismissedPriceBanner(true);
+                await AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
+              }}
+            >
+              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Dynamic Broadcast Announcements from Admin strictly regarding subscriptions */}
+        {serverNotifs.map((n: any) => {
+          if (dismissedNotifIds.includes(n.id)) return null;
+          return (
+            <View key={n.id} style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#1E293B' : '#FEF3C7', borderColor: '#F59E0B' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                <Ionicons name="notifications" size={20} color="#D97706" style={{ marginTop: 2, marginRight: 8 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>
+                    {n.title || 'Subscription Notice'}
+                  </Text>
+                  <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#CBD5E1' : '#78350F' }]}>
+                    {n.message}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#334155' : '#FDE68A' }]}
+                onPress={async () => {
+                  setDismissedNotifIds((prev) => [...prev, n.id]);
+                  await AsyncStorage.setItem(`@clucko_dismissed_notif_${n.id}`, 'true');
+                }}
+              >
+                <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>Got it</Text>
+              </TouchableOpacity>
+            </View>
           );
-        })()}
+        })}
 
         {/* Pending GCash Payment Auto-Recovery Card */}
         {pendingRecovery && (
