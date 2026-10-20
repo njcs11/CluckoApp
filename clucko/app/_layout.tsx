@@ -1,8 +1,8 @@
-// app/_layout.tsx
 import { DarkModeProvider } from '@/context/DarkModeContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { TourProvider } from '@/context/TourContext';
 import InteractiveProductTour from '../components/ui/InteractiveProductTour';
+import AccountSuspendedModal from '../components/ui/AccountSuspendedModal';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
@@ -39,6 +39,7 @@ export default function RootLayout() {
             <Stack.Screen name="server-settings" options={{ animation: 'ios_from_right', animationDuration: 280 }} />
           </Stack>
           <InteractiveProductTour />
+          <AccountSuspendedModal />
         </TourProvider>
       </NotificationProvider>
     </DarkModeProvider>

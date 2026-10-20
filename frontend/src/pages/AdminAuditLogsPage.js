@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, X, Clock, User, 
   FileText, ArrowRight, Eye, FileSpreadsheet
 } from 'lucide-react';
+import { SkeletonTableRows } from '../components/SkeletonLoader';
 import './AdminAuditLogsPage.css';
 
 export default function AdminAuditLogsPage() {
@@ -224,12 +225,7 @@ export default function AdminAuditLogsPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td colSpan={6} className="table-loading">
-                    <div className="spinner-large" style={{ width: 22, height: 22 }} />
-                    <span>Loading audit records...</span>
-                  </td>
-                </tr>
+                <SkeletonTableRows rows={Math.min(limit, 10)} cols={6} />
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="table-empty">
@@ -248,7 +244,7 @@ export default function AdminAuditLogsPage() {
                     <td>
                       <div className="operator-cell">
                         <User size={13} color="var(--accent-green)" />
-                        <span style={{ fontWeight: 600, color: '#FFFFFF' }}>{log.admin_name || 'Super Admin'}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{log.admin_name || 'Super Admin'}</span>
                       </div>
                     </td>
                     <td>
@@ -280,26 +276,40 @@ export default function AdminAuditLogsPage() {
             Showing <strong>{logs.length > 0 ? (page - 1) * limit + 1 : 0}</strong> to{' '}
             <strong>{Math.min(page * limit, total)}</strong> of <strong>{total}</strong> entries
           </div>
-          <div className="pagination-controls">
-            <button 
-              className="page-nav-btn"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-              <span>Previous</span>
-            </button>
-            <span className="page-current-display">
-              Page {page} of {pages}
-            </span>
-            <button 
-              className="page-nav-btn"
-              disabled={page >= pages}
-              onClick={() => setPage(page + 1)}
-            >
-              <span>Next</span>
-              <ChevronRight size={16} />
-            </button>
+          <div className="pagination-right-group">
+            <div className="limit-select-wrap">
+              <span>Rows per page:</span>
+              <select 
+                value={limit} 
+                onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+            <div className="pagination-controls">
+              <button 
+                className="page-nav-btn"
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+              >
+                <ChevronLeft size={16} />
+                <span>Previous</span>
+              </button>
+              <span className="page-current-display">
+                Page {page} of {pages}
+              </span>
+              <button 
+                className="page-nav-btn"
+                disabled={page >= pages}
+                onClick={() => setPage(page + 1)}
+              >
+                <span>Next</span>
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         </div>
       </div>

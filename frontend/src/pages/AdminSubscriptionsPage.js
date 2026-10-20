@@ -8,6 +8,7 @@ import {
   HelpCircle, Check, X, Award, Clock, FileSpreadsheet,
   UserCheck, Inbox, MessageSquare, Eye, CheckSquare, Square, Layers, Sparkles
 } from 'lucide-react';
+import { SkeletonTableRows } from '../components/SkeletonLoader';
 import './AdminSubscriptionsPage.css';
 
 export default function AdminSubscriptionsPage() {
@@ -144,8 +145,7 @@ export default function AdminSubscriptionsPage() {
         if (res.data.summary) setTxSummary(res.data.summary);
       }
     } catch (err) {
-      console.error('Failed to load transactions:', err);
-      toast.error('Failed to load transaction ledger');
+      console.warn('Silent note: Transactions ledger fetch error (server warming up?):', err?.message);
     } finally {
       setLoadingTx(false);
     }
@@ -165,7 +165,7 @@ export default function AdminSubscriptionsPage() {
         setPendingRefundCount(pending);
       }
     } catch (err) {
-      console.error('Failed to load refund requests:', err);
+      console.warn('Silent note: Refund requests fetch error (server warming up?):', err?.message);
     } finally {
       setLoadingRefunds(false);
     }
@@ -194,8 +194,7 @@ export default function AdminSubscriptionsPage() {
         setSubPages(res.data.pages || 1);
       }
     } catch (err) {
-      console.error('Failed to load subscriptions:', err);
-      toast.error('Failed to load subscriptions');
+      console.warn('Silent note: Subscriptions fetch error (server warming up?):', err?.message);
     } finally {
       setLoadingSub(false);
     }
@@ -671,12 +670,7 @@ export default function AdminSubscriptionsPage() {
                 </thead>
                 <tbody>
                   {loadingSub ? (
-                    <tr>
-                      <td colSpan={7} className="table-loading">
-                        <div className="spinner-large" style={{ width: 22, height: 22 }} />
-                        <span>Loading subscriptions...</span>
-                      </td>
-                    </tr>
+                    <SkeletonTableRows rows={6} cols={7} />
                   ) : subscriptions.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="table-empty">
@@ -842,12 +836,7 @@ export default function AdminSubscriptionsPage() {
                 </thead>
                 <tbody>
                   {loadingRefunds ? (
-                    <tr>
-                      <td colSpan={8} className="table-loading">
-                        <div className="spinner-large" style={{ width: 22, height: 22 }} />
-                        <span>Loading refund requests...</span>
-                      </td>
-                    </tr>
+                    <SkeletonTableRows rows={5} cols={8} />
                   ) : filteredRefundRequests.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="table-empty">
@@ -1016,12 +1005,7 @@ export default function AdminSubscriptionsPage() {
                 </thead>
                 <tbody>
                   {loadingTx ? (
-                    <tr>
-                      <td colSpan={7} className="table-loading">
-                        <div className="spinner-large" style={{ width: 22, height: 22 }} />
-                        <span>Loading payment ledger...</span>
-                      </td>
-                    </tr>
+                    <SkeletonTableRows rows={6} cols={7} />
                   ) : transactions.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="table-empty">

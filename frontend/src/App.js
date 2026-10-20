@@ -27,6 +27,8 @@ const API_BASE = process.env.REACT_APP_API_URL || '';
 if (API_BASE) {
   axios.defaults.baseURL = API_BASE.replace(/\/$/, '');
 }
+// Render free tier cold-starts can take 30-40s; allow 50s before aborting
+axios.defaults.timeout = 50000;
 
 // Configure Axios JWT injection for platform administration
 axios.interceptors.request.use((config) => {
@@ -37,15 +39,31 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
-// Auto-redirect on 401 unauthorized
+// Auto-redirect on 401 unauthorized & Silent Retry for Render Cloud Cold Starts (502, 503, 504, timeout)
 axios.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const config = error.config;
+    
+    // Auto-redirect on 401 unauthorized
     if (error.response && error.response.status === 401 && window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') {
       localStorage.removeItem('clucko_admin_token');
       localStorage.removeItem('clucko_admin_user');
       window.location.href = '/admin/login';
+      return Promise.reject(error);
     }
+
+    // Silent 1-time retry on cloud wake-up errors (502, 503, 504, ECONNABORTED, timeout)
+    const status = error.response ? error.response.status : null;
+    const isNetworkOrColdStart = !status || [502, 503, 504].includes(status) || error.code === 'ECONNABORTED';
+
+    if (config && isNetworkOrColdStart && !config._retry) {
+      config._retry = true;
+      // Wait 2.5 seconds for container to finish booting
+      await new Promise((res) => setTimeout(res, 2500));
+      return axios(config);
+    }
+
     return Promise.reject(error);
   }
 );

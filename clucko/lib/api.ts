@@ -106,6 +106,46 @@ export const clearStaleSession = async () => {
   }
 };
 
+let _onAccountSuspended: ((reason: string, email?: string) => void) | null = null;
+export const setOnAccountSuspended = (cb: (reason: string, email?: string) => void) => {
+  _onAccountSuspended = cb;
+};
+export const triggerAccountSuspended = (reason: string, email?: string) => {
+  if (_onAccountSuspended) {
+    _onAccountSuspended(reason, email);
+  }
+};
+
+export const checkSuspendedResponse = async (res: Response) => {
+  if (res.status === 403) {
+    try {
+      const cloned = res.clone();
+      const json = await cloned.json();
+      if (json && json.suspended) {
+        const userDataStr = await AsyncStorage.getItem("userData");
+        let email = "";
+        try {
+          if (userDataStr) email = JSON.parse(userDataStr).email || "";
+        } catch {}
+        await clearStaleSession();
+        triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
+      }
+    } catch {}
+  }
+};
+
+export const apiSubmitAppeal = async (email: string, reason: string, appealMessage: string) => {
+  const API_URL = await getApiUrl();
+  const res = await fetch(`${API_URL}/api/auth/appeal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, reason, appeal_message: appealMessage }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to submit appeal");
+  return json;
+};
+
 const headers = async () => {
   const token = await getToken();
   const h: Record<string, string> = {
@@ -208,6 +248,14 @@ export const apiLogin = async (email: string, password: string) => {
     body: JSON.stringify({ email, password }),
   });
   const json = await res.json();
+  if (res.status === 403 && json && json.suspended) {
+    await clearStaleSession();
+    triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
+    const err: any = new Error(json.error || "Account suspended");
+    err.suspended = true;
+    err.reason = json.reason;
+    throw err;
+  }
   if (!res.ok) throw new Error(json.error || "Login failed");
   await AsyncStorage.setItem("token", json.token);
   await AsyncStorage.setItem("user_id", String(json.user.id));
@@ -234,6 +282,14 @@ export const apiGoogleAuth = async (googleProfile: {
     body: JSON.stringify(googleProfile),
   });
   const json = await res.json();
+  if (res.status === 403 && json && json.suspended) {
+    await clearStaleSession();
+    triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", googleProfile.email);
+    const err: any = new Error(json.error || "Account suspended");
+    err.suspended = true;
+    err.reason = json.reason;
+    throw err;
+  }
   if (!res.ok) throw new Error(json.error || "Google authentication failed");
   await AsyncStorage.setItem("token", json.token);
   await AsyncStorage.setItem("user_id", String(json.user_id || json.user?.id));

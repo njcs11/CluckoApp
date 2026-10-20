@@ -712,6 +712,15 @@ def get_admin_user_detail(user_id):
                 ORDER BY f.created_at DESC
             ''', (user_id,))
             owned_farms = cur.fetchall()
+            for farm in owned_farms:
+                cur.execute('''
+                    SELECT u.id, u.first_name, u.last_name, u.email, u.phone_number, fm.joined_at
+                    FROM farm_members fm
+                    JOIN users u ON u.id = fm.user_id
+                    WHERE fm.farm_id = %s AND fm.role = 'caretaker'
+                    ORDER BY fm.joined_at ASC
+                ''', (farm['id'],))
+                farm['caretakers'] = cur.fetchall()
 
             # Farms member of (if caretaker)
             cur.execute('''
@@ -889,19 +898,64 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
             msg.attach(part1)
             msg.attach(part2)
 
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_password)
-                server.sendmail(smtp_user, to_email, msg.as_string())
+            sent = False
+            try:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_password)
+                    server.sendmail(smtp_user, to_email, msg.as_string())
+                sent = True
+            except Exception as e587:
+                try:
+                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as server:
+                        server.login(smtp_user, smtp_password)
+                        server.sendmail(smtp_user, to_email, msg.as_string())
+                    sent = True
+                except Exception as e465:
+                    print(f"[ADMIN] SMTP failed on both 587 ({e587}) and 465 ({e465})")
 
-            print(f"[ADMIN] Welcome email with credentials dispatched successfully to {to_email}")
-            return True
+            if sent:
+                print(f"[ADMIN] Welcome email with credentials dispatched successfully to {to_email}")
+                return True
         except Exception as smtp_err:
             print(f"[ADMIN] SMTP dispatch to {to_email} failed: {smtp_err}")
-            return False
-    else:
-        print(f"[ADMIN] SMTP credentials not set; welcome email simulated for {to_email}")
-        return False
+
+    # Fallback: EmailJS
+    try:
+        import requests
+        emailjs_service = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
+        emailjs_template = os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID', 'template_welcome')
+        emailjs_user = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
+        payload = {
+            'service_id': emailjs_service,
+            'template_id': emailjs_template,
+            'user_id': emailjs_user,
+            'template_params': {
+                'to_email': to_email,
+                'email': to_email,
+                'user_name': admin_full_name,
+                'name': admin_full_name,
+                'temp_password': temp_password,
+                'role': role_display,
+                'login_url': login_url,
+                'subject': subject,
+                'message': text_content,
+            }
+        }
+        resp = requests.post(
+            'https://api.emailjs.com/api/v1.0/email/send',
+            headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
+            json=payload,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            print(f"[ADMIN] Welcome email sent via EmailJS fallback to {to_email}")
+            return True
+    except Exception as ejs_err:
+        print(f"[ADMIN] EmailJS fallback failed: {ejs_err}")
+
+    print(f"[ADMIN] Welcome email simulated for {to_email}")
+    return False
 
 
 @app.route('/api/admin/users/create', methods=['POST'])
@@ -1095,7 +1149,13 @@ def toggle_user_status(user_id):
             if getattr(request, 'user_id', 0) == user_id and not is_active:
                 return jsonify({'error': 'You cannot suspend your own admin account.'}), 400
 
-            cur.execute('UPDATE users SET is_active = %s WHERE id = %s', (is_active, user_id))
+            if is_active:
+                cur.execute('UPDATE users SET is_active = %s, suspension_reason = NULL WHERE id = %s', (True, user_id))
+            else:
+                cur.execute('UPDATE users SET is_active = %s, suspension_reason = %s WHERE id = %s', (False, reason or 'Violation of platform community guidelines', user_id))
+
+            from db import invalidate_user_suspension_cache
+            invalidate_user_suspension_cache(user_id)
 
             action_type = 'user_activated' if is_active else 'user_suspended'
             desc = f"User {user['email']} was {'reactivated' if is_active else 'suspended'}. Reason: {reason or 'Admin discretion'}"
@@ -2736,5 +2796,102 @@ def export_audit_logs_csv():
             response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
             response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
             return response
+    finally:
+        db.close()
+
+
+# ─── Account Suspension Appeals Review ────────────────────────────────────────
+@app.route('/api/admin/appeals', methods=['GET'])
+@admin_required
+def get_account_appeals():
+    """
+    Fetches user account suspension appeals for administrative review.
+    """
+    status_filter = request.args.get('status', 'all')
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            sql = '''
+                SELECT a.id, a.user_id, a.user_email, a.user_name, a.reason,
+                       a.appeal_text, a.status, a.admin_notes, a.created_at, a.resolved_at,
+                       u.role as user_role, u.is_active as current_active
+                FROM account_appeals a
+                LEFT JOIN users u ON u.id = a.user_id
+            '''
+            params = []
+            if status_filter != 'all':
+                sql += ' WHERE a.status = %s'
+                params.append(status_filter)
+            sql += ' ORDER BY a.created_at DESC LIMIT 100'
+
+            cur.execute(sql, params)
+            appeals = cur.fetchall()
+            return jsonify({'success': True, 'appeals': appeals})
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/appeals/<int:appeal_id>/action', methods=['POST'])
+@admin_required
+def handle_account_appeal_action(appeal_id):
+    """
+    Processes an account suspension appeal: approves and reactivates user, or rejects.
+    """
+    d = request.json or {}
+    action = d.get('action')  # 'approve' or 'reject'
+    admin_notes = (d.get('admin_notes') or '').strip()
+
+    if action not in ('approve', 'reject'):
+        return jsonify({'error': 'action must be approve or reject'}), 400
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT * FROM account_appeals WHERE id = %s', (appeal_id,))
+            appeal = cur.fetchone()
+            if not appeal:
+                return jsonify({'error': 'Appeal record not found'}), 404
+
+            user_id = appeal['user_id']
+            new_status = 'approved' if action == 'approve' else 'rejected'
+
+            cur.execute('''
+                UPDATE account_appeals
+                SET status = %s, admin_notes = %s, resolved_at = NOW()
+                WHERE id = %s
+            ''', (new_status, admin_notes, appeal_id))
+
+            if action == 'approve' and user_id:
+                # Reactivate user account
+                cur.execute('UPDATE users SET is_active = TRUE, suspension_reason = NULL WHERE id = %s', (user_id,))
+                from db import invalidate_user_suspension_cache
+                invalidate_user_suspension_cache(user_id)
+
+                # Send approval notification
+                cur.execute('SELECT id FROM farms WHERE owner_id = %s LIMIT 1', (user_id,))
+                f_row = cur.fetchone()
+                farm_id = f_row['id'] if f_row else None
+                cur.execute('''
+                    INSERT INTO notifications (farm_id, user_id, title, message, type)
+                    VALUES (%s, %s, 'Account Appeal Approved!', 'Your account suspension appeal has been approved by administration. Full access has been restored.', 'success')
+                ''', (farm_id, user_id))
+
+            # Log audit
+            log_audit_action(
+                cur,
+                getattr(request, 'user_id', 0),
+                'Admin',
+                f'appeal_{new_status}',
+                'user',
+                user_id or 0,
+                f"Appeal #{appeal_id} for {appeal['user_email']} was {new_status}. Notes: {admin_notes or 'None'}",
+                {'appeal_id': appeal_id, 'action': action, 'admin_notes': admin_notes}
+            )
+
+            db.commit()
+            return jsonify({
+                'success': True,
+                'message': f"Appeal has been {new_status}."
+            })
     finally:
         db.close()

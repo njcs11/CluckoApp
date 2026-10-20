@@ -29,7 +29,7 @@ def get_farms():
                       CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as owner_name,
                       u.email as owner_email,
                       COUNT(DISTINCT fm.user_id) as caretaker_count,
-                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm.user_id END) as online_caretaker_count,
+                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at IS NOT NULL AND u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm.user_id END) as online_caretaker_count,
                       COUNT(DISTINCT c.id) as chicken_count
                     FROM farms f
                     LEFT JOIN users u ON u.id = f.owner_id
@@ -46,7 +46,7 @@ def get_farms():
                       CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as owner_name,
                       u.email as owner_email,
                       COUNT(DISTINCT fm2.user_id) as caretaker_count,
-                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm2.user_id END) as online_caretaker_count,
+                      COUNT(DISTINCT CASE WHEN u_cm.last_active_at IS NOT NULL AND u_cm.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN fm2.user_id END) as online_caretaker_count,
                       COUNT(DISTINCT c.id) as chicken_count
                     FROM farms f
                     LEFT JOIN users u ON u.id = f.owner_id
@@ -259,13 +259,13 @@ def get_farm(farm_id):
                        u.last_active_at,
                        CASE
                            WHEN u.id = %s THEN TRUE
-                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
                            ELSE FALSE
                        END as is_online,
                        CASE
                            WHEN u.id = %s THEN 'Online'
-                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
-                           WHEN u.last_active_at::date = CURRENT_DATE THEN 'Active today'
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at::date = CURRENT_DATE THEN 'Active today'
                            WHEN u.last_active_at IS NOT NULL THEN TO_CHAR(u.last_active_at, 'Mon DD')
                            ELSE 'Offline'
                        END as online_status_text
@@ -376,13 +376,13 @@ def get_farm_members(farm_id):
                        u.last_active_at,
                        CASE
                            WHEN u.id = %s THEN TRUE
-                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN TRUE
                            ELSE FALSE
                        END as is_online,
                        CASE
                            WHEN u.id = %s THEN 'Online'
-                           WHEN u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
-                           WHEN u.last_active_at::date = CURRENT_DATE THEN 'Active today'
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at >= NOW() - INTERVAL '5 MINUTE' THEN 'Online'
+                           WHEN u.last_active_at IS NOT NULL AND u.last_active_at::date = CURRENT_DATE THEN 'Active today'
                            WHEN u.last_active_at IS NOT NULL THEN TO_CHAR(u.last_active_at, 'Mon DD')
                            ELSE 'Offline'
                        END as online_status_text

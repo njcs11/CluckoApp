@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   BackHandler,
   Linking,
@@ -86,6 +87,29 @@ export default function SubscriptionScreen() {
   const [dismissedRejectBanner, setDismissedRejectBanner] = useState(false);
   const [dismissedApproveBanner, setDismissedApproveBanner] = useState(false);
 
+  // Playing-card style banner stack animation
+  const bannerSwipeAnim = useRef(new Animated.Value(0)).current;
+  const bannerOpacityAnim = useRef(new Animated.Value(1)).current;
+
+  const handleDismissBannerCard = (banner: any) => {
+    Animated.parallel([
+      Animated.timing(bannerSwipeAnim, {
+        toValue: -400,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(bannerOpacityAnim, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start(async () => {
+      await banner.onDismiss();
+      bannerSwipeAnim.setValue(0);
+      bannerOpacityAnim.setValue(1);
+    });
+  };
+
   // Pending GCash Payment Auto-Recovery State
   const [pendingRecovery, setPendingRecovery] = useState<any>(null);
   const [verifyingPendingRecovery, setVerifyingPendingRecovery] = useState(false);
@@ -153,6 +177,12 @@ export default function SubscriptionScreen() {
       }
       if (refRes && refRes.refund_request) {
         setRefundRequestData(refRes.refund_request);
+        const [appDismissed, rejDismissed] = await Promise.all([
+          AsyncStorage.getItem(`@clucko_dismissed_refund_${refRes.refund_request.id}_approved`),
+          AsyncStorage.getItem(`@clucko_dismissed_refund_${refRes.refund_request.id}_rejected`),
+        ]);
+        if (appDismissed === 'true') setDismissedApproveBanner(true);
+        if (rejDismissed === 'true') setDismissedRejectBanner(true);
       }
       if (res && res.subscription) {
         setSubData(res.subscription);
@@ -580,77 +610,155 @@ export default function SubscriptionScreen() {
           </View>
         )}
 
-        {/* Persistent In-App Pricing Update Banner */}
-        {!dismissedPriceBanner && (
-          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#1E293B' : '#FEF3C7', borderColor: '#F59E0B' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
-              <Ionicons name="notifications" size={20} color="#D97706" style={{ marginTop: 2, marginRight: 8 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FDE68A' : '#92400E' }]}>
-                  Notice: Subscription Pricing Update
-                </Text>
-                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#CBD5E1' : '#78350F' }]}>
-                  Pro Plan is now ₱{proPrice}/3mo and Premium Plan is ₱{premiumPrice}/yr. All active subscriptions maintain their valid duration without price change until next renewal.
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={styles.pricingNoticeDismiss}
-              onPress={() => {
+        {/* Playing Card Deck Alert Stack */}
+        {(() => {
+          const activeBanners: any[] = [];
+          if (refundRequestData?.status === 'approved' && !dismissedApproveBanner) {
+            activeBanners.push({
+              id: `refund_app_${refundRequestData.id}`,
+              title: 'Notice: Refund Request Approved',
+              body: `Your refund request for ₱${Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} has been approved and processed. ${refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : 'The transaction was refunded and your subscription ledger updated.'}`,
+              icon: 'checkmark-circle' as const,
+              iconColor: '#059669',
+              bgColor: isDarkMode ? '#064E3B28' : '#ECFDF5',
+              borderColor: '#10B981',
+              titleColor: isDarkMode ? '#6EE7B7' : '#065F46',
+              textColor: isDarkMode ? '#E2E8F0' : '#047857',
+              dismissBg: isDarkMode ? '#064E3B' : '#D1FAE5',
+              dismissTextColor: isDarkMode ? '#A7F3D0' : '#047857',
+              onDismiss: async () => {
+                setDismissedApproveBanner(true);
+                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_approved`, 'true');
+              },
+            });
+          }
+          if (refundRequestData?.status === 'rejected' && !dismissedRejectBanner) {
+            activeBanners.push({
+              id: `refund_rej_${refundRequestData.id}`,
+              title: 'Notice: Refund Request Declined',
+              body: `Your previous refund request was reviewed and declined. Reason: ${refundRequestData.admin_notes || 'Does not qualify under standard refund terms'}. If you have valid grounds or wish to adjust your reason, you can submit a new request below.`,
+              icon: 'close-circle' as const,
+              iconColor: '#DC2626',
+              bgColor: isDarkMode ? '#2D1718' : '#FEF2F2',
+              borderColor: '#EF4444',
+              titleColor: isDarkMode ? '#FCA5A5' : '#B91C1C',
+              textColor: isDarkMode ? '#E2E8F0' : '#7F1D1D',
+              dismissBg: isDarkMode ? '#450A0A' : '#FEE2E2',
+              dismissTextColor: isDarkMode ? '#FCA5A5' : '#991B1B',
+              onDismiss: async () => {
+                setDismissedRejectBanner(true);
+                await AsyncStorage.setItem(`@clucko_dismissed_refund_${refundRequestData.id}_rejected`, 'true');
+              },
+            });
+          }
+          if (!dismissedPriceBanner) {
+            activeBanners.push({
+              id: 'pricing_notice',
+              title: 'Notice: Subscription Pricing Update',
+              body: `Pro Plan is now ₱${proPrice}/3mo and Premium Plan is ₱${premiumPrice}/yr. All active subscriptions maintain their valid duration without price change until next renewal.`,
+              icon: 'notifications' as const,
+              iconColor: '#D97706',
+              bgColor: isDarkMode ? '#1E293B' : '#FEF3C7',
+              borderColor: '#F59E0B',
+              titleColor: isDarkMode ? '#FDE68A' : '#92400E',
+              textColor: isDarkMode ? '#CBD5E1' : '#78350F',
+              dismissBg: isDarkMode ? '#334155' : '#FDE68A',
+              dismissTextColor: isDarkMode ? '#FDE68A' : '#92400E',
+              onDismiss: async () => {
                 setDismissedPriceBanner(true);
-                AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
-              }}
-            >
-              <Text style={styles.pricingNoticeDismissText}>Acknowledge</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+                await AsyncStorage.setItem('dismissed_pricing_notice_v1', 'true');
+              },
+            });
+          }
 
-        {/* Refund Approved Top Alert Banner (Green format same as pricing update banner) */}
-        {refundRequestData?.status === 'approved' && !dismissedApproveBanner && (
-          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#064E3B28' : '#ECFDF5', borderColor: '#10B981' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
-              <Ionicons name="checkmark-circle" size={20} color="#059669" style={{ marginTop: 2, marginRight: 8 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#6EE7B7' : '#065F46' }]}>
-                  Notice: Refund Request Approved
-                </Text>
-                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#047857' }]}>
-                  Your refund request for ₱{Number(refundRequestData.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} has been approved and processed. {refundRequestData.admin_notes ? `Note: ${refundRequestData.admin_notes}` : 'The transaction was refunded and your subscription ledger updated.'}
-                </Text>
+          if (activeBanners.length === 0) return null;
+
+          return (
+            <View style={{ marginBottom: 16 }}>
+              {activeBanners.length > 1 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginHorizontal: 20 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="albums-outline" size={13} color={isDarkMode ? '#94A3B8' : '#64748B'} />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: isDarkMode ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Alert Notice Deck (1 of {activeBanners.length})
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 10, color: isDarkMode ? '#64748B' : '#94A3B8' }}>
+                    Tap Acknowledge to swipe card
+                  </Text>
+                </View>
+              )}
+
+              <View style={{ position: 'relative' }}>
+                {/* Back Deck Card (Preview of next notification) */}
+                {activeBanners.length > 1 && (
+                  <View
+                    style={[
+                      styles.pricingNoticeBanner,
+                      {
+                        position: 'absolute',
+                        top: 6,
+                        left: 24,
+                        right: 16,
+                        bottom: -6,
+                        zIndex: 1,
+                        opacity: 0.55,
+                        backgroundColor: activeBanners[1].bgColor,
+                        borderColor: activeBanners[1].borderColor,
+                        transform: [{ scale: 0.96 }],
+                      },
+                    ]}
+                    pointerEvents="none"
+                  />
+                )}
+
+                {/* Front Active Card (Top of Deck with Swipe-Left Animation) */}
+                <Animated.View
+                  style={[
+                    styles.pricingNoticeBanner,
+                    {
+                      zIndex: 2,
+                      backgroundColor: activeBanners[0].bgColor,
+                      borderColor: activeBanners[0].borderColor,
+                      opacity: bannerOpacityAnim,
+                      transform: [{ translateX: bannerSwipeAnim }],
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 6,
+                      elevation: 4,
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
+                    <Ionicons
+                      name={activeBanners[0].icon}
+                      size={20}
+                      color={activeBanners[0].iconColor}
+                      style={{ marginTop: 2, marginRight: 8 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.pricingNoticeTitle, { color: activeBanners[0].titleColor }]}>
+                        {activeBanners[0].title}
+                      </Text>
+                      <Text style={[styles.pricingNoticeBody, { color: activeBanners[0].textColor }]}>
+                        {activeBanners[0].body}
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.pricingNoticeDismiss, { backgroundColor: activeBanners[0].dismissBg }]}
+                    onPress={() => handleDismissBannerCard(activeBanners[0])}
+                  >
+                    <Text style={[styles.pricingNoticeDismissText, { color: activeBanners[0].dismissTextColor }]}>
+                      Acknowledge
+                    </Text>
+                  </TouchableOpacity>
+                </Animated.View>
               </View>
             </View>
-            <TouchableOpacity
-              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#064E3B' : '#D1FAE5' }]}
-              onPress={() => setDismissedApproveBanner(true)}
-            >
-              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#A7F3D0' : '#047857' }]}>Acknowledge</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Refund Declined Top Alert Banner (Same format as pricing update banner) */}
-        {refundRequestData?.status === 'rejected' && !dismissedRejectBanner && (
-          <View style={[styles.pricingNoticeBanner, { backgroundColor: isDarkMode ? '#2D1718' : '#FEF2F2', borderColor: '#EF4444' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flex: 1 }}>
-              <Ionicons name="close-circle" size={20} color="#DC2626" style={{ marginTop: 2, marginRight: 8 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.pricingNoticeTitle, { color: isDarkMode ? '#FCA5A5' : '#B91C1C' }]}>
-                  Notice: Refund Request Declined
-                </Text>
-                <Text style={[styles.pricingNoticeBody, { color: isDarkMode ? '#E2E8F0' : '#7F1D1D' }]}>
-                  Your previous refund request was reviewed and declined. Reason: {refundRequestData.admin_notes || 'Does not qualify under standard refund terms'}. If you have valid grounds or wish to adjust your reason, you can submit a new request below.
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={[styles.pricingNoticeDismiss, { backgroundColor: isDarkMode ? '#450A0A' : '#FEE2E2' }]}
-              onPress={() => setDismissedRejectBanner(true)}
-            >
-              <Text style={[styles.pricingNoticeDismissText, { color: isDarkMode ? '#FCA5A5' : '#991B1B' }]}>Acknowledge</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          );
+        })()}
 
         {/* Pending GCash Payment Auto-Recovery Card */}
         {pendingRecovery && (

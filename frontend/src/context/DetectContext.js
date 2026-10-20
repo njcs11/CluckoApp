@@ -21,21 +21,22 @@ export function DetectProvider({ children }) {
 
     setLoading(true);
     setGradcamData(null);
+    const toastId = toast.loading('Analyzing image with MobileNetV2 Deep Learning...');
     try {
       const { data } = await axios.post('/api/detect', {
         image: targetImage,
         module: targetModule
-      });
+      }, { timeout: 60000 });
       setResult(data);
       if (data.rejected) {
-        toast.error('Detection rejected — see details below');
+        toast.error('Detection rejected — see details below', { id: toastId });
       } else {
-        toast.success(`Diagnosis complete: ${data.top_prediction?.disease_name || 'Processed'}`);
+        toast.success(`Diagnosis complete: ${data.top_prediction?.disease_name || 'Processed'}`, { id: toastId });
       }
       return data;
     } catch (err) {
-      const msg = err.response?.data?.error || 'Detection failed';
-      toast.error(msg);
+      const msg = err.response?.data?.error || (err.code === 'ECONNABORTED' ? 'AI Model is warming up on the cloud. Please try once more.' : 'Detection failed');
+      toast.error(msg, { id: toastId });
     } finally {
       setLoading(false);
     }

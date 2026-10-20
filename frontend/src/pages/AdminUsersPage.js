@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { 
   Users, Search, Filter, Download, UserX, UserCheck, 
   Trash2, Edit2, Key, Eye, Shield, CheckSquare, Square, 
   ChevronLeft, ChevronRight, X, AlertTriangle, Copy, 
-  Calendar, Check, Activity, Home, Phone, Mail, FileSpreadsheet, UserPlus
+  Calendar, Check, Activity, Home, Phone, Mail, FileSpreadsheet, UserPlus,
+  ArrowUpDown, ShieldAlert, MessageSquare, CheckCircle2, XCircle
 } from 'lucide-react';
+import { SkeletonTableRows } from '../components/SkeletonLoader';
 import './AdminUsersPage.css';
 
 export default function AdminUsersPage() {
@@ -23,6 +25,8 @@ export default function AdminUsersPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('created_at');
   const [sortDir, setSortDir] = useState('desc');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef(null);
   const [loading, setLoading] = useState(true);
 
   // Bulk Actions
@@ -35,6 +39,12 @@ export default function AdminUsersPage() {
   const [suspendModal, setSuspendModal] = useState(null);
   const [suspendReason, setSuspendReason] = useState('');
   const [deleteConfirmModal, setDeleteConfirmModal] = useState(null);
+
+  // Appeals Management State
+  const [appealsModal, setAppealsModal] = useState(false);
+  const [appeals, setAppeals] = useState([]);
+  const [appealsLoading, setAppealsLoading] = useState(false);
+  const [pendingAppealsCount, setPendingAppealsCount] = useState(0);
 
   // Invite / Create Admin State
   const [createModal, setCreateModal] = useState(false);
@@ -70,16 +80,56 @@ export default function AdminUsersPage() {
         if (res.data.stats) setStats(res.data.stats);
       }
     } catch (err) {
-      console.error('Failed to load users:', err);
-      toast.error('Failed to load users');
+      console.warn('Initial load / fetch users encountered a delay:', err.message);
+      // Suppress alarming toast on initial cold load; let skeleton loader wait gracefully
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchAppeals = async () => {
+    setAppealsLoading(true);
+    try {
+      const res = await axios.get('/api/admin/appeals');
+      if (res.data && res.data.success) {
+        setAppeals(res.data.appeals || []);
+        setPendingAppealsCount((res.data.appeals || []).filter(a => a.status === 'pending').length);
+      }
+    } catch (err) {
+      console.warn('Appeals fetch error:', err);
+    } finally {
+      setAppealsLoading(false);
+    }
+  };
+
+  const handleAppealAction = async (appealId, action) => {
+    try {
+      const res = await axios.post(`/api/admin/appeals/${appealId}/action`, { action });
+      if (res.data.success) {
+        toast.success(res.data.message);
+        fetchAppeals();
+        fetchUsers();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update appeal status');
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
+    fetchAppeals();
   }, [page, limit, roleFilter, statusFilter, sortBy, sortDir]);
+
+  // Click outside listener for sort dropdown
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target)) {
+        setSortMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Debounced Search
   useEffect(() => {
@@ -343,6 +393,32 @@ export default function AdminUsersPage() {
         <div className="admin-header-actions">
           <button 
             type="button"
+            onClick={() => {
+              setAppealsModal(true);
+              fetchAppeals();
+            }} 
+            className={`admin-btn ${pendingAppealsCount > 0 ? 'warning' : 'secondary'}`}
+            title="Review submitted account suspension appeals"
+            style={{ position: 'relative' }}
+          >
+            <ShieldAlert size={15} />
+            <span>Appeals Review</span>
+            {pendingAppealsCount > 0 && (
+              <span style={{
+                background: 'var(--accent-red)',
+                color: '#fff',
+                fontSize: '10px',
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: '10px',
+                marginLeft: '4px'
+              }}>
+                {pendingAppealsCount}
+              </span>
+            )}
+          </button>
+          <button 
+            type="button"
             onClick={handleExportExcelUsers} 
             className="admin-btn secondary"
             title="Download full user directory formatted for Microsoft Excel"
@@ -436,43 +512,55 @@ export default function AdminUsersPage() {
             </select>
           </div>
 
-          {/* Sort By */}
-          <div className="filter-select-wrap">
+          {/* Sort Popover Button */}
+          <div className="filter-select-wrap" ref={sortMenuRef} style={{ position: 'relative' }}>
             <label className="filter-label">Sort:</label>
-            <select 
-              value={`${sortBy}_${sortDir}`} 
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === 'name_asc') {
-                  setSortBy('first_name');
-                  setSortDir('asc');
-                } else if (val === 'name_desc') {
-                  setSortBy('first_name');
-                  setSortDir('desc');
-                } else if (val === 'created_desc') {
-                  setSortBy('created_at');
-                  setSortDir('desc');
-                } else if (val === 'created_asc') {
-                  setSortBy('created_at');
-                  setSortDir('asc');
-                } else if (val === 'active_desc') {
-                  setSortBy('last_active_at');
-                  setSortDir('desc');
-                } else if (val === 'email_asc') {
-                  setSortBy('email');
-                  setSortDir('asc');
-                }
-                setPage(1);
-              }}
-              className="filter-select"
+            <button 
+              type="button"
+              className="sort-popover-trigger-btn"
+              onClick={() => setSortMenuOpen(!sortMenuOpen)}
+              title="Click to change sorting order"
             >
-              <option value="created_desc">Joined Date (Newest)</option>
-              <option value="created_asc">Joined Date (Oldest)</option>
-              <option value="name_asc">Name (A → Z)</option>
-              <option value="name_desc">Name (Z → A)</option>
-              <option value="active_desc">Recently Active</option>
-              <option value="email_asc">Email (A → Z)</option>
-            </select>
+              <ArrowUpDown size={13} />
+              <span>
+                {sortBy === 'created_at' && sortDir === 'desc' && 'Joined Date (Newest)'}
+                {sortBy === 'created_at' && sortDir === 'asc' && 'Joined Date (Oldest)'}
+                {sortBy === 'first_name' && sortDir === 'asc' && 'Name (A → Z)'}
+                {sortBy === 'first_name' && sortDir === 'desc' && 'Name (Z → A)'}
+                {sortBy === 'last_active_at' && 'Recently Active'}
+                {sortBy === 'email' && 'Email (A → Z)'}
+              </span>
+            </button>
+            {sortMenuOpen && (
+              <div className="sort-popover-menu">
+                {[
+                  { id: 'created_desc', label: 'Joined Date (Newest)', by: 'created_at', dir: 'desc' },
+                  { id: 'created_asc', label: 'Joined Date (Oldest)', by: 'created_at', dir: 'asc' },
+                  { id: 'name_asc', label: 'Name (A → Z)', by: 'first_name', dir: 'asc' },
+                  { id: 'name_desc', label: 'Name (Z → A)', by: 'first_name', dir: 'desc' },
+                  { id: 'active_desc', label: 'Recently Active', by: 'last_active_at', dir: 'desc' },
+                  { id: 'email_asc', label: 'Email (A → Z)', by: 'email', dir: 'asc' }
+                ].map((opt) => {
+                  const isActive = sortBy === opt.by && (opt.by === 'last_active_at' || sortDir === opt.dir);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`sort-popover-item ${isActive ? 'active' : ''}`}
+                      onClick={() => {
+                        setSortBy(opt.by);
+                        setSortDir(opt.dir);
+                        setPage(1);
+                        setSortMenuOpen(false);
+                      }}
+                    >
+                      <span>{opt.label}</span>
+                      {isActive && <Check size={14} color="var(--accent-green)" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -553,12 +641,7 @@ export default function AdminUsersPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td colSpan={9} className="table-loading">
-                    <div className="spinner-large" style={{ width: 24, height: 24 }} />
-                    <span>Loading user accounts...</span>
-                  </td>
-                </tr>
+                <SkeletonTableRows rows={limit} cols={9} />
               ) : users.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="table-empty">
@@ -821,7 +904,7 @@ export default function AdminUsersPage() {
                 )}
               </div>
 
-              {/* Owned Farms */}
+              {/* Owned Farms (For Farm Owners) */}
               {activeUserDetail.owned_farms?.length > 0 && (
                 <div className="dossier-section">
                   <h3 className="section-title">Owned Farms ({activeUserDetail.owned_farms.length})</h3>
@@ -831,14 +914,80 @@ export default function AdminUsersPage() {
                         <div className="farm-card-head">
                           <Home size={15} color="var(--accent-green)" />
                           <span className="farm-mini-name">{f.farm_name}</span>
-                          <span className="farm-mini-code">Code: {f.farm_code}</span>
                         </div>
-                        <div className="farm-card-metrics">
-                          <span>{f.chicken_count} Chickens</span> • <span>{f.caretaker_count} Caretakers</span>
+                        <div className="farm-card-metrics" style={{ marginTop: 4 }}>
+                          <span>{f.chicken_count || 0} Chickens</span> • <span>{f.caretaker_count || 0} Caretakers</span>
                         </div>
+                        
+                        {/* Caretakers list under this farm */}
+                        {f.caretakers && f.caretakers.length > 0 ? (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)', fontSize: '12px' }}>
+                            <div style={{ color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>
+                              Assigned Caretakers:
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {f.caretakers.map(c => (
+                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)' }}></span>
+                                  <strong style={{ color: 'var(--text-primary)' }}>{c.first_name} {c.last_name || ''}</strong>
+                                  <span style={{ color: 'var(--text-muted)' }}>({c.email})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 6, fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            No caretakers assigned to this farm yet.
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Assigned Farms & Supervisor (For Caretakers) */}
+              {activeUserDetail.user.role === 'caretaker' && (
+                <div className="dossier-section">
+                  <h3 className="section-title">Assigned Farm & Supervisor</h3>
+                  {activeUserDetail.member_farms && activeUserDetail.member_farms.length > 0 ? (
+                    <div className="farms-cards-list">
+                      {activeUserDetail.member_farms.map(mf => (
+                        <div key={mf.id} className="farm-mini-card">
+                          <div className="farm-card-head">
+                            <Home size={15} color="var(--accent-green)" />
+                            <span className="farm-mini-name">{mf.farm_name}</span>
+                          </div>
+                          <div style={{ marginTop: 8, fontSize: '12.5px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div>
+                              <span style={{ color: 'var(--text-muted)' }}>Assigned at: </span>
+                              <strong style={{ color: 'var(--text-primary)' }}>{mf.farm_name}</strong>
+                            </div>
+                            <div>
+                              <span style={{ color: 'var(--text-muted)' }}>Under of: </span>
+                              <strong style={{ color: 'var(--accent-green)' }}>{mf.owner_name}</strong>
+                              <span style={{ color: 'var(--text-muted)' }}> ({mf.owner_email})</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="farm-mini-card">
+                      <div style={{ fontSize: '12.5px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)' }}>Assigned at: </span>
+                          <strong style={{ color: 'var(--text-primary)' }}>{activeUserDetail.user.farm_name || 'Individual / Pending'}</strong>
+                        </div>
+                        {activeUserDetail.user.farm_location && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)' }}>Location: </span>
+                            <span style={{ color: 'var(--text-secondary)' }}>{activeUserDetail.user.farm_location}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -959,15 +1108,52 @@ export default function AdminUsersPage() {
             </h2>
             <p className="modal-desc">
               {suspendModal.is_active
-                ? `Suspending ${suspendModal.email} will immediately revoke their active sessions and block login access.`
+                ? `Suspending ${suspendModal.email} will immediately revoke their active sessions, terminate mobile access, and display the suspension notice with support appeal link.`
                 : `Reactivating ${suspendModal.email} will restore their login access immediately.`}
             </p>
-            <div className="form-field">
-              <label>Reason for Action (Recorded in Audit Ledger):</label>
+
+            {suspendModal.is_active && (
+              <div style={{ marginTop: 12, textAlign: 'left' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>
+                  Select Guideline Conflict / Preset Reason:
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  {[
+                    'Terms of Service: Community guidelines conflict',
+                    'Suspicious Activity: Unauthorized automated access detected',
+                    'Billing Discrepancy: Subscription payment under administrative review',
+                    'Farm Owner Request: Disciplinary hold or membership revoked',
+                    'Security Audit: Verification required before account reactivation'
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="preset-reason-btn"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11.5px',
+                        borderRadius: '16px',
+                        background: suspendReason === preset ? 'rgba(234, 179, 8, 0.2)' : 'var(--bg-input)',
+                        border: `1px solid ${suspendReason === preset ? 'var(--accent-amber)' : 'var(--border)'}`,
+                        color: suspendReason === preset ? 'var(--accent-amber)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onClick={() => setSuspendReason(preset)}
+                    >
+                      {preset.split(':')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="form-field" style={{ textAlign: 'left' }}>
+              <label>Reason for Action (Visible to User in Support / Appeal & Recorded in Audit Trail):</label>
               <textarea 
                 rows={3} 
                 className="admin-textarea"
-                placeholder="e.g. Terms violation, requested hold, or identity verified..."
+                placeholder="e.g. Terms of Service: Community guidelines conflict. Please contact Customer Service to appeal."
                 value={suspendReason}
                 onChange={(e) => setSuspendReason(e.target.value)}
               />
@@ -981,6 +1167,124 @@ export default function AdminUsersPage() {
                 onClick={handleConfirmSuspend}
               >
                 {suspendModal.is_active ? 'Confirm Suspension' : 'Confirm Reactivation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── MODAL 4: ACCOUNT APPEALS REVIEW ───────────────────────── */}
+      {appealsModal && (
+        <div className="admin-modal-backdrop" onClick={() => setAppealsModal(false)}>
+          <div className="admin-modal-card" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(234, 179, 8, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={20} color="var(--accent-amber)" />
+                </div>
+                <div>
+                  <h2 className="modal-title" style={{ margin: 0 }}>Account Suspension Appeals</h2>
+                  <p className="modal-desc" style={{ margin: 0, fontSize: '0.82rem' }}>
+                    Review user defenses, inspect guideline violations, and approve or dismiss appeals.
+                  </p>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={() => setAppealsModal(false)} aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ maxHeight: '60vh', overflowY: 'auto', marginTop: 16 }}>
+              {appealsLoading ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
+                  Loading appeals list...
+                </div>
+              ) : appeals.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                  <CheckCircle2 size={36} color="var(--accent-green)" style={{ margin: '0 auto 12px' }} />
+                  <p style={{ margin: 0, fontWeight: 600 }}>No appeals submitted yet</p>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                    When a suspended user files an appeal through the mobile app, it will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {appeals.map(appeal => (
+                    <div 
+                      key={appeal.id} 
+                      style={{ 
+                        background: 'var(--bg-input)', 
+                        border: '1px solid var(--border)', 
+                        borderRadius: 8, 
+                        padding: 14 
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <div>
+                          <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>{appeal.user_name}</strong>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: 8 }}>({appeal.user_email})</span>
+                        </div>
+                        <span 
+                          style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                            textTransform: 'uppercase',
+                            background: appeal.status === 'pending' ? 'rgba(234, 179, 8, 0.15)' : appeal.status === 'approved' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                            color: appeal.status === 'pending' ? 'var(--accent-amber)' : appeal.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-red)'
+                          }}
+                        >
+                          {appeal.status}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '0.82rem', marginBottom: 6 }}>
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Suspension Reason: </span>
+                        <span style={{ color: 'var(--accent-amber)' }}>{appeal.suspension_reason || 'Administrative hold'}</span>
+                      </div>
+
+                      <div style={{ background: 'var(--bg-card)', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 10 }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          USER APPEAL STATEMENT:
+                        </div>
+                        "{appeal.appeal_message}"
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        <span>Submitted on {new Date(appeal.created_at).toLocaleString()}</span>
+                        {appeal.status === 'pending' && (
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              type="button"
+                              className="admin-btn primary"
+                              style={{ padding: '4px 12px', fontSize: '0.78rem' }}
+                              onClick={() => handleAppealAction(appeal.id, 'approve')}
+                            >
+                              <UserCheck size={13} />
+                              <span>Approve & Lift Suspension</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-btn secondary"
+                              style={{ padding: '4px 12px', fontSize: '0.78rem', color: 'var(--accent-red)' }}
+                              onClick={() => handleAppealAction(appeal.id, 'reject')}
+                            >
+                              <XCircle size={13} />
+                              <span>Dismiss Appeal</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions-row" style={{ marginTop: 16 }}>
+              <button type="button" className="admin-btn secondary" onClick={() => setAppealsModal(false)}>
+                Close
               </button>
             </div>
           </div>

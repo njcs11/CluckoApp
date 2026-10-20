@@ -899,3 +899,77 @@
   color: var(--text-tertiary);
   font-family: var(--font-mono);
 }
+
+/* Sort Popover Button & Menu */
+.sort-popover-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.sort-popover-trigger-btn:hover {
+  border-color: var(--accent-green);
+  background: var(--bg-card);
+}
+
+.sort-popover-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 100;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.sort-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  width: 100%;
+}
+
+.sort-popover-item:hover {
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.sort-popover-item.active {
+  background: var(--accent-green-subtle);
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+/* Checkbox fixes */
+.form-field input[type="checkbox"] {
+  width: 18px !important;
+  height: 18px !important;
+  accent-color: var(--accent-green);
+  cursor: pointer;
+  display: inline-block !important;
+}

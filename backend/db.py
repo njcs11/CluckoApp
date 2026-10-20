@@ -222,6 +222,38 @@ def record_user_activity(user_id):
             if db:
                 db.close()
 
+_SUSPENSION_CACHE = {}  # user_id -> (timestamp, is_suspended, reason)
+
+def check_user_suspension(user_id: int) -> dict:
+    if not user_id:
+        return {'is_suspended': False}
+    now = time.time()
+    cached = _SUSPENSION_CACHE.get(user_id)
+    if cached and (now - cached[0] < 20):
+        return {'is_suspended': cached[1], 'reason': cached[2]}
+    
+    db = None
+    try:
+        db = get_db()
+        with db.cursor() as cur:
+            cur.execute('SELECT is_active, suspension_reason FROM users WHERE id = %s', (user_id,))
+            row = cur.fetchone()
+            if row and row.get('is_active') is False:
+                reason = row.get('suspension_reason') or 'Violation of platform guidelines'
+                _SUSPENSION_CACHE[user_id] = (now, True, reason)
+                return {'is_suspended': True, 'reason': reason}
+            else:
+                _SUSPENSION_CACHE[user_id] = (now, False, None)
+                return {'is_suspended': False}
+    except Exception:
+        return {'is_suspended': False}
+    finally:
+        if db:
+            db.close()
+
+def invalidate_user_suspension_cache(user_id: int):
+    _SUSPENSION_CACHE.pop(user_id, None)
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -241,6 +273,17 @@ def token_required(f):
             user_id = data.get('user_id')
             if not user_id:
                 return jsonify({'error': 'Invalid token'}), 401
+
+            # Check if user account is currently suspended
+            suspension = check_user_suspension(user_id)
+            if suspension.get('is_suspended'):
+                return jsonify({
+                    'error': 'Account suspended',
+                    'suspended': True,
+                    'reason': suspension.get('reason') or 'Violation of platform guidelines',
+                    'message': 'Your account has been suspended by administration. You may submit an appeal or contact customer support.'
+                }), 403
+
             request.user_id = user_id
             request.user_role = data.get('role', 'owner')
             record_user_activity(user_id)

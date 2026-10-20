@@ -38,14 +38,14 @@ def get_smtp_credentials():
         except Exception as e:
             print(f"[AUTH] Warning reading .env: {e}")
 
-    user = os.environ.get('SMTP_USER')
-    password = os.environ.get('SMTP_PASSWORD')
+    user = os.environ.get('SMTP_USER') or 'cluckodevteam@gmail.com'
+    password = os.environ.get('SMTP_PASSWORD') or 'vsfl merl bvgk tyfz'
     host = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
     try:
         port = int(os.environ.get('SMTP_PORT', '587'))
     except ValueError:
         port = 587
-    from_name = os.environ.get('SMTP_FROM_NAME', 'Clucko Gamefowl Health')
+    from_name = os.environ.get('SMTP_FROM_NAME', 'Clucko Dev Team')
 
     return user, password, host, port, from_name
 
@@ -152,13 +152,25 @@ def send_caretaker_welcome_email(to_email: str, first_name: str, last_name: str,
             msg.attach(part1)
             msg.attach(part2)
 
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_password)
-                server.sendmail(smtp_user, to_email, msg.as_string())
+            sent = False
+            try:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_password)
+                    server.sendmail(smtp_user, to_email, msg.as_string())
+                sent = True
+            except Exception as e587:
+                try:
+                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as server:
+                        server.login(smtp_user, smtp_password)
+                        server.sendmail(smtp_user, to_email, msg.as_string())
+                    sent = True
+                except Exception as e465:
+                    print(f"[AUTH] SMTP failed on both 587 ({e587}) and 465 ({e465})")
 
-            print(f"[AUTH] Caretaker welcome email dispatched directly via SMTP ({smtp_user}) to {to_email}")
-            return True
+            if sent:
+                print(f"[AUTH] Caretaker welcome email dispatched directly via SMTP ({smtp_user}) to {to_email}")
+                return True
         except Exception as smtp_err:
             print(f"[AUTH] Direct SMTP dispatch failed: {smtp_err}")
 
@@ -433,9 +445,15 @@ def login():
                 cur.execute('UPDATE users SET password_hash=%s WHERE id=%s', (new_hash, user['id']))
                 db.commit()
 
-            # Check if user account is deactivated
+            # Check if user account is deactivated / suspended
             if user.get('is_active') is False:
-                return jsonify({'error': 'Your account has been deactivated. Please contact your farm owner.'}), 403
+                reason = user.get('suspension_reason') or 'Violation of platform community guidelines'
+                return jsonify({
+                    'error': 'Account suspended',
+                    'suspended': True,
+                    'reason': reason,
+                    'message': f"Your account has been suspended: {reason}. You can contact support and submit an appeal."
+                }), 403
 
             # For caretakers, verify active farm membership
             if user.get('role') == 'caretaker':
@@ -513,7 +531,13 @@ def google_auth():
             if user:
                 # Existing user logging in
                 if user.get('is_active') is False:
-                    return jsonify({'error': 'Your account has been deactivated. Please contact your farm owner.'}), 403
+                    reason = user.get('suspension_reason') or 'Violation of platform community guidelines'
+                    return jsonify({
+                        'error': 'Account suspended',
+                        'suspended': True,
+                        'reason': reason,
+                        'message': f"Your account has been suspended: {reason}. You can contact support and submit an appeal."
+                    }), 403
                 user_id = user['id']
                 role = user.get('role') or 'owner'
                 is_new_user = False
@@ -665,12 +689,12 @@ def create_caretaker():
             if cur.fetchone():
                 return jsonify({'error': 'Email already registered'}), 400
 
-            # Create caretaker account
+            # Create caretaker account (explicitly set last_active_at to NULL so newly created caretakers do not show online before logging in)
             pw_hash = hash_password(password)
             cur.execute('''
                 INSERT INTO users
-                (first_name, last_name, email, password_hash, phone_number, role)
-                VALUES (%s, %s, %s, %s, %s, 'caretaker')
+                (first_name, last_name, email, password_hash, phone_number, role, last_active_at)
+                VALUES (%s, %s, %s, %s, %s, 'caretaker', NULL)
             ''', (
                 first_name,
                 last_name,
@@ -1219,5 +1243,67 @@ def reset_password():
     except Exception as e:
         db.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── Account Suspension Appeal Submission ─────────────────────────────────────
+@app.route('/api/auth/appeal', methods=['POST'])
+def submit_account_appeal():
+    """
+    Allows a suspended user to submit an appeal to customer service.
+    Accepts JSON: { email, appeal_text, reason }
+    """
+    d = request.json or {}
+    email = (d.get('email') or '').strip().lower()
+    appeal_text = (d.get('appeal_text') or d.get('message') or '').strip()
+
+    if not email:
+        return jsonify({'error': 'Email address is required to locate your account'}), 400
+    if not appeal_text or len(appeal_text) < 5:
+        return jsonify({'error': 'Please provide a descriptive explanation for your appeal'}), 400
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('SELECT id, first_name, last_name, role, suspension_reason FROM users WHERE LOWER(email) = %s', (email,))
+            u = cur.fetchone()
+            user_id = u['id'] if u else None
+            user_name = f"{u['first_name']} {u.get('last_name') or ''}".strip() if u else email
+            susp_reason = (u.get('suspension_reason') if u else None) or d.get('reason') or 'Administrative action'
+
+            cur.execute('''
+                INSERT INTO account_appeals (user_id, user_email, user_name, reason, appeal_text, status)
+                VALUES (%s, %s, %s, %s, %s, 'pending')
+                RETURNING id, created_at
+            ''', (user_id, email, user_name, susp_reason, appeal_text))
+            new_appeal = cur.fetchone()
+
+            # Record in admin audit logs
+            if user_id:
+                try:
+                    from routes_admin import log_audit_action
+                    log_audit_action(
+                        cur,
+                        user_id,
+                        user_name,
+                        'user_appeal_submitted',
+                        'user',
+                        user_id,
+                        f"Suspended user {email} submitted an appeal: \"{appeal_text[:75]}...\"",
+                        {'appeal_id': new_appeal['id'], 'appeal_text': appeal_text}
+                    )
+                except Exception:
+                    pass
+
+            db.commit()
+            return jsonify({
+                'success': True,
+                'message': 'Your appeal has been received. Clucko Customer Service and Trust & Safety will review your account.',
+                'appeal_id': new_appeal['id']
+            })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': f"Failed to submit appeal: {str(e)}"}), 500
     finally:
         db.close()
