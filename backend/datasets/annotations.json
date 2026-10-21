@@ -1,0 +1,42 @@
+{
+  "0_18787887878-removebg-preview_1791614452.jpg": {
+    "disease": "infectious_coryza",
+    "symptoms": ["swollen_eyes", "watery_eyes"]
+  },
+  "0_Screenshot_2026-09-26_160605_1790410872.jpg": {
+    "disease": "infectious_coryza",
+    "symptoms": ["facial_swelling", "closed_swollen_eyes"]
+  },
+  "21_mirrored_swollen-eye_1791614453.jpg": {
+    "disease": "infectious_coryza",
+    "symptoms": ["swollen_eyes", "watery_eyes"]
+  },
+  "26_symptoms-of-coryza-3_1791614453.jpg": {
+    "disease": "infectious_coryza",
+    "symptoms": ["facial_swelling", "swollen_eyes"]
+  },
+  "0_fowlpox-5_1791614486.jpg": {
+    "disease": "fowl_pox",
+    "symptoms": ["eye_lesions", "scabs"]
+  },
+  "10_fowlpox_288_1791614486.jpg": {
+    "disease": "fowl_pox",
+    "symptoms": ["wart_like_nodules", "yellow_bumps"]
+  },
+  "12_44_1791614486.jpg": {
+    "disease": "fowl_pox",
+    "symptoms": ["eye_lesions", "wart_like_nodules", "scabs"]
+  },
+  "0_download_(1).jpg": {
+    "disease": "newcastle_disease",
+    "symptoms": ["drooping_wings", "wing_weakness"]
+  },
+  "11_hredirect2.jpg": {
+    "disease": "newcastle_disease",
+    "symptoms": ["drooping_wings", "severe_droop"]
+  },
+  "15_images_(12).jpg": {
+    "disease": "newcastle_disease",
+    "symptoms": ["drooping_wings", "wing_weakness"]
+  }
+}

@@ -597,13 +597,18 @@ export default function CaptureScreen() {
   // actually saves the scan, not during preview/retake.
   const applyDetectionResult = (result: any, base64Image?: string) => {
     const top = result.top_prediction;
-    const isHealthy = !top || String(top.disease_id).startsWith('healthy');
-    const symptomLabels = (result.detected_symptoms || []).map((s: any) => s.label);
+    const isHealthy = !top || String(top.disease_id).startsWith('healthy') || result.disease_name === 'Healthy';
+    const symptomLabels = (result.detected_symptoms || []).map((s: any) => {
+      if (typeof s === 'string') return s;
+      if (!s) return '';
+      const label = s.label || s.id || '';
+      return s.confidence != null ? `${label} (${Math.round(s.confidence)}%)` : label;
+    }).filter(Boolean);
 
     const scan = {
-      disease: isHealthy ? null : top.disease_name,
+      disease: isHealthy ? null : (top?.disease_name || result.disease_name),
       diseaseId: top ? top.disease_id : null,
-      confidence: top ? top.confidence : 0,
+      confidence: top ? top.confidence : (result.confidence || 0),
       confidenceLevel: result.confidence_level || (top?.confidence >= 70 ? 'High' : 'Moderate'),
       severity: top?.severity || 'none',
       module: result.module || selectedPart || 'eye',

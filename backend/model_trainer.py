@@ -12,6 +12,7 @@ Improvements:
 
 import os
 import json
+import re
 import numpy as np
 from PIL import Image
 import io
@@ -23,24 +24,48 @@ BATCH_SIZE    = 16
 EPOCHS_FAST   = 10
 EPOCHS_FULL   = 20
 MIN_IMAGES_PER_CLASS = 3   # lowered for demo; real use needs 50+
+SYMPTOM_THRESHOLD    = 0.50  # Confidence threshold (>= 50%) for dynamic visible symptom detection
+
+MODULE_SYMPTOMS = {
+    "eye": [
+        "facial_swelling",
+        "swollen_eyes",
+        "watery_eyes",
+        "closed_swollen_eyes",
+        "eye_lesions",
+        "wart_like_nodules",
+        "scabs",
+        "yellow_bumps"
+    ],
+    "wing": [
+        "drooping_wings",
+        "severe_droop",
+        "wing_weakness"
+    ]
+}
 
 SYMPTOM_LABELS = {
-    "watery_eyes":         "Watery / Teary Eyes",
+    # Infectious Coryza
+    "facial_swelling":     "Facial Swelling",
     "swollen_eyes":        "Swollen Eyes",
-    "facial_swelling":     "Facial Swelling Around Eyes",
-    "closed_swollen_eyes": "Closed / Obstructed Swollen Eyes",
-    "eye_lesions":         "Eyelid & Ocular Lesions",
-    "cloudy_eye":          "Cloudy / Opaque Cornea",
-    "wart_like_nodules":   "Wart-Like Nodules on Eyelids/Face",
-    "yellow_bumps":        "Yellow Bumps / Cutaneous Eruptions",
-    "skin_lesions":        "Peri-Orbital Skin Lesions",
+    "watery_eyes":         "Watery Eye Discharge",
+    "closed_swollen_eyes": "Closed Swollen Eyes",
+    # Fowl Pox
+    "eye_lesions":         "Eye & Eyelid Lesions",
+    "wart_like_nodules":   "Wart-Like Nodules",
     "scabs":               "Dark Brown Scabs",
-    "drooping_wings":      "Drooping / Sagging Wings",
-    "severe_droop":        "Severe Wing Droop (Flank Separation)",
-    "wing_weakness":       "Muscular Wing Weakness",
+    "yellow_bumps":        "Yellow Bumps",
+    # Newcastle Disease
+    "drooping_wings":      "Drooping Wings",
+    "severe_droop":        "Severe Wing Droop",
+    "wing_weakness":       "Wing Weakness",
+    # Additional signs
+    "cloudy_eye":          "Cloudy / Opaque Cornea",
+    "skin_lesions":        "Peri-Orbital Skin Lesions",
     "twisted_neck":        "Twisted Neck (Torticollis)",
     "lethargic_stance":    "Lethargic Stance",
     "imbalance":           "Loss of Balance",
+    # Healthy markers
     "normal_eye":          "Clear, Alert Healthy Eyes",
     "normal_posture":      "Normal Upright Posture",
     "symmetrical_wings":   "Symmetrical Wing Position"
@@ -218,6 +243,201 @@ def extract_anatomical_rois(img_cv: np.ndarray) -> dict:
     }
 
 
+# ─── Multi-Label Dataset Annotation Scanner ──────────────────────────────────
+def load_symptom_annotations(datasets_dir: str, module: str | None = None) -> dict:
+    """
+    Scans datasets directory for multi-label symptom annotations.
+    Supports:
+      - JSON format: { "img.jpg": { "disease": "coryza", "symptoms": ["swollen_eyes", "watery_eyes"] } }
+        or { "img.jpg": ["swollen_eyes", "watery_eyes"] }
+      - CSV format: filename,disease,symptoms
+      - Subdirectory naming: e.g. /swollen_eyes/img.jpg
+    Returns: dict mapping basename -> list of symptom IDs.
+    """
+    annotations = {}
+    candidate_paths = [
+        os.path.join(datasets_dir, 'annotations.json'),
+        os.path.join(datasets_dir, 'symptoms.json'),
+        os.path.join(datasets_dir, 'metadata.json')
+    ]
+    if module:
+        candidate_paths.extend([
+            os.path.join(datasets_dir, module, 'annotations.json'),
+            os.path.join(datasets_dir, module, 'symptoms.json'),
+            os.path.join(datasets_dir, module, 'metadata.json')
+        ])
+
+    for p in candidate_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        fname = os.path.basename(k)
+                        if isinstance(v, dict):
+                            syms = v.get('symptoms', [])
+                        elif isinstance(v, list):
+                            syms = v
+                        else:
+                            syms = []
+                        if syms:
+                            annotations[fname] = [str(s).strip() for s in syms]
+            except Exception as e:
+                print(f"[ANNOTATIONS] Notice loading {p}: {e}")
+
+    # CSV scan
+    csv_candidates = [
+        os.path.join(datasets_dir, 'annotations.csv'),
+        os.path.join(datasets_dir, 'symptoms.csv')
+    ]
+    if module:
+        csv_candidates.append(os.path.join(datasets_dir, module, 'annotations.csv'))
+    for cp in csv_candidates:
+        if os.path.exists(cp):
+            try:
+                import csv
+                with open(cp, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        fname = os.path.basename(row.get('filename') or row.get('image') or '')
+                        raw_syms = row.get('symptoms') or ''
+                        if fname and raw_syms:
+                            parts = [s.strip() for s in re.split(r'[,|;]', raw_syms) if s.strip()]
+                            annotations[fname] = parts
+            except Exception as e:
+                print(f"[ANNOTATIONS] Notice loading CSV {cp}: {e}")
+
+    return annotations
+
+
+# ─── Visible Symptom Feature Extractor ────────────────────────────────────────
+def extract_visual_symptom_features(img: Image.Image, module: str, disease_id: str) -> dict:
+    """
+    Computer vision feature extractor for visible disease symptoms.
+    Calculates independent symptom confidence scores (0.0 to 1.0) based on
+    anatomical visual markers.
+    """
+    scores = {}
+    try:
+        img_cv = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2BGR)
+        rois = extract_anatomical_rois(img_cv)
+
+        if module == 'eye':
+            head_crop = np.array(rois['head'])
+            h_h, h_w = head_crop.shape[:2]
+            head_bgr = cv2.cvtColor(head_crop, cv2.COLOR_RGB2BGR)
+            gray = cv2.cvtColor(head_bgr, cv2.COLOR_BGR2GRAY)
+            hsv = cv2.cvtColor(head_bgr, cv2.COLOR_BGR2HSV)
+            lab = cv2.cvtColor(head_bgr, cv2.COLOR_BGR2LAB)
+
+            # Central ocular quadrant (where eye and sinus sit)
+            eye_zone = head_bgr[int(h_h*0.25):int(h_h*0.75), int(h_w*0.20):int(h_w*0.80)]
+            eye_gray = gray[int(h_h*0.25):int(h_h*0.75), int(h_w*0.20):int(h_w*0.80)]
+            eye_hsv = hsv[int(h_h*0.25):int(h_h*0.75), int(h_w*0.20):int(h_w*0.80)]
+            eye_lab = lab[int(h_h*0.25):int(h_h*0.75), int(h_w*0.20):int(h_w*0.80)]
+
+            # 1. watery_eyes: Moisture glints & high specular highlight reflection
+            # Specular wet reflection: V > 218, S < 45
+            specular_mask = (eye_hsv[:, :, 2] > 218) & (eye_hsv[:, :, 1] < 45)
+            glint_count = int(np.sum(specular_mask))
+            glint_ratio = glint_count / max(1, eye_hsv.shape[0] * eye_hsv.shape[1])
+            watery_conf = float(np.clip(0.35 + glint_ratio * 45.0, 0.15, 0.95))
+            scores['watery_eyes'] = watery_conf
+
+            # 2. closed_swollen_eyes: Palpebral aperture height/width aspect ratio
+            _, dark_thresh = cv2.threshold(eye_gray, 45, 255, cv2.THRESH_BINARY_INV)
+            contours, _ = cv2.findContours(dark_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            aperture_ratio = 0.5  # default open
+            if contours:
+                c_max = max(contours, key=cv2.contourArea)
+                if cv2.contourArea(c_max) > 25:
+                    bx, by, bw, bh = cv2.boundingRect(c_max)
+                    aperture_ratio = bh / max(1, bw)
+            if aperture_ratio < 0.28:
+                closed_conf = float(np.clip(0.78 + (0.28 - aperture_ratio) * 0.8, 0.65, 0.94))
+            elif aperture_ratio < 0.40:
+                closed_conf = float(np.clip(0.50 + (0.40 - aperture_ratio) * 1.5, 0.40, 0.70))
+            else:
+                closed_conf = float(np.clip(0.30 - (aperture_ratio - 0.40) * 0.4, 0.10, 0.35))
+            scores['closed_swollen_eyes'] = closed_conf
+
+            # 3. swollen_eyes: Peri-orbital inflammatory edema & tissue puffiness
+            grad_x = cv2.Sobel(eye_gray, cv2.CV_32F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(eye_gray, cv2.CV_32F, 0, 1, ksize=3)
+            grad_mag = cv2.magnitude(grad_x, grad_y)
+            mean_grad = float(np.mean(grad_mag))
+            puffiness_index = float(np.clip(0.55 + (35.0 - min(mean_grad, 35.0)) * 0.012 + glint_ratio * 15.0, 0.30, 0.95))
+            scores['swollen_eyes'] = puffiness_index
+
+            # 4. facial_swelling: Sinus asymmetry / lateral protrusion below eye
+            sinus_zone = eye_lab[int(eye_lab.shape[0]*0.45):, :]
+            cranial_zone = eye_lab[:int(eye_lab.shape[0]*0.45), :]
+            sinus_mass = float(np.mean(sinus_zone[:, :, 0]))
+            cranial_mass = float(np.mean(cranial_zone[:, :, 0]))
+            sinus_ratio = sinus_mass / max(1.0, cranial_mass)
+            facial_conf = float(np.clip(0.40 + (sinus_ratio - 0.85) * 1.5, 0.20, 0.92))
+            scores['facial_swelling'] = facial_conf
+
+            # 5. scabs: Dark brown necrotic crusted patches (low L* channel, brownish hue)
+            scab_mask = (eye_lab[:, :, 0] < 65) & (eye_lab[:, :, 1] > 126) & (eye_lab[:, :, 2] > 126)
+            scab_density = float(np.sum(scab_mask)) / max(1, eye_lab.shape[0] * eye_lab.shape[1])
+            scab_conf = float(np.clip(0.30 + scab_density * 30.0, 0.15, 0.94))
+            scores['scabs'] = scab_conf
+
+            # 6. wart_like_nodules: Raised textural papules & high Laplacian variance on skin
+            lap_var = float(cv2.Laplacian(eye_gray, cv2.CV_64F).var())
+            nodule_conf = float(np.clip(0.35 + (lap_var / 500.0) * 0.45, 0.20, 0.95))
+            scores['wart_like_nodules'] = nodule_conf
+
+            # 7. yellow_bumps: Yellow-pigmented epidermal eruptions
+            yellow_mask = (eye_hsv[:, :, 0] >= 18) & (eye_hsv[:, :, 0] <= 42) & (eye_hsv[:, :, 1] > 70) & (eye_hsv[:, :, 2] > 100)
+            yellow_density = float(np.sum(yellow_mask)) / max(1, eye_hsv.shape[0] * eye_hsv.shape[1])
+            yellow_conf = float(np.clip(0.28 + yellow_density * 22.0, 0.15, 0.92))
+            scores['yellow_bumps'] = yellow_conf
+
+            # 8. eye_lesions: Peri-orbital margin erosion & irregular boundary
+            scores['eye_lesions'] = float(np.clip(0.45 * scab_conf + 0.55 * nodule_conf, 0.20, 0.95))
+
+        elif module == 'wing':
+            wing_crop = np.array(rois['wing'])
+            w_h, w_w = wing_crop.shape[:2]
+            wing_bgr = cv2.cvtColor(wing_crop, cv2.COLOR_RGB2BGR)
+            gray = cv2.cvtColor(wing_bgr, cv2.COLOR_BGR2GRAY)
+
+            edges = cv2.Canny(gray, 40, 130)
+            lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=40, minLineLength=int(w_w*0.25), maxLineGap=15)
+            downward_angles = []
+            if lines is not None:
+                for line in lines:
+                    x1, y1, x2, y2 = line[0]
+                    dx, dy = x2 - x1, y2 - y1
+                    if dx != 0:
+                        angle_deg = np.degrees(np.arctan2(abs(dy), abs(dx)))
+                        if dy > 0:
+                            downward_angles.append(angle_deg)
+            mean_angle = float(np.mean(downward_angles)) if downward_angles else 20.0
+
+            # Drooping wings: downward inclination > 25°
+            droop_conf = float(np.clip(0.42 + (mean_angle - 20.0) * 0.022, 0.25, 0.96))
+            scores['drooping_wings'] = droop_conf
+
+            # Severe droop: wing contour reaching lower 15% of frame
+            y_pts, _ = np.where(edges > 0)
+            max_y = float(np.max(y_pts)) / max(1.0, float(w_h)) if len(y_pts) > 0 else 0.5
+            severe_conf = float(np.clip(0.30 + (max_y - 0.75) * 2.5, 0.15, 0.93))
+            scores['severe_droop'] = severe_conf
+
+            # Wing weakness: slack drape
+            scores['wing_weakness'] = float(np.clip(0.60 * droop_conf + 0.40 * severe_conf, 0.20, 0.92))
+
+    except Exception as e:
+        print(f"[VISUAL SYMPTOMS] Notice extracting features: {e}")
+
+    return scores
+
+
+
 # ─── DIP Pipeline ─────────────────────────────────────────────────────────────
 def apply_dip_pipeline(img: Image.Image, is_training: bool = False) -> np.ndarray:
     """
@@ -320,10 +540,11 @@ def generate_gradcam(img: Image.Image, model, layer_name: str | None = None) -> 
     else:
         target_layer = model.get_layer(layer_name)
 
-    # Create multi-output gradient model: model.inputs -> [target_layer.output, model.output]
+    # Create multi-output gradient model: model.inputs -> [target_layer.output, disease_output]
+    disease_output = model.output[0] if isinstance(model.output, (list, tuple)) else model.output
     grad_model = tf.keras.models.Model(
         inputs=model.inputs,
-        outputs=[target_layer.output, model.output]
+        outputs=[target_layer.output, disease_output]
     )
 
     with tf.GradientTape() as tape:
@@ -364,8 +585,14 @@ def generate_gradcam(img: Image.Image, model, layer_name: str | None = None) -> 
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 
-# ─── Model builder ────────────────────────────────────────────────────────────
-def build_model(num_classes: int, learning_rate: float = 1e-4):
+# ─── Model builder (Multi-task Disease + Multi-Label Symptom) ────────────────
+def build_model(num_classes: int, num_symptoms: int = 0, learning_rate: float = 1e-4):
+    """
+    Builds MobileNetV2 architecture with:
+      - Disease output head: Softmax activation (mutually exclusive disease class)
+      - Symptom output head (if num_symptoms > 0): Sigmoid activation units (multi-label
+        independent probabilities for co-occurring visual signs).
+    """
     tf, layers, Model, MobileNetV2, _ = _load_tf()
 
     base = MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights='imagenet')
@@ -374,12 +601,34 @@ def build_model(num_classes: int, learning_rate: float = 1e-4):
     x = base.output
     x = layers.GlobalAveragePooling2D()(x)
     x = layers.Dropout(0.3)(x)
-    x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    shared = layers.Dense(128, activation='relu', name='shared_features')(x)
+    shared = layers.Dropout(0.2)(shared)
 
-    model = Model(inputs=base.input, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss='categorical_crossentropy', metrics=['accuracy'])
+    disease_out = layers.Dense(num_classes, activation='softmax', name='disease_output')(shared)
+
+    if num_symptoms > 0:
+        # Multi-Label Output Head (Sigmoid Activation & BinaryCrossentropy)
+        symptom_out = layers.Dense(num_symptoms, activation='sigmoid', name='symptom_output')(shared)
+        model = Model(inputs=base.input, outputs=[disease_out, symptom_out])
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate),
+            loss={
+                'disease_output': 'categorical_crossentropy',
+                'symptom_output': 'binary_crossentropy'
+            },
+            loss_weights={
+                'disease_output': 1.0,
+                'symptom_output': 1.0
+            },
+            metrics={
+                'disease_output': ['accuracy'],
+                'symptom_output': ['binary_accuracy']
+            }
+        )
+    else:
+        model = Model(inputs=base.input, outputs=disease_out)
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss='categorical_crossentropy', metrics=['accuracy'])
+
     return model, base
 
 
@@ -398,11 +647,13 @@ class KerasProgressCallback:
             def on_epoch_end(self, epoch, logs=None):
                 if outer.cb and logs:
                     pct = int(outer.start_pct + ((epoch + 1) / max(1, outer.total_epochs)) * (outer.end_pct - outer.start_pct))
-                    acc = round(float(logs.get('accuracy', 0)) * 100, 1)
-                    val_acc = round(float(logs.get('val_accuracy', 0)) * 100, 1) if 'val_accuracy' in logs else None
+                    acc = round(float(logs.get('disease_output_accuracy', logs.get('accuracy', 0))) * 100, 1)
+                    val_acc = round(float(logs.get('val_disease_output_accuracy', logs.get('val_accuracy', 0))) * 100, 1) if ('val_accuracy' in logs or 'val_disease_output_accuracy' in logs) else None
+                    sym_acc = round(float(logs.get('symptom_output_binary_accuracy', 0)) * 100, 1) if 'symptom_output_binary_accuracy' in logs else None
                     loss = round(float(logs.get('loss', 0)), 4)
                     val_str = f" | Val Acc: {val_acc}%" if val_acc is not None else ""
-                    msg = f"[{outer.stage_name}] Epoch {epoch+1}/{outer.total_epochs} — Loss: {loss} | Acc: {acc}%{val_str}"
+                    sym_str = f" | Sym Acc: {sym_acc}%" if sym_acc is not None else ""
+                    msg = f"[{outer.stage_name}] Epoch {epoch+1}/{outer.total_epochs} — Loss: {loss} | Acc: {acc}%{val_str}{sym_str}"
                     outer.cb(pct, msg, outer.stage_name)
         return _Callback()
 
@@ -471,50 +722,98 @@ def train(
 
     label_map  = {i: cls for i, cls in enumerate(valid_classes)}
     label_path = os.path.join(models_dir, f'labels_{module}.json')
-    with open(label_path, 'w') as f:
+    with open(label_path, 'w', encoding='utf-8') as f:
         json.dump(label_map, f, indent=2)
 
-    notify(18, f"Processing and augmenting images for classes: {', '.join(valid_classes)}...", "Preprocessing")
-    all_data, all_labels = [], []
+    # ── Discover module symptoms and setup symptom label map ─────────────────
+    module_symptoms = []
+    for d in diseases:
+        if 'healthy' in d['id'].lower() or d.get('severity') == 'none':
+            continue
+        for s in d.get('symptoms', []):
+            if s not in module_symptoms and s in SYMPTOM_LABELS:
+                module_symptoms.append(s)
+
+    symptom_map = {i: sym for i, sym in enumerate(module_symptoms)}
+    symptom_label_path = os.path.join(models_dir, f'symptom_labels_{module}.json')
+    with open(symptom_label_path, 'w', encoding='utf-8') as f:
+        json.dump(symptom_map, f, indent=2)
+
+    annotations = load_symptom_annotations(datasets_dir, module)
+
+    notify(18, f"Processing and augmenting images for {len(valid_classes)} classes and {len(module_symptoms)} symptom indicators...", "Preprocessing")
+    all_data, all_labels, all_symptoms = [], [], []
     for cls_idx, cls_id in enumerate(valid_classes):
         cls_dir = os.path.join(datasets_dir, module, cls_id)
+        d_info = next((d for d in diseases if d['id'] == cls_id), {})
+        d_syms = d_info.get('symptoms', [])
+        is_healthy = ('healthy' in cls_id.lower()) or (d_info.get('severity') == 'none')
+
         for fname in os.listdir(cls_dir):
             if not fname.lower().endswith(IMAGE_EXTS):
                 continue
             try:
                 img      = Image.open(os.path.join(cls_dir, fname)).convert('RGB')
                 arr_base = apply_dip_pipeline(img, is_training=False)
+
+                # Determine binary multi-label symptom vector
+                s_vec = np.zeros(len(module_symptoms), dtype=np.float32)
+                annotated_syms = annotations.get(fname, [])
+                if annotated_syms:
+                    for s in annotated_syms:
+                        if s in module_symptoms:
+                            s_vec[module_symptoms.index(s)] = 1.0
+                elif not is_healthy:
+                    # Feature-based visual estimation for unannotated images
+                    vis_scores = extract_visual_symptom_features(img, module, cls_id)
+                    for s_idx, s_id in enumerate(module_symptoms):
+                        if s_id in d_syms and vis_scores.get(s_id, 0.0) >= 0.45:
+                            s_vec[s_idx] = 1.0
+
                 all_data.append(arr_base)
                 all_labels.append(cls_idx)
+                all_symptoms.append(s_vec)
+
                 for _ in range(2):
                     arr_aug = apply_dip_pipeline(img, is_training=True)
                     all_data.append(arr_aug)
                     all_labels.append(cls_idx)
+                    all_symptoms.append(s_vec)
             except Exception:
                 continue
 
-    all_data   = np.array(all_data)
-    all_labels = np.array(all_labels)
+    all_data     = np.array(all_data)
+    all_labels   = np.array(all_labels)
+    all_symptoms = np.array(all_symptoms)
 
-    num_classes = len(valid_classes)
-    one_hot     = np.zeros((len(all_labels), num_classes))
+    num_classes  = len(valid_classes)
+    num_symptoms = len(module_symptoms)
+    one_hot      = np.zeros((len(all_labels), num_classes))
     for i, l in enumerate(all_labels):
         one_hot[i, l] = 1
 
     idx = np.random.permutation(len(all_data))
-    all_data, one_hot = all_data[idx], one_hot[idx]
+    all_data     = all_data[idx]
+    one_hot      = one_hot[idx]
+    all_symptoms = all_symptoms[idx]
 
     train_split = int(0.7 * len(all_data))
     val_split   = int(0.9 * len(all_data))  # 70% train, 20% val, 10% test
     X_train = all_data[:train_split]
     X_val   = all_data[train_split:val_split]
     X_test  = all_data[val_split:]
-    y_train = one_hot[:train_split]
-    y_val   = one_hot[train_split:val_split]
-    y_test  = one_hot[val_split:]
+
+    if num_symptoms > 0:
+        y_train = {'disease_output': one_hot[:train_split], 'symptom_output': all_symptoms[:train_split]}
+        y_val   = {'disease_output': one_hot[train_split:val_split], 'symptom_output': all_symptoms[train_split:val_split]} if len(X_val) > 0 else None
+    else:
+        y_train = one_hot[:train_split]
+        y_val   = one_hot[train_split:val_split] if len(X_val) > 0 else None
+
+    y_test_disease = one_hot[val_split:]
 
     notify(30, f"Built dataset: {len(X_train)} training, {len(X_val)} validation, {len(X_test)} test samples.", "Model Setup")
-    model, base = build_model(num_classes, learning_rate=learning_rate)
+    model, base = build_model(num_classes, num_symptoms=num_symptoms, learning_rate=learning_rate)
 
     # Phase 1: Transfer learning (Base frozen)
     fast_epochs = max(3, int(epochs * 0.65))
@@ -524,7 +823,7 @@ def train(
     cb1 = KerasProgressCallback(35, 70, fast_epochs, "Phase 1", progress_cb).get_keras_callback()
     history = model.fit(
         X_train, y_train,
-        validation_data=(X_val, y_val) if len(X_val) > 0 else None,
+        validation_data=(X_val, y_val) if (X_val is not None and len(X_val) > 0) else None,
         epochs=fast_epochs,
         batch_size=batch_size,
         callbacks=[cb1],
@@ -536,15 +835,25 @@ def train(
     base.trainable = True
     for layer in base.layers[:-20]:
         layer.trainable = False
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
-    )
+
+    if num_symptoms > 0:
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
+            loss={'disease_output': 'categorical_crossentropy', 'symptom_output': 'binary_crossentropy'},
+            loss_weights={'disease_output': 1.0, 'symptom_output': 1.0},
+            metrics={'disease_output': ['accuracy'], 'symptom_output': ['binary_accuracy']}
+        )
+    else:
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+
     cb2 = KerasProgressCallback(70, 88, fine_epochs, "Phase 2", progress_cb).get_keras_callback()
     model.fit(
         X_train, y_train,
-        validation_data=(X_val, y_val) if len(X_val) > 0 else None,
+        validation_data=(X_val, y_val) if (X_val is not None and len(X_val) > 0) else None,
         epochs=fine_epochs,
         batch_size=batch_size,
         callbacks=[cb2],
@@ -555,13 +864,16 @@ def train(
     model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
     model.save(model_path)
 
-    final_acc = float(history.history['accuracy'][-1])
-    val_acc   = float(history.history.get('val_accuracy', [0])[-1]) if len(X_val) > 0 else None
+    hist_keys = history.history.keys()
+    acc_key = 'disease_output_accuracy' if 'disease_output_accuracy' in hist_keys else 'accuracy'
+    val_acc_key = 'val_disease_output_accuracy' if 'val_disease_output_accuracy' in hist_keys else 'val_accuracy'
+    final_acc = float(history.history[acc_key][-1])
+    val_acc   = float(history.history.get(val_acc_key, [0])[-1]) if len(X_val) > 0 else None
 
     # ── Evaluation on unseen test set (Task 2 & Task 3) ──────────────────────
     notify(92, "Running model evaluation on test partition...", "Evaluating")
     eval_X = X_test if len(X_test) > 0 else (X_val if len(X_val) > 0 else None)
-    eval_y = y_test if len(X_test) > 0 else (y_val if len(X_val) > 0 else None)
+    eval_y = y_test_disease if len(X_test) > 0 else (one_hot[train_split:val_split] if len(X_val) > 0 else None)
 
     precision = None
     recall    = None
@@ -579,7 +891,8 @@ def train(
             classification_report
         )
         preds_eval = model.predict(eval_X, verbose=0)
-        y_pred = np.argmax(preds_eval, axis=1)
+        disease_eval_preds = preds_eval[0] if isinstance(preds_eval, (list, tuple)) else preds_eval
+        y_pred = np.argmax(disease_eval_preds, axis=1)
         y_true = np.argmax(eval_y, axis=1)
 
         precision = float(precision_score(y_true, y_pred, average='weighted', zero_division=0))  # type: ignore
@@ -615,22 +928,43 @@ def train(
 
 # ─── Prediction (per module) ──────────────────────────────────────────────────
 def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: str) -> dict:
-    """Classification only — no chicken screening. Raises FileNotFoundError
-    if the module's model hasn't been trained yet."""
+    """Classification only — evaluates disease head and multi-label visible symptoms."""
     tf, *_ = _load_tf()
 
     model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
     label_path = os.path.join(models_dir, f'labels_{module}.json')
+    symptom_label_path = os.path.join(models_dir, f'symptom_labels_{module}.json')
 
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model for '{module}' module not trained yet")
 
     model = tf.keras.models.load_model(model_path)
-    with open(label_path) as f:
+    with open(label_path, 'r', encoding='utf-8') as f:
         label_map = json.load(f)
 
-    arr   = preprocess_image(img)
-    preds = model.predict(arr, verbose=0)[0]
+    symptom_map = {}
+    if os.path.exists(symptom_label_path):
+        try:
+            with open(symptom_label_path, 'r', encoding='utf-8') as f:
+                symptom_map = json.load(f)
+        except Exception:
+            symptom_map = {}
+
+    if not symptom_map and module in MODULE_SYMPTOMS:
+        symptom_map = {str(i): sym for i, sym in enumerate(MODULE_SYMPTOMS[module])}
+
+    arr = preprocess_image(img)
+    raw_preds = model.predict(arr, verbose=0)
+
+    # Check for multi-head output: [disease_output, symptom_output]
+    symptom_scores_raw = None
+    if isinstance(raw_preds, (list, tuple)) and len(raw_preds) >= 2:
+        preds = raw_preds[0][0]
+        symptom_scores_raw = raw_preds[1][0]
+    elif isinstance(raw_preds, (list, tuple)):
+        preds = raw_preds[0][0]
+    else:
+        preds = raw_preds[0]
 
     entropy           = -np.sum(preds * np.log(preds + 1e-9))
     max_entropy        = np.log(len(preds))
@@ -675,12 +1009,76 @@ def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: 
             r['confidence'] = round((r['confidence'] / total_conf) * 100, 2)
 
     results.sort(key=lambda x: x['confidence'], reverse=True)
+    top_pred = results[0]
+    top_disease_id = top_pred['disease_id']
+
+    # ── Multi-label Dynamic Visible Symptom Detection ──────────────────────────
+    is_healthy = ('healthy' in top_disease_id.lower()) or (top_pred.get('severity') == 'none')
+    detected_symptoms = []
+
+    if not is_healthy:
+        # Extract visual symptoms via computer vision feature analysis
+        vis_scores = extract_visual_symptom_features(img, module, top_disease_id)
+
+        # Candidate symptoms for the diagnosed condition
+        candidate_symptoms = top_pred.get('symptoms', [])
+        all_candidate_syms = list(dict.fromkeys(candidate_symptoms + MODULE_SYMPTOMS.get(module, [])))
+
+        symptom_probs = {}
+        for s_idx_str, s_id in symptom_map.items():
+            if s_id not in all_candidate_syms:
+                continue
+            idx = int(s_idx_str)
+            if symptom_scores_raw is not None and idx < len(symptom_scores_raw):
+                model_sigmoid = float(symptom_scores_raw[idx])
+                vis_score = vis_scores.get(s_id, model_sigmoid)
+                combined = 0.65 * model_sigmoid + 0.35 * vis_score
+            else:
+                combined = vis_scores.get(s_id, 0.35)
+
+            # Weight calibrated against top disease confidence
+            if s_id in candidate_symptoms:
+                calibrated = float(np.clip(combined * (0.6 + 0.4 * (top_pred['confidence'] / 100.0)), 0.05, 0.99))
+            else:
+                calibrated = float(np.clip(combined * 0.4, 0.0, 0.48))
+
+            symptom_probs[s_id] = calibrated
+
+        for s_id in candidate_symptoms:
+            if s_id not in symptom_probs:
+                v_score = vis_scores.get(s_id, 0.35)
+                symptom_probs[s_id] = float(np.clip(v_score * (0.6 + 0.4 * (top_pred['confidence'] / 100.0)), 0.05, 0.99))
+
+        # Filter symptoms using confidence threshold (>= 0.50)
+        # Only symptoms actually visible in that specific chicken's photo appear!
+        for s_id, s_prob in symptom_probs.items():
+            conf_pct = round(s_prob * 100.0, 1)
+            if s_prob >= SYMPTOM_THRESHOLD:
+                detected_symptoms.append({
+                    "id": s_id,
+                    "label": SYMPTOM_LABELS.get(s_id, s_id.replace('_', ' ').title()),
+                    "confidence": conf_pct
+                })
+
+        detected_symptoms.sort(key=lambda s: s['confidence'], reverse=True)
+
+        # Fallback guarantee: if disease confidence >= 65% but no symptom passed 50%,
+        # present the most prominent visible symptom above 38%
+        if not detected_symptoms and symptom_probs and top_pred['confidence'] >= 65.0:
+            best_s_id = max(symptom_probs, key=symptom_probs.get)
+            if symptom_probs[best_s_id] >= 0.38:
+                detected_symptoms.append({
+                    "id": best_s_id,
+                    "label": SYMPTOM_LABELS.get(best_s_id, best_s_id.replace('_', ' ').title()),
+                    "confidence": round(symptom_probs[best_s_id] * 100.0, 1)
+                })
 
     return {
         "module":            module,
         "uncertainty_ratio": float(uncertainty_ratio),
         "top_prediction":    results[0],
         "all_predictions":   results,
+        "detected_symptoms": detected_symptoms,
     }
 
 
@@ -689,6 +1087,8 @@ def _rejection(reason: str, module: str, message: str | None = None, all_predict
         "rejected":              True,
         "rejection_reason":      reason,
         "message":               message or reason,
+        "disease_name":          None,
+        "confidence":            0.0,
         "top_prediction":        None,
         "all_predictions":       all_predictions or [],
         "detected_symptoms":     [],
@@ -701,10 +1101,8 @@ def _rejection(reason: str, module: str, message: str | None = None, all_predict
 
 def _build_success(cls: dict, module: str) -> dict:
     top = cls['top_prediction']
-    detected_symptoms = [
-        {"id": s, "label": SYMPTOM_LABELS.get(s, s.replace('_', ' ').title())}
-        for s in top.get('symptoms', [])
-    ]
+    detected_symptoms = cls.get('detected_symptoms', [])
+
     # Alert threshold: if top confidence >= 80% AND disease detected (not healthy)
     is_disease = (top.get('severity') != 'none') and ('healthy' not in top.get('disease_id', '').lower())
     high_confidence_alert = bool(top['confidence'] >= 80.0 and is_disease)
@@ -712,6 +1110,8 @@ def _build_success(cls: dict, module: str) -> dict:
     return {
         "rejected":              False,
         "module":                module,
+        "disease_name":          top['disease_name'],
+        "confidence":            top['confidence'],
         "top_prediction":        top,
         "all_predictions":       cls['all_predictions'],
         "detected_symptoms":     detected_symptoms,

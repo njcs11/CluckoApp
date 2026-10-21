@@ -322,14 +322,40 @@ export default function DetectPage() {
 
               {/* Detected Symptoms */}
               {!result.rejected && <div className="card symptoms-card">
-                <div className="card-title">Detected Symptoms</div>
+                <div className="card-title">Detected Visible Symptoms</div>
                 <div className="symptoms-grid">
-                  {result.detected_symptoms.map(s => (
-                    <div key={s.id} className="symptom-chip">
-                      <span className="symptom-dot" />
-                      {s.label}
+                  {(result.detected_symptoms || []).map(s => {
+                    const id = typeof s === 'string' ? s : s.id;
+                    const label = typeof s === 'string' ? s : s.label;
+                    const conf = typeof s === 'object' && s.confidence != null ? s.confidence : null;
+                    return (
+                      <div key={id || label} className="symptom-chip">
+                        <span className="symptom-dot" />
+                        <span>{label}</span>
+                        {conf != null && (
+                          <span
+                            className="symptom-confidence"
+                            style={{
+                              marginLeft: '6px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              padding: '2px 6px',
+                              borderRadius: '10px'
+                            }}
+                          >
+                            {Math.round(conf)}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {(!result.detected_symptoms || result.detected_symptoms.length === 0) && (
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      No visible disease indicators detected above threshold.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>}
 

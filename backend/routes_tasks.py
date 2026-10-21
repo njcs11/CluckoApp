@@ -7,8 +7,9 @@ from db import get_db, token_required
 
 def init_tasks_table():
     """Ensure the tasks table exists."""
-    db = get_db()
+    db = None
     try:
+        db = get_db()
         with db.cursor() as cur:
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -33,7 +34,8 @@ def init_tasks_table():
     except Exception as e:
         print(f"[TASKS] Table init warning: {e}")
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 # Run table initialization on import
