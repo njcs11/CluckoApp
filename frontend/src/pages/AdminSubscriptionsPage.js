@@ -530,27 +530,27 @@ export default function AdminSubscriptionsPage() {
       {/* Financial Health Summary Cards */}
       <div className="billing-summary-strip">
         <div className="billing-metric-card">
-          <span className="metric-label">Gross Paid Volume</span>
+          <span className="metric-label">Total Payment Volume (TPV)</span>
           <span className="metric-val text-emerald">
             ₱{txSummary.total_paid.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </span>
-          <span className="metric-sub">{txSummary.paid_count} successful payments</span>
+          <span className="metric-sub">{txSummary.paid_count} completed payments</span>
         </div>
 
         <div className="billing-metric-card">
-          <span className="metric-label">Processed Refunds</span>
+          <span className="metric-label">Total Refunded Amount</span>
           <span className="metric-val text-red">
             ₱{txSummary.total_refunded.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </span>
-          <span className="metric-sub">{txSummary.refund_count} refunds recorded</span>
+          <span className="metric-sub">{txSummary.refund_count} refunds processed</span>
         </div>
 
         <div className="billing-metric-card">
-          <span className="metric-label">Net Settled Revenue</span>
+          <span className="metric-label">Net Revenue</span>
           <span className="metric-val text-white">
             ₱{(Math.max(0, txSummary.total_paid - txSummary.total_refunded)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </span>
-          <span className="metric-sub">Net revenue after refund reconciliation</span>
+          <span className="metric-sub">Total revenue after refund reconciliation</span>
         </div>
       </div>
 
@@ -594,7 +594,7 @@ export default function AdminSubscriptionsPage() {
               <input 
                 type="text"
                 className="search-input"
-                placeholder="Search subscribers by name or email..."
+                placeholder="Search name or email..."
                 autoComplete="off"
                 value={subSearch}
                 onChange={(e) => setSubSearch(e.target.value)}
@@ -635,21 +635,6 @@ export default function AdminSubscriptionsPage() {
                   <option value="expired">Expired</option>
                 </select>
               </div>
-
-              {/* Account Filter Dropdown for Active Subscriptions */}
-              <div className="filter-select-wrap">
-                <label className="filter-label">Account:</label>
-                <select 
-                  value={subAccountFilter} 
-                  onChange={(e) => { setSubAccountFilter(e.target.value); setSubPage(1); }}
-                  className="filter-select"
-                >
-                  <option value="all">All Accounts</option>
-                  {subAccountsList.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} ({a.email})</option>
-                  ))}
-                </select>
-              </div>
             </div>
           </div>
 
@@ -662,9 +647,9 @@ export default function AdminSubscriptionsPage() {
                     <th>Account</th>
                     <th>Current Plan</th>
                     <th>Status</th>
-                    <th>Validity Period</th>
-                    <th>Resource Quota</th>
-                    <th>Flock Usage</th>
+                    <th>Subscription Period</th>
+                    <th>Plan Limits</th>
+                    <th>Farm & Bird Usage</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -800,21 +785,6 @@ export default function AdminSubscriptionsPage() {
                   <option value="rejected">Declined</option>
                 </select>
               </div>
-
-              {/* Account Filter Dropdown for Owner Refund Requests */}
-              <div className="filter-select-wrap">
-                <label className="filter-label">Account:</label>
-                <select 
-                  value={refundAccountFilter} 
-                  onChange={(e) => setRefundAccountFilter(e.target.value)}
-                  className="filter-select"
-                >
-                  <option value="all">All Accounts</option>
-                  {refundAccountsList.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} ({a.email})</option>
-                  ))}
-                </select>
-              </div>
             </div>
           </div>
 
@@ -943,7 +913,7 @@ export default function AdminSubscriptionsPage() {
               <input 
                 type="text"
                 className="search-input"
-                placeholder="Search by customer name, email, or session ID..."
+                placeholder="Search customer, email, session..."
                 autoComplete="off"
                 value={txSearch}
                 onChange={(e) => setTxSearch(e.target.value)}
@@ -968,21 +938,6 @@ export default function AdminSubscriptionsPage() {
                   <option value="refunded">Refunded</option>
                   <option value="pending">Pending</option>
                   <option value="cancelled">Cancelled / Expired</option>
-                </select>
-              </div>
-
-              {/* Customer Filter Dropdown (Customers who made purchases) */}
-              <div className="filter-select-wrap">
-                <label className="filter-label">Customer:</label>
-                <select 
-                  value={txCustomerFilter} 
-                  onChange={(e) => { setTxCustomerFilter(e.target.value); setTxPage(1); }}
-                  className="filter-select"
-                >
-                  <option value="all">All Customers</option>
-                  {customersList.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
-                  ))}
                 </select>
               </div>
             </div>
@@ -1697,7 +1652,7 @@ export default function AdminSubscriptionsPage() {
                           <option value="premium">Premium Account (Unlimited Farms & Chickens)</option>
                           <option value="pro">Pro Account (2 Farms, 60 Chickens)</option>
                           <option value="free_trial">Free Trial (1 Farm, 20 Chickens, 30 Scans)</option>
-                          <option value="free">Standard Free Plan</option>
+                          <option value="free">Standard Free Tier</option>
                         </select>
                       </div>
 

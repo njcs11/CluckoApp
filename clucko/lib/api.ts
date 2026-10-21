@@ -119,6 +119,12 @@ export const triggerAccountSuspended = (reason: string, email?: string) => {
   if (_onAccountSuspended) {
     _onAccountSuspended(reason, email);
   }
+  try {
+    const { router } = require('expo-router');
+    if (router && typeof router.replace === 'function') {
+      router.replace('/login');
+    }
+  } catch (e) {}
 };
 
 export const checkSuspendedResponse = async (res: Response) => {
@@ -126,14 +132,19 @@ export const checkSuspendedResponse = async (res: Response) => {
     try {
       const cloned = res.clone();
       const json = await cloned.json();
-      if (json && json.suspended) {
+      if (json && (json.suspended || json.deactivated)) {
         const userDataStr = await AsyncStorage.getItem("userData");
         let email = "";
         try {
           if (userDataStr) email = JSON.parse(userDataStr).email || "";
         } catch {}
+        await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
+          reason: json.reason || "Account deactivated by platform developers",
+          deactivated_by: json.deactivated_by || "developer",
+          email
+        }));
         await clearStaleSession();
-        triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
+        triggerAccountSuspended(json.reason || "Account deactivated by platform developers", email);
       }
     } catch {}
   }
@@ -167,15 +178,20 @@ export const apiCheckHeartbeatStatus = async () => {
     });
     if (res.status === 403) {
       const json = await res.json().catch(() => ({}));
-      if (json && json.suspended) {
+      if (json && (json.suspended || json.deactivated)) {
         const userDataStr = await AsyncStorage.getItem("userData");
         let email = "";
         try {
           if (userDataStr) email = JSON.parse(userDataStr).email || "";
         } catch {}
+        await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
+          reason: json.reason || "Account deactivated by platform developers",
+          deactivated_by: json.deactivated_by || "developer",
+          email
+        }));
         await clearStaleSession();
-        triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
-        return { suspended: true, reason: json.reason };
+        triggerAccountSuspended(json.reason || "Account deactivated by platform developers", email);
+        return { suspended: true, deactivated: true, reason: json.reason };
       }
     }
     return { ok: res.ok };
@@ -286,11 +302,17 @@ export const apiLogin = async (email: string, password: string) => {
     body: JSON.stringify({ email, password }),
   });
   const json = await res.json();
-  if (res.status === 403 && json && json.suspended) {
+  if (res.status === 403 && json && (json.suspended || json.deactivated)) {
     await clearStaleSession();
-    triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", email);
-    const err: any = new Error(json.error || "Account suspended");
+    await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
+      reason: json.reason || "Account deactivated by platform developers",
+      deactivated_by: json.deactivated_by || "developer",
+      email
+    }));
+    triggerAccountSuspended(json.reason || "Account deactivated by platform developers", email);
+    const err: any = new Error(json.error || "Account deactivated");
     err.suspended = true;
+    err.deactivated = true;
     err.reason = json.reason;
     throw err;
   }
@@ -320,11 +342,17 @@ export const apiGoogleAuth = async (googleProfile: {
     body: JSON.stringify(googleProfile),
   });
   const json = await res.json();
-  if (res.status === 403 && json && json.suspended) {
+  if (res.status === 403 && json && (json.suspended || json.deactivated)) {
     await clearStaleSession();
-    triggerAccountSuspended(json.reason || "Terms of Service: Community guidelines conflict", googleProfile.email);
-    const err: any = new Error(json.error || "Account suspended");
+    await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
+      reason: json.reason || "Account deactivated by platform developers",
+      deactivated_by: json.deactivated_by || "developer",
+      email: googleProfile.email
+    }));
+    triggerAccountSuspended(json.reason || "Account deactivated by platform developers", googleProfile.email);
+    const err: any = new Error(json.error || "Account deactivated");
     err.suspended = true;
+    err.deactivated = true;
     err.reason = json.reason;
     throw err;
   }

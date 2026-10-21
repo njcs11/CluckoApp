@@ -222,7 +222,7 @@ def record_user_activity(user_id):
             if db:
                 db.close()
 
-_SUSPENSION_CACHE = {}  # user_id -> (timestamp, is_suspended, reason)
+_SUSPENSION_CACHE = {}  # user_id -> (timestamp, is_suspended, reason, deactivated_by)
 
 def check_user_suspension(user_id: int) -> dict:
     if not user_id:
@@ -230,20 +230,21 @@ def check_user_suspension(user_id: int) -> dict:
     now = time.time()
     cached = _SUSPENSION_CACHE.get(user_id)
     if cached and (now - cached[0] < 20):
-        return {'is_suspended': cached[1], 'reason': cached[2]}
+        return {'is_suspended': cached[1], 'reason': cached[2], 'deactivated_by': cached[3]}
     
     db = None
     try:
         db = get_db()
         with db.cursor() as cur:
-            cur.execute('SELECT is_active, suspension_reason FROM users WHERE id = %s', (user_id,))
+            cur.execute('SELECT is_active, deactivated_by, suspension_reason FROM users WHERE id = %s', (user_id,))
             row = cur.fetchone()
             if row and row.get('is_active') is False:
-                reason = row.get('suspension_reason') or 'Violation of platform guidelines'
-                _SUSPENSION_CACHE[user_id] = (now, True, reason)
-                return {'is_suspended': True, 'reason': reason}
+                reason = row.get('suspension_reason') or 'Deactivated by platform administration'
+                deact_by = row.get('deactivated_by') or 'developer'
+                _SUSPENSION_CACHE[user_id] = (now, True, reason, deact_by)
+                return {'is_suspended': True, 'reason': reason, 'deactivated_by': deact_by}
             else:
-                _SUSPENSION_CACHE[user_id] = (now, False, None)
+                _SUSPENSION_CACHE[user_id] = (now, False, None, None)
                 return {'is_suspended': False}
     except Exception:
         return {'is_suspended': False}
@@ -274,14 +275,16 @@ def token_required(f):
             if not user_id:
                 return jsonify({'error': 'Invalid token'}), 401
 
-            # Check if user account is currently suspended
+            # Check if user account is currently deactivated
             suspension = check_user_suspension(user_id)
             if suspension.get('is_suspended'):
                 return jsonify({
-                    'error': 'Account suspended',
+                    'error': 'Account deactivated',
+                    'deactivated': True,
                     'suspended': True,
-                    'reason': suspension.get('reason') or 'Violation of platform guidelines',
-                    'message': 'Your account has been suspended by administration. You may submit an appeal or contact customer support.'
+                    'deactivated_by': suspension.get('deactivated_by') or 'developer',
+                    'reason': suspension.get('reason') or 'Deactivated by platform developers / administration',
+                    'message': 'Your account has been deactivated by the developers/platform administration.'
                 }), 403
 
             request.user_id = user_id

@@ -93,8 +93,8 @@ export default function AdminAuditLogsPage() {
     // 2. Rejections & Declines -> RED
     if (act.includes('refund_rejected') || act.includes('rejected') || act.includes('declined')) return 'action-badge red';
     
-    // 3. Deletions, Cancellations, Suspensions -> AMBER / ORANGE
-    if (act.includes('suspend') || act.includes('deleted') || act.includes('cancelled')) return 'action-badge amber';
+    // 3. Deletions, Cancellations, Deactivations -> AMBER / ORANGE
+    if (act.includes('deactivate') || act.includes('suspend') || act.includes('deleted') || act.includes('cancelled')) return 'action-badge amber';
     if (act.includes('refund')) return 'action-badge amber';
     
     // 4. Payment Gateway Verification -> CYAN
@@ -117,9 +117,9 @@ export default function AdminAuditLogsPage() {
             <span className="crumb-sep">/</span>
             <span className="crumb-current">Audit Trail</span>
           </div>
-          <h1 className="admin-page-title">Forensic Audit & Security Ledger</h1>
+          <h1 className="admin-page-title">Audit Logs &amp; Activity History</h1>
           <p className="admin-page-sub">
-            Permanent, tamper-evident log of administrative operations, policy adjustments, user account suspensions, and financial refunds.
+            History of administrative actions, account updates, pricing adjustments, and refund operations.
           </p>
         </div>
         <div className="admin-header-actions">
@@ -127,7 +127,7 @@ export default function AdminAuditLogsPage() {
             type="button"
             onClick={handleExportExcelAudit} 
             className="admin-btn secondary"
-            title="Download forensic security log formatted for Microsoft Excel"
+            title="Download audit logs in Excel format"
           >
             <FileSpreadsheet size={15} />
             <span>Export to Excel (CSV)</span>
@@ -146,7 +146,7 @@ export default function AdminAuditLogsPage() {
           <input 
             type="text"
             className="search-input"
-            placeholder="Search description, operator, or target identifier..."
+            placeholder="Search description, operator..."
             autoComplete="off"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -167,13 +167,12 @@ export default function AdminAuditLogsPage() {
               className="filter-select"
             >
               <option value="all">All Actions</option>
-              <option value="plan_pricing_updated">Pricing Alteration</option>
-              <option value="subscription_refunded">Refund Issued</option>
-              <option value="subscription_adjusted">Subscription Adjusted</option>
-              <option value="user_suspended">User Suspended</option>
+              <option value="plan_pricing_updated">Price Updated</option>
+              <option value="subscription_refunded">Refund Processed</option>
+              <option value="subscription_adjusted">Plan Adjusted</option>
+              <option value="user_deactivated">User Deactivated</option>
               <option value="user_activated">User Activated</option>
-              <option value="user_deleted">User Deleted</option>
-              <option value="broadcast_sent">Broadcast Dispatched</option>
+              <option value="broadcast_sent">Announcement Sent</option>
             </select>
           </div>
 
@@ -187,25 +186,27 @@ export default function AdminAuditLogsPage() {
               <option value="all">All Targets</option>
               <option value="user">User Accounts</option>
               <option value="transaction">Payment Transactions</option>
-              <option value="pricing">Plan Configurations</option>
+              <option value="pricing">Pricing &amp; Plans</option>
               <option value="subscription">Subscriptions</option>
-              <option value="system">System Broadcasts</option>
+              <option value="system">Announcements</option>
             </select>
           </div>
 
-          <div className="filter-select-wrap">
-            <label className="filter-label">Operator:</label>
-            <select 
-              value={operatorFilter} 
-              onChange={(e) => { setOperatorFilter(e.target.value); setPage(1); }}
-              className="filter-select"
-            >
-              <option value="all">All Operators</option>
-              {operatorsList.map(op => (
-                <option key={op} value={op}>{op}</option>
-              ))}
-            </select>
-          </div>
+          {operatorsList.length > 0 && (
+            <div className="filter-select-wrap">
+              <label className="filter-label">Operator:</label>
+              <select 
+                value={operatorFilter} 
+                onChange={(e) => { setOperatorFilter(e.target.value); setPage(1); }}
+                className="filter-select"
+              >
+                <option value="all">All Operators</option>
+                {operatorsList.map((op) => (
+                  <option key={op} value={op}>{op}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 

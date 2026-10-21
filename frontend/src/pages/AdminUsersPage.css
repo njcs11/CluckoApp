@@ -81,9 +81,10 @@
 
 .search-input-wrap {
   position: relative;
-  flex: 0 1 240px;
-  min-width: 180px;
-  max-width: 260px;
+  flex: 0 0 180px;
+  width: 180px;
+  min-width: 140px;
+  max-width: 180px;
 }
 
 .search-icon {
