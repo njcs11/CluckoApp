@@ -254,6 +254,15 @@ def load_symptom_annotations(datasets_dir: str, module: str | None = None) -> di
       - Subdirectory naming: e.g. /swollen_eyes/img.jpg
     Returns: dict mapping basename -> list of symptom IDs.
     """
+    if not os.path.exists(datasets_dir):
+        backend_datasets = os.path.join(os.path.dirname(__file__), datasets_dir)
+        if os.path.exists(backend_datasets):
+            datasets_dir = backend_datasets
+        else:
+            backend_default = os.path.join(os.path.dirname(__file__), 'datasets')
+            if os.path.exists(backend_default):
+                datasets_dir = backend_default
+
     annotations = {}
     candidate_paths = [
         os.path.join(datasets_dir, 'annotations.json'),

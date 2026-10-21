@@ -58,7 +58,8 @@ def test_build_model_multi_task_architecture():
 
 def test_load_symptom_annotations():
     """Verify loading multi-label annotations from datasets/annotations.json."""
-    annotations = load_symptom_annotations('datasets', module='eye')
+    datasets_dir = os.path.join(os.path.dirname(__file__), 'datasets')
+    annotations = load_symptom_annotations(datasets_dir, module='eye')
     assert isinstance(annotations, dict)
     assert '0_18787887878-removebg-preview_1791614452.jpg' in annotations
     coryza_symptoms = annotations['0_18787887878-removebg-preview_1791614452.jpg']
