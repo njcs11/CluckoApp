@@ -55,36 +55,56 @@ By registering an account, accessing, downloading, or using the Clucko mobile ap
 
 ---
 
-### 6. PAYMENT TERMS, SUBSCRIPTIONS & CANCELLATION
-1. **Pricing & Currency:** Subscription fees are stated and charged in **Philippine Peso (PHP)** inclusive of applicable local taxes where required.
-2. **Free Trial:** New farm owner accounts receive a complimentary thirty (30) day free trial. Free trial parameters (flock size, farms quota, monthly scans) are governed by our active plan matrix.
-3. **Payment Processing:** Payment processing is powered securely by licensed third-party gateways (e.g., PayMongo). Clucko does not store or process complete credit card numbers, GCash MPINs, or bank account credentials on its own servers.
-4. **Auto-Renewal & Cancellation:** Paid subscriptions auto-renew at the end of each billing cycle (monthly or annually) unless cancelled before the renewal date. You may cancel your subscription at any time via App Settings → Subscription Management. Cancellation takes effect at the end of the current paid billing period.
-5. **Refund Policy:** In compliance with the **Consumer Act of the Philippines (Republic Act No. 7394)**, digital subscription services accessed and consumed are non-refundable, except where required by law or in instances of verified technical billing duplicates reported to `jasphertadlan@gmail.com` within seven (7) days of transaction.
+### 6. PAYMENT TERMS, SUBSCRIPTION TIERS & DYNAMIC PRICING POLICY
+1. **Dynamic Pricing & Currency:** All subscription fees and pricing schedules are denominated and charged in **Philippine Peso (PHP)** inclusive of applicable local taxes.
+   - **Tier Architecture:** Clucko offers tiers structured to scale with poultry operations: **Free Trial Tier**, **Pro Plan**, and **Premium Plan** (with fallback to **Standard Free Tier** upon expiration).
+   - **Developer Discretion & Price Variations:** All subscription pricing, promotional rates, and billing amounts are dynamic and subject to variation and adjustments at the sole discretion of the platform development team.
+   - **User Duty of Vigilance:** Fixed pricing amounts are deliberately not codified herein. All users are expressly responsible for regularly monitoring active in-app pricing schedules, billing banners, and official announcements prior to completing any checkout, extension, or renewal.
+2. **Payment Gateway Integration:** Payment processing is powered securely by licensed third-party gateways (e.g., PayMongo) supporting GCash, Maya, and Visa/Mastercard credit/debit cards. Clucko does not store complete credit card numbers, GCash MPINs, or bank account credentials on its own servers.
+3. **7-Day Refund Grace Period Policy:**
+   - In accordance with consumer protection standards, subscribers may request a full refund directly inside the application within exactly seven (7) calendar days of transaction completion.
+   - **Strict Window Cutoff:** Once the seven (7) calendar day grace period has elapsed, transactions become strictly non-refundable and cannot be approved or refunded under any circumstances.
+   - **Selective Rollback Protection:** When an eligible refund is approved for a renewal or stacked tier, earlier valid subscription records and existing flock data remain completely protected without penalty.
+4. **Plan Expiration & 3-Day Grace Period (Standard Free Tier):**
+   - At the conclusion of a paid billing cycle, users are granted a complimentary three (3) day grace period to renew without service disruption.
+   - If unrenewed after the 3-day grace period, the account is automatically downgraded to the **Standard Free Tier**. All historical flock records and data remain safely preserved, but new additions are locked until quota compliance or renewal.
 
 ---
 
-### 7. ACCOUNT TERMINATION & DATA ERASURE
+### 7. ADMINISTRATIVE DEACTIVATION BY DEVELOPERS & IRREVOCABILITY
+1. **Developer Administrative Authority:** Clucko platform developers and system administrators reserve the absolute right to deactivate any user account (including Farm Owners, Caretakers, and Administrators) immediately, unilaterally, and without prior notice in cases of:
+   - Violations of these Terms and Conditions or Community Guidelines;
+   - Suspected fraud, unauthorized payment manipulation, or chargeback abuses;
+   - Misuse of AI diagnostic tools, deliberate data falsification, or biosecurity threats;
+   - Unauthorized credential sharing, multi-tenant breaches, or automated scraping.
+2. **Finality & Irrevocability:** Once an account has been deactivated by platform developers or system administrators, such administrative deactivation is **STRICTLY FINAL, PERMANENT, AND IRREVOCABLE**.
+3. **No Owner Override Authority:** Farm owners possess **NO AUTHORITY, PRIVILEGE, OR TECHNICAL CAPABILITY** to reactivate, override, or restore any caretaker or user account that has been deactivated by platform developers.
+4. **Immediate Session Termination & Lockout:** Administrative deactivation immediately invalidates all active JWT authentication tokens, forcibly terminates all live mobile and web client sessions in real time, and bars subsequent sign-in attempts.
+5. **No In-App Appeal Mechanism:** Platform developer deactivations are conclusive administrative measures taken to protect the platform ecosystem and are not subject to an in-app appeal or reconsideration workflow.
+6. **Forfeiture of Subscription Balances:** If an account is deactivated by developers due to a breach of these Terms, any remaining active subscription duration or prepaid privileges are immediately forfeited without refund.
+
+---
+
+### 8. VOLUNTARY USER TERMINATION & DATA ERASURE
 1. **Termination by User:** You may close your account and exercise your **Right to Erasure** at any time through the in-app deletion button (*Profile → Preferences → Danger Zone → Delete Account*) or by emailing `jasphertadlan@gmail.com`.
-2. **Termination by Provider:** We reserve the right to suspend, deactivate, or permanently delete accounts that violate these Terms, breach biosecurity standards, engage in unauthorized farm access, or fail payment obligations.
-3. **Effect of Deletion:** Upon account deletion, all personal data, chicken records, QR scan logs, and active subscription entitlements are permanently deleted from active production databases in accordance with our Privacy Policy.
+2. **Effect of Deletion:** Upon voluntary account deletion, all personal data, chicken records, QR scan logs, and active subscription entitlements are permanently deleted from active production databases in accordance with our Privacy Policy.
 
 ---
 
-### 8. LIMITATION OF LIABILITY & WARRANTY DISCLAIMER
+### 9. LIMITATION OF LIABILITY & WARRANTY DISCLAIMER
 1. **"As-Is" Provision:** Clucko is provided on an "AS IS" and "AS AVAILABLE" basis without warranties of any kind, whether express or implied, including fitness for a particular purpose or 100% diagnostic accuracy.
 2. **Limitation of Liability:** To the maximum extent permitted under Philippine law, Clucko, its developers, contractors, and affiliates shall NOT be liable for any bird mortality, flock contagion spread, quarantine enforcement costs, loss of prize winnings, business interruption, or indirect damages arising from the use or inability to use the platform.
 3. **Liability Cap:** In all circumstances, Clucko's total aggregate liability to any user for all claims shall not exceed the total fees paid by said user to Clucko in the twelve (12) months preceding the event giving rise to liability.
 
 ---
 
-### 9. GOVERNING LAW & DISPUTE RESOLUTION
+### 10. GOVERNING LAW & DISPUTE RESOLUTION
 1. **Governing Law:** These Terms and Conditions shall be governed by, construed, and enforced in accordance with the laws of the **Republic of the Philippines**.
 2. **Dispute Resolution & Venue:** Any dispute, claim, or controversy arising out of or relating to these Terms shall first be submitted to mutual amicable conciliation. If unresolved after thirty (30) days, the dispute shall be submitted to the exclusive jurisdiction of the proper courts of **Davao City, Philippines**, to the exclusion of all other courts.
 
 ---
 
-### 10. MODIFICATIONS TO TERMS
+### 11. MODIFICATIONS TO TERMS
 We reserve the right to update these Terms at any time. When material changes are made, we will update the version number (`terms_version`) and effective date, and prompt users to review and re-accept upon their next login. Continued use of the platform after notice constitutes acceptance of the modified Terms.
 
 ---

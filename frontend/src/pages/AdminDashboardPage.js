@@ -182,8 +182,8 @@ export default function AdminDashboardPage() {
             <span className="kpi-sub-text">
               <strong style={{ color: 'var(--text-primary)' }}>{users.owners}</strong> Owners • <strong style={{ color: 'var(--text-primary)' }}>{users.caretakers}</strong> Caretakers
             </span>
-            {users.suspended > 0 && (
-              <span className="badge-suspended-inline">{users.suspended} Suspended</span>
+            {(users.deactivated > 0 || users.suspended > 0) && (
+              <span className="badge-suspended-inline">{users.deactivated || users.suspended} Deactivated</span>
             )}
           </div>
         </div>

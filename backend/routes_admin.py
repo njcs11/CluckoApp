@@ -180,14 +180,14 @@ def recalculate_user_subscription(user_id, cur):
     # Check if cumulative end is in the future
     if cumulative_end > now:
         status = 'active'
-    elif (cumulative_end + timedelta(days=7)) > now:
+    elif (cumulative_end + timedelta(days=3)) > now:
         status = 'grace_period'
     else:
         status = 'expired'
         active_plan = 'free'
 
     plan_cfg = PLANS_CONFIG.get(active_plan, PLANS_CONFIG['free'])
-    grace_end = cumulative_end + timedelta(days=7)
+    grace_end = cumulative_end + timedelta(days=3)
 
     cur.execute('''
         UPDATE subscriptions
@@ -605,7 +605,7 @@ def get_admin_users():
 
     if status_filter == 'active':
         conditions.append("u.is_active = TRUE")
-    elif status_filter == 'suspended':
+    elif status_filter in ('suspended', 'deactivated'):
         conditions.append("u.is_active = FALSE")
 
     user_id_param = request.args.get('user_id')
@@ -634,6 +634,7 @@ def get_admin_users():
                     COUNT(CASE WHEN role = 'caretaker' THEN 1 END) as caretakers,
                     COUNT(CASE WHEN role = 'admin' THEN 1 END) as admins,
                     COUNT(CASE WHEN is_active = TRUE THEN 1 END) as active,
+                    COUNT(CASE WHEN is_active = FALSE THEN 1 END) as deactivated,
                     COUNT(CASE WHEN is_active = FALSE THEN 1 END) as suspended
                 FROM users
             ''')
@@ -663,6 +664,8 @@ def get_admin_users():
                      FROM farm_members fm JOIN farms f ON f.id = fm.farm_id
                      WHERE fm.user_id = u.id LIMIT 1) as assigned_farm_name,
                     u.is_active,
+                    COALESCE(u.deactivated_by, '') as deactivated_by,
+                    u.suspension_reason as deactivation_reason,
                     u.created_at,
                     u.last_active_at,
                     COALESCE(s.plan, 'none') as current_plan,
@@ -1176,15 +1179,15 @@ def toggle_user_status(user_id):
                 return jsonify({'error': 'You cannot suspend your own admin account.'}), 400
 
             if is_active:
-                cur.execute('UPDATE users SET is_active = %s, suspension_reason = NULL WHERE id = %s', (True, user_id))
+                cur.execute('UPDATE users SET is_active = %s, deactivated_by = NULL, suspension_reason = NULL WHERE id = %s', (True, user_id))
             else:
-                cur.execute('UPDATE users SET is_active = %s, suspension_reason = %s WHERE id = %s', (False, reason or 'Violation of platform community guidelines', user_id))
+                cur.execute('UPDATE users SET is_active = %s, deactivated_by = %s, suspension_reason = %s WHERE id = %s', (False, 'developer', reason or 'Deactivated by platform developers / administration', user_id))
 
             from db import invalidate_user_suspension_cache
             invalidate_user_suspension_cache(user_id)
 
-            action_type = 'user_activated' if is_active else 'user_suspended'
-            desc = f"User {user['email']} was {'reactivated' if is_active else 'suspended'}. Reason: {reason or 'Admin discretion'}"
+            action_type = 'user_activated' if is_active else 'user_deactivated'
+            desc = f"User {user['email']} was {'reactivated' if is_active else 'deactivated by developers'}. Reason: {reason or 'Admin discretion'}"
 
             log_audit_action(
                 cur,
@@ -1194,7 +1197,7 @@ def toggle_user_status(user_id):
                 'user',
                 user_id,
                 desc,
-                {'reason': reason, 'is_active': is_active}
+                {'reason': reason, 'is_active': is_active, 'deactivated_by': None if is_active else 'developer'}
             )
 
             # If user has a farm, send notification
@@ -1207,8 +1210,8 @@ def toggle_user_status(user_id):
                 ''', (
                     farm['id'],
                     user_id,
-                    'Account Status Update' if is_active else 'Account Suspended',
-                    f"Your Clucko account has been {'reactivated' if is_active else 'suspended by administration'}. {('Reason: ' + reason) if reason else ''}",
+                    'Account Reactivated' if is_active else 'Account Deactivated',
+                    f"Your Clucko account has been {'reactivated' if is_active else 'deactivated by platform developers'}. {('Reason: ' + reason) if reason else ''}",
                     'info' if is_active else 'warning'
                 ))
 
@@ -1312,12 +1315,12 @@ def delete_admin_user(user_id):
 def bulk_user_action():
     d = request.json or {}
     user_ids = d.get('user_ids', [])
-    action = d.get('action') # 'suspend' | 'activate' | 'delete'
+    action = d.get('action') # 'deactivate' | 'suspend' | 'activate'
 
     if not user_ids or not isinstance(user_ids, list):
         return jsonify({'error': 'No users selected'}), 400
 
-    if action not in ('suspend', 'activate', 'delete'):
+    if action not in ('deactivate', 'suspend', 'activate'):
         return jsonify({'error': 'Invalid bulk action specified'}), 400
 
     current_admin = getattr(request, 'user_id', 0)
@@ -1331,20 +1334,23 @@ def bulk_user_action():
     try:
         with db.cursor() as cur:
             placeholders = ', '.join(['%s'] * len(safe_user_ids))
-            if action == 'suspend':
-                cur.execute(f"UPDATE users SET is_active = FALSE WHERE id IN ({placeholders})", safe_user_ids)
-                log_audit_action(cur, current_admin, 'Admin', 'bulk_suspend', 'users', None, f"Bulk suspended {len(safe_user_ids)} user accounts", {'user_ids': safe_user_ids})
+            if action in ('deactivate', 'suspend'):
+                cur.execute(f"UPDATE users SET is_active = FALSE, deactivated_by = 'developer', suspension_reason = 'Bulk deactivated by platform developer' WHERE id IN ({placeholders})", safe_user_ids)
+                log_audit_action(cur, current_admin, 'Admin', 'bulk_deactivate', 'users', None, f"Bulk deactivated {len(safe_user_ids)} user accounts", {'user_ids': safe_user_ids})
             elif action == 'activate':
-                cur.execute(f"UPDATE users SET is_active = TRUE WHERE id IN ({placeholders})", safe_user_ids)
+                cur.execute(f"UPDATE users SET is_active = TRUE, deactivated_by = NULL, suspension_reason = NULL WHERE id IN ({placeholders})", safe_user_ids)
                 log_audit_action(cur, current_admin, 'Admin', 'bulk_activate', 'users', None, f"Bulk activated {len(safe_user_ids)} user accounts", {'user_ids': safe_user_ids})
-            elif action == 'delete':
-                cur.execute(f"DELETE FROM users WHERE id IN ({placeholders}) AND role != 'admin'", safe_user_ids)
-                log_audit_action(cur, current_admin, 'Admin', 'bulk_delete', 'users', None, f"Bulk deleted {len(safe_user_ids)} user accounts", {'user_ids': safe_user_ids})
 
             db.commit()
+
+            from db import invalidate_user_suspension_cache
+            for uid in safe_user_ids:
+                invalidate_user_suspension_cache(uid)
+
+            verb = 'deactivated' if action in ('deactivate', 'suspend') else 'activated'
             return jsonify({
                 'success': True,
-                'message': f"Bulk {action} successfully executed for {len(safe_user_ids)} users."
+                'message': f"Bulk {verb} successfully executed for {len(safe_user_ids)} accounts."
             })
     finally:
         db.close()
@@ -1560,7 +1566,7 @@ def adjust_user_subscription(user_id):
 
             now = dt.utcnow()
             new_end = now + timedelta(days=duration_days)
-            new_grace = new_end + timedelta(days=7)
+            new_grace = new_end + timedelta(days=3)
 
             cur.execute('''
                 INSERT INTO subscriptions
@@ -2001,7 +2007,7 @@ def admin_verify_paymongo_transaction(tx_id):
                 new_end_date = now + timedelta(days=duration_days)
                 new_start_date = now
 
-            new_grace_date = new_end_date + timedelta(days=7)
+            new_grace_date = new_end_date + timedelta(days=3)
 
             if existing:
                 cur.execute('''

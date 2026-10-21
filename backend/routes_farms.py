@@ -373,6 +373,8 @@ def get_farm_members(farm_id):
                 SELECT u.id, u.first_name, u.last_name,
                        u.email, u.phone_number, fm.role, fm.joined_at,
                        COALESCE(fm.is_active, u.is_active, TRUE) as is_active,
+                       COALESCE(u.deactivated_by, '') as deactivated_by,
+                       u.suspension_reason as deactivation_reason,
                        u.last_active_at,
                        CASE
                            WHEN u.id = %s THEN TRUE
@@ -415,6 +417,19 @@ def update_member_status(farm_id, member_id):
             if not farm or farm['owner_id'] != request.user_id:
                 return jsonify({'error': 'Only farm owner can modify caretaker status'}), 403
 
+            # Check if this caretaker was deactivated by developer / platform administration
+            cur.execute('SELECT id, is_active, deactivated_by, suspension_reason FROM users WHERE id=%s', (member_id,))
+            target_user = cur.fetchone()
+            if not target_user:
+                return jsonify({'error': 'Target user not found'}), 404
+
+            # Enforce Terms & Conditions: If deactivated by platform developers, owner CANNOT reactivate
+            if is_active and target_user.get('deactivated_by') in ('developer', 'admin', 'superadmin'):
+                return jsonify({
+                    'error': 'This account was deactivated by platform developers/administration. As stated in our Terms & Agreements, developer-deactivated accounts are final and cannot be reactivated by the farm owner.',
+                    'deactivated_by_developer': True
+                }), 403
+
             # Update farm_members
             cur.execute('''
                 UPDATE farm_members
@@ -423,13 +438,18 @@ def update_member_status(farm_id, member_id):
             ''', (is_active, farm_id, member_id))
 
             # Also update users table for this caretaker
+            deact_by = None if is_active else 'owner'
             cur.execute('''
                 UPDATE users
-                SET is_active = %s
+                SET is_active = %s, deactivated_by = %s,
+                    suspension_reason = CASE WHEN %s = FALSE THEN 'Deactivated by farm owner' ELSE NULL END
                 WHERE id=%s AND role='caretaker'
-            ''', (is_active, member_id))
+            ''', (is_active, deact_by, is_active, member_id))
 
             db.commit()
+
+            from db import invalidate_user_suspension_cache
+            invalidate_user_suspension_cache(member_id)
 
             status_text = 'activated' if is_active else 'deactivated'
             return jsonify({

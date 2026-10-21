@@ -369,7 +369,7 @@ def signup():
                 # Auto-provision 30-Day Free Trial (starts with 0 farms)
                 now = datetime.utcnow()
                 trial_end = now + timedelta(days=30)
-                trial_grace = trial_end + timedelta(days=7)
+                trial_grace = trial_end + timedelta(days=3)
                 cur.execute('''
                     INSERT INTO subscriptions
                     (user_id, plan, status, price_paid, currency, payment_gateway,
@@ -467,14 +467,17 @@ def login():
                 cur.execute('UPDATE users SET password_hash=%s WHERE id=%s', (new_hash, user['id']))
                 db.commit()
 
-            # Check if user account is deactivated / suspended
+            # Check if user account is deactivated
             if user.get('is_active') is False:
-                reason = user.get('suspension_reason') or 'Violation of platform community guidelines'
+                reason = user.get('suspension_reason') or 'Account deactivated by platform developers/administration'
+                deact_by = user.get('deactivated_by') or 'developer'
                 return jsonify({
-                    'error': 'Account suspended',
+                    'error': 'Account deactivated',
+                    'deactivated': True,
                     'suspended': True,
+                    'deactivated_by': deact_by,
                     'reason': reason,
-                    'message': f"Your account has been suspended: {reason}. You can contact support and submit an appeal."
+                    'message': f"Your account has been deactivated by the developers/platform administration: {reason}."
                 }), 403
 
             # For caretakers, verify active farm membership
@@ -553,12 +556,15 @@ def google_auth():
             if user:
                 # Existing user logging in
                 if user.get('is_active') is False:
-                    reason = user.get('suspension_reason') or 'Violation of platform community guidelines'
+                    reason = user.get('suspension_reason') or 'Account deactivated by platform developers/administration'
+                    deact_by = user.get('deactivated_by') or 'developer'
                     return jsonify({
-                        'error': 'Account suspended',
+                        'error': 'Account deactivated',
+                        'deactivated': True,
                         'suspended': True,
+                        'deactivated_by': deact_by,
                         'reason': reason,
-                        'message': f"Your account has been suspended: {reason}. You can contact support and submit an appeal."
+                        'message': f"Your account has been deactivated by the developers/platform administration: {reason}."
                     }), 403
                 user_id = user['id']
                 role = user.get('role') or 'owner'
@@ -613,7 +619,7 @@ def google_auth():
                 # Auto-provision 30-day Free Trial for new Google users (starts with 0 farms)
                 now = datetime.utcnow()
                 trial_end = now + timedelta(days=30)
-                trial_grace = trial_end + timedelta(days=7)
+                trial_grace = trial_end + timedelta(days=3)
                 cur.execute('''
                     INSERT INTO subscriptions
                     (user_id, plan, status, price_paid, currency, payment_gateway,

@@ -17,7 +17,7 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [stats, setStats] = useState({ total: 0, owners: 0, caretakers: 0, active: 0, suspended: 0 });
+  const [stats, setStats] = useState({ total: 0, owners: 0, caretakers: 0, active: 0, deactivated: 0, suspended: 0 });
   
   // Filters & Search
   const [search, setSearch] = useState('');
@@ -27,8 +27,6 @@ export default function AdminUsersPage() {
   const [sortDir, setSortDir] = useState('desc');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortMenuRef = useRef(null);
-  const [accountFilter, setAccountFilter] = useState('all');
-  const [allAccounts, setAllAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Bulk Actions
@@ -38,15 +36,8 @@ export default function AdminUsersPage() {
   const [activeUserDetail, setActiveUserDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editUserModal, setEditUserModal] = useState(null);
-  const [suspendModal, setSuspendModal] = useState(null);
-  const [suspendReason, setSuspendReason] = useState('');
-  const [deleteConfirmModal, setDeleteConfirmModal] = useState(null);
-
-  // Appeals Management State
-  const [appealsModal, setAppealsModal] = useState(false);
-  const [appeals, setAppeals] = useState([]);
-  const [appealsLoading, setAppealsLoading] = useState(false);
-  const [pendingAppealsCount, setPendingAppealsCount] = useState(0);
+  const [deactivateModal, setDeactivateModal] = useState(null);
+  const [deactivateReason, setDeactivateReason] = useState('');
 
   // Invite / Create Admin State
   const [createModal, setCreateModal] = useState(false);
@@ -72,15 +63,11 @@ export default function AdminUsersPage() {
           role: roleFilter,
           status: statusFilter,
           sort_by: sortBy,
-          sort_dir: sortDir,
-          user_id: accountFilter
+          sort_dir: sortDir
         }
       });
       if (res.data && res.data.success) {
         setUsers(res.data.users || []);
-        if (res.data.all_accounts && res.data.all_accounts.length > 0) {
-          setAllAccounts(res.data.all_accounts);
-        }
         setTotal(res.data.total || 0);
         setPages(res.data.pages || 1);
         if (res.data.stats) setStats(res.data.stats);
@@ -93,53 +80,9 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleAccountFilterChange = (val) => {
-    setAccountFilter(val);
-    setPage(1);
-  };
-
-  useEffect(() => {
-    // Initial fetch of full accounts directory
-    axios.get('/api/admin/users', { params: { limit: 100 } })
-      .then(r => {
-        if (r.data && r.data.all_accounts) setAllAccounts(r.data.all_accounts);
-        else if (r.data && r.data.users) setAllAccounts(r.data.users);
-      })
-      .catch(() => {});
-  }, []);
-
-  const fetchAppeals = async () => {
-    setAppealsLoading(true);
-    try {
-      const res = await axios.get('/api/admin/appeals');
-      if (res.data && res.data.success) {
-        setAppeals(res.data.appeals || []);
-        setPendingAppealsCount((res.data.appeals || []).filter(a => a.status === 'pending').length);
-      }
-    } catch (err) {
-      console.warn('Appeals fetch error:', err);
-    } finally {
-      setAppealsLoading(false);
-    }
-  };
-
-  const handleAppealAction = async (appealId, action) => {
-    try {
-      const res = await axios.post(`/api/admin/appeals/${appealId}/action`, { action });
-      if (res.data.success) {
-        toast.success(res.data.message);
-        fetchAppeals();
-        fetchUsers();
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to update appeal status');
-    }
-  };
-
   useEffect(() => {
     fetchUsers();
-    fetchAppeals();
-  }, [page, limit, roleFilter, statusFilter, accountFilter, sortBy, sortDir]);
+  }, [page, limit, roleFilter, statusFilter, sortBy, sortDir]);
 
   // Click outside listener for sort dropdown
   useEffect(() => {
@@ -197,21 +140,21 @@ export default function AdminUsersPage() {
     }
   };
 
-  // Toggle Suspend Status
-  const handleConfirmSuspend = async () => {
-    if (!suspendModal) return;
+  // Toggle Deactivate / Reactivate Status
+  const handleConfirmDeactivate = async () => {
+    if (!deactivateModal) return;
     try {
-      const newStatus = !suspendModal.is_active;
-      const res = await axios.post(`/api/admin/users/${suspendModal.id}/status`, {
+      const newStatus = !deactivateModal.is_active;
+      const res = await axios.post(`/api/admin/users/${deactivateModal.id}/status`, {
         is_active: newStatus,
-        reason: suspendReason
+        reason: deactivateReason
       });
       if (res.data.success) {
         toast.success(res.data.message);
-        setSuspendModal(null);
-        setSuspendReason('');
+        setDeactivateModal(null);
+        setDeactivateReason('');
         fetchUsers();
-        if (activeUserDetail && activeUserDetail.user.id === suspendModal.id) {
+        if (activeUserDetail && activeUserDetail.user.id === deactivateModal.id) {
           setActiveUserDetail(prev => ({
             ...prev,
             user: { ...prev.user, is_active: newStatus }
@@ -259,24 +202,6 @@ export default function AdminUsersPage() {
     }
   };
 
-  // Delete User
-  const handleConfirmDelete = async () => {
-    if (!deleteConfirmModal) return;
-    try {
-      const res = await axios.delete(`/api/admin/users/${deleteConfirmModal.id}`);
-      if (res.data.success) {
-        toast.success(res.data.message);
-        setDeleteConfirmModal(null);
-        if (activeUserDetail?.user?.id === deleteConfirmModal.id) {
-          setActiveUserDetail(null);
-        }
-        fetchUsers();
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to delete user');
-    }
-  };
-
   // Bulk Actions
   const handleSelectAll = () => {
     if (selectedUserIds.length === users.length) {
@@ -296,9 +221,6 @@ export default function AdminUsersPage() {
 
   const handleBulkAction = async (action) => {
     if (selectedUserIds.length === 0) return;
-    if (action === 'delete' && !window.confirm(`Are you sure you want to permanently delete ${selectedUserIds.length} user accounts?`)) {
-      return;
-    }
     try {
       const res = await axios.post('/api/admin/users/bulk-action', {
         user_ids: selectedUserIds,
@@ -416,32 +338,6 @@ export default function AdminUsersPage() {
         <div className="admin-header-actions">
           <button 
             type="button"
-            onClick={() => {
-              setAppealsModal(true);
-              fetchAppeals();
-            }} 
-            className={`admin-btn ${pendingAppealsCount > 0 ? 'warning' : 'secondary'}`}
-            title="Review submitted account suspension appeals"
-            style={{ position: 'relative' }}
-          >
-            <ShieldAlert size={15} />
-            <span>Appeals Review</span>
-            {pendingAppealsCount > 0 && (
-              <span style={{
-                background: 'var(--accent-red)',
-                color: '#fff',
-                fontSize: '10px',
-                fontWeight: 700,
-                padding: '1px 6px',
-                borderRadius: '10px',
-                marginLeft: '4px'
-              }}>
-                {pendingAppealsCount}
-              </span>
-            )}
-          </button>
-          <button 
-            type="button"
             onClick={handleExportExcelUsers} 
             className="admin-btn secondary"
             title="Download full user directory formatted for Microsoft Excel"
@@ -479,9 +375,9 @@ export default function AdminUsersPage() {
         <div className="stat-pill">
           <span>Active: <strong style={{ color: 'var(--accent-green)' }}>{stats.active}</strong></span>
         </div>
-        {stats.suspended > 0 && (
+        {(stats.deactivated > 0 || stats.suspended > 0) && (
           <div className="stat-pill suspended">
-            <span>Suspended: <strong style={{ color: 'var(--accent-red)' }}>{stats.suspended}</strong></span>
+            <span>Deactivated: <strong style={{ color: 'var(--accent-red)' }}>{stats.deactivated || stats.suspended}</strong></span>
           </div>
         )}
       </div>
@@ -493,7 +389,7 @@ export default function AdminUsersPage() {
           <input 
             type="text"
             className="search-input"
-            placeholder="Search by name, email, phone, or farm..."
+            placeholder="Search name, email, farm..."
             autoComplete="off"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -531,29 +427,7 @@ export default function AdminUsersPage() {
             >
               <option value="all">All Statuses</option>
               <option value="active">Active Only</option>
-              <option value="suspended">Suspended Only</option>
-            </select>
-          </div>
-
-          {/* Account Filter Dropdown — Direct Individual User Accounts */}
-          <div className="filter-select-wrap">
-            <label className="filter-label">Account:</label>
-            <select 
-              value={accountFilter} 
-              onChange={(e) => handleAccountFilterChange(e.target.value)}
-              className="filter-select"
-            >
-              <option value="all">All Accounts ({allAccounts.length || stats.total || users.length})</option>
-              {(allAccounts.length > 0 ? allAccounts : users).map((acc) => {
-                const roleLabel = acc.role === 'admin' ? 'Admin' : acc.role === 'owner' ? 'Owner' : 'Caretaker';
-                const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || acc.email;
-                const statusTag = acc.is_active === false ? ' [Suspended]' : '';
-                return (
-                  <option key={acc.id} value={acc.id}>
-                    {fullName} ({acc.email}) — {roleLabel}{statusTag}
-                  </option>
-                );
-              })}
+              <option value="deactivated">Deactivated Only</option>
             </select>
           </div>
 
@@ -622,21 +496,14 @@ export default function AdminUsersPage() {
               onClick={() => handleBulkAction('activate')}
             >
               <UserCheck size={14} />
-              <span>Bulk Activate</span>
+              <span>Bulk Reactivate</span>
             </button>
             <button 
               className="bulk-btn suspend"
-              onClick={() => handleBulkAction('suspend')}
+              onClick={() => handleBulkAction('deactivate')}
             >
               <UserX size={14} />
-              <span>Bulk Suspend</span>
-            </button>
-            <button 
-              className="bulk-btn delete"
-              onClick={() => handleBulkAction('delete')}
-            >
-              <Trash2 size={14} />
-              <span>Bulk Delete</span>
+              <span>Bulk Deactivate</span>
             </button>
             <button 
               className="bulk-btn cancel"
@@ -769,7 +636,7 @@ export default function AdminUsersPage() {
                         {u.is_active ? (
                           <span className="status-badge active">ACTIVE</span>
                         ) : (
-                          <span className="status-badge suspended">SUSPENDED</span>
+                          <span className="status-badge suspended">DEACTIVATED</span>
                         )}
                       </td>
                       <td className="text-sm text-secondary font-mono">
@@ -797,17 +664,10 @@ export default function AdminUsersPage() {
                           </button>
                           <button 
                             className={`action-icon-btn ${u.is_active ? 'warning' : 'success'}`} 
-                            title={u.is_active ? 'Suspend Account' : 'Reactivate Account'}
-                            onClick={() => { setSuspendModal(u); setSuspendReason(''); }}
+                            title={u.is_active ? 'Deactivate Account' : 'Reactivate Account'}
+                            onClick={() => { setDeactivateModal(u); setDeactivateReason(''); }}
                           >
                             {u.is_active ? <UserX size={15} /> : <UserCheck size={15} />}
-                          </button>
-                          <button 
-                            className="action-icon-btn danger" 
-                            title="Permanently Delete"
-                            onClick={() => setDeleteConfirmModal(u)}
-                          >
-                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>
@@ -896,7 +756,7 @@ export default function AdminUsersPage() {
                       {activeUserDetail.user.is_active ? (
                         <span className="status-badge active">ACTIVE</span>
                       ) : (
-                        <span className="status-badge suspended">SUSPENDED</span>
+                        <span className="status-badge suspended">DEACTIVATED</span>
                       )}
                     </div>
                   </div>
@@ -1140,34 +1000,34 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* ─── MODAL 3: SUSPEND / REACTIVATE CONFIRMATION ───────────────────── */}
-      {suspendModal && (
-        <div className="admin-modal-backdrop" onClick={() => setSuspendModal(null)}>
+      {/* ─── MODAL 3: DEACTIVATE / REACTIVATE CONFIRMATION ───────────────────── */}
+      {deactivateModal && (
+        <div className="admin-modal-backdrop" onClick={() => setDeactivateModal(null)}>
           <div className="admin-modal-card warning-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-icon-alert">
               <AlertTriangle size={28} color="var(--accent-amber)" />
             </div>
             <h2 className="modal-title">
-              {suspendModal.is_active ? 'Suspend User Account?' : 'Reactivate User Account?'}
+              {deactivateModal.is_active ? 'Deactivate User Account?' : 'Reactivate User Account?'}
             </h2>
             <p className="modal-desc">
-              {suspendModal.is_active
-                ? `Suspending ${suspendModal.email} will immediately revoke their active sessions, terminate mobile access, and display the suspension notice with support appeal link.`
-                : `Reactivating ${suspendModal.email} will restore their login access immediately.`}
+              {deactivateModal.is_active
+                ? `Deactivating ${deactivateModal.email} will immediately terminate their active sessions, log them out, and display a notice on the login page informing them that their account was deactivated by the platform developers. As stated in our Terms & Agreements, accounts deactivated by developers cannot be reactivated by farm owners.`
+                : `Reactivating ${deactivateModal.email} will restore their login access immediately.`}
             </p>
 
-            {suspendModal.is_active && (
+            {deactivateModal.is_active && (
               <div style={{ marginTop: 12, textAlign: 'left' }}>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>
                   Select Guideline Conflict / Preset Reason:
                 </label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
                   {[
-                    'Terms of Service: Community guidelines conflict',
-                    'Suspicious Activity: Unauthorized automated access detected',
-                    'Billing Discrepancy: Subscription payment under administrative review',
-                    'Farm Owner Request: Disciplinary hold or membership revoked',
-                    'Security Audit: Verification required before account reactivation'
+                    'Platform Developer Discretion: Community guidelines and policy conflict',
+                    'System Integrity & Security: Irregular automated activity detected',
+                    'Billing & Subscription Dispute: Under developer review',
+                    'Breach of Terms: Commercial exploitation or unauthorized delegation',
+                    'Administrative Hold: Investigation pending'
                   ].map((preset, idx) => (
                     <button
                       key={idx}
@@ -1177,13 +1037,13 @@ export default function AdminUsersPage() {
                         padding: '4px 10px',
                         fontSize: '11.5px',
                         borderRadius: '16px',
-                        background: suspendReason === preset ? 'rgba(234, 179, 8, 0.2)' : 'var(--bg-input)',
-                        border: `1px solid ${suspendReason === preset ? 'var(--accent-amber)' : 'var(--border)'}`,
-                        color: suspendReason === preset ? 'var(--accent-amber)' : 'var(--text-secondary)',
+                        background: deactivateReason === preset ? 'rgba(234, 179, 8, 0.2)' : 'var(--bg-input)',
+                        border: `1px solid ${deactivateReason === preset ? 'var(--accent-amber)' : 'var(--border)'}`,
+                        color: deactivateReason === preset ? 'var(--accent-amber)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease'
                       }}
-                      onClick={() => setSuspendReason(preset)}
+                      onClick={() => setDeactivateReason(preset)}
                     >
                       {preset.split(':')[0]}
                     </button>
@@ -1193,165 +1053,24 @@ export default function AdminUsersPage() {
             )}
 
             <div className="form-field" style={{ textAlign: 'left' }}>
-              <label>Reason for Action (Visible to User in Support / Appeal & Recorded in Audit Trail):</label>
+              <label>Reason for Action (Recorded in Audit Trail and displayed to user upon login):</label>
               <textarea 
                 rows={3} 
                 className="admin-textarea"
-                placeholder="e.g. Terms of Service: Community guidelines conflict. Please contact Customer Service to appeal."
-                value={suspendReason}
-                onChange={(e) => setSuspendReason(e.target.value)}
+                placeholder="e.g. Platform Developer Discretion: Community guidelines conflict."
+                value={deactivateReason}
+                onChange={(e) => setDeactivateReason(e.target.value)}
               />
             </div>
             <div className="modal-actions-row">
-              <button className="admin-btn secondary" onClick={() => setSuspendModal(null)}>
+              <button className="admin-btn secondary" onClick={() => setDeactivateModal(null)}>
                 Cancel
               </button>
               <button 
-                className={`admin-btn ${suspendModal.is_active ? 'danger' : 'primary'}`}
-                onClick={handleConfirmSuspend}
+                className={`admin-btn ${deactivateModal.is_active ? 'danger' : 'primary'}`}
+                onClick={handleConfirmDeactivate}
               >
-                {suspendModal.is_active ? 'Confirm Suspension' : 'Confirm Reactivation'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── MODAL 4: ACCOUNT APPEALS REVIEW ───────────────────────── */}
-      {appealsModal && (
-        <div className="admin-modal-backdrop" onClick={() => setAppealsModal(false)}>
-          <div className="admin-modal-card" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(234, 179, 8, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ShieldAlert size={20} color="var(--accent-amber)" />
-                </div>
-                <div>
-                  <h2 className="modal-title" style={{ margin: 0 }}>Account Suspension Appeals</h2>
-                  <p className="modal-desc" style={{ margin: 0, fontSize: '0.82rem' }}>
-                    Review user defenses, inspect guideline violations, and approve or dismiss appeals.
-                  </p>
-                </div>
-              </div>
-              <button className="modal-close-btn" onClick={() => setAppealsModal(false)} aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ maxHeight: '60vh', overflowY: 'auto', marginTop: 16 }}>
-              {appealsLoading ? (
-                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-                  Loading appeals list...
-                </div>
-              ) : appeals.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
-                  <CheckCircle2 size={36} color="var(--accent-green)" style={{ margin: '0 auto 12px' }} />
-                  <p style={{ margin: 0, fontWeight: 600 }}>No appeals submitted yet</p>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-                    When a suspended user files an appeal through the mobile app, it will appear here.
-                  </p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {appeals.map(appeal => (
-                    <div 
-                      key={appeal.id} 
-                      style={{ 
-                        background: 'var(--bg-input)', 
-                        border: '1px solid var(--border)', 
-                        borderRadius: 8, 
-                        padding: 14 
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <div>
-                          <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>{appeal.user_name}</strong>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: 8 }}>({appeal.user_email})</span>
-                        </div>
-                        <span 
-                          style={{
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: 12,
-                            textTransform: 'uppercase',
-                            background: appeal.status === 'pending' ? 'rgba(234, 179, 8, 0.15)' : appeal.status === 'approved' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                            color: appeal.status === 'pending' ? 'var(--accent-amber)' : appeal.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-red)'
-                          }}
-                        >
-                          {appeal.status}
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: '0.82rem', marginBottom: 6 }}>
-                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Suspension Reason: </span>
-                        <span style={{ color: 'var(--accent-amber)' }}>{appeal.suspension_reason || 'Administrative hold'}</span>
-                      </div>
-
-                      <div style={{ background: 'var(--bg-card)', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 10 }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
-                          USER APPEAL STATEMENT:
-                        </div>
-                        "{appeal.appeal_message}"
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        <span>Submitted on {new Date(appeal.created_at).toLocaleString()}</span>
-                        {appeal.status === 'pending' && (
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              type="button"
-                              className="admin-btn primary"
-                              style={{ padding: '4px 12px', fontSize: '0.78rem' }}
-                              onClick={() => handleAppealAction(appeal.id, 'approve')}
-                            >
-                              <UserCheck size={13} />
-                              <span>Approve & Lift Suspension</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="admin-btn secondary"
-                              style={{ padding: '4px 12px', fontSize: '0.78rem', color: 'var(--accent-red)' }}
-                              onClick={() => handleAppealAction(appeal.id, 'reject')}
-                            >
-                              <XCircle size={13} />
-                              <span>Dismiss Appeal</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="modal-actions-row" style={{ marginTop: 16 }}>
-              <button type="button" className="admin-btn secondary" onClick={() => setAppealsModal(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── MODAL 5: PERMANENT DELETE CONFIRMATION ───────────────────────── */}
-      {deleteConfirmModal && (
-        <div className="admin-modal-backdrop" onClick={() => setDeleteConfirmModal(null)}>
-          <div className="admin-modal-card danger-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon-alert danger">
-              <Trash2 size={28} color="var(--accent-red)" />
-            </div>
-            <h2 className="modal-title">Permanently Delete Account?</h2>
-            <p className="modal-desc">
-              Are you sure you want to delete <strong>{deleteConfirmModal.email}</strong>? This action is irreversible and cascades to all associated chickens, scans, and task history.
-            </p>
-            <div className="modal-actions-row">
-              <button className="admin-btn secondary" onClick={() => setDeleteConfirmModal(null)}>
-                Cancel
-              </button>
-              <button className="admin-btn danger" onClick={handleConfirmDelete}>
-                Delete Permanently
+                {deactivateModal.is_active ? 'Confirm Deactivation' : 'Confirm Reactivation'}
               </button>
             </div>
           </div>

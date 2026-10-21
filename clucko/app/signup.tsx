@@ -929,17 +929,19 @@ export default function SignupScreen() {
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>4. User Accounts & Shared Farm Access</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>4. User Accounts, Deactivation &amp; Irrevocability</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
-                  You are responsible for safeguarding your login credentials. Farm owners may assign caretakers to specific farms. Caretakers agree to accurately log captures, chicken profiles, and daily health observations. Clucko is not responsible for unauthorized actions performed via shared credentials.
+                  You are responsible for safeguarding your login credentials. Farm owners may assign and manage caretakers for specific farms.{'\n\n'}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>DEVELOPER DEACTIVATION CLAUSE:</Text> Clucko platform developers and administrators reserve the absolute right to deactivate any user account (including Farm Owners and Caretakers) without prior notice for violations of platform integrity, suspected fraud, abusive behavior, or non-compliance. Once an account is deactivated by platform developers, this action is <Text style={{ fontWeight: '700', color: '#EF4444' }}>FINAL, PERMANENT, AND IRREVOCABLE</Text>. Farm owners have no authority or technical capability to reactivate any account deactivated by developers. Active sessions are terminated immediately without an appeal process.
                 </Text>
               </View>
 
               <View style={styles.legalSection}>
-                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Subscriptions, Payments &amp; 7-Day Refund Grace Period</Text>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Subscriptions, Dynamic Pricing, Expiration &amp; 7-Day Refund Policy</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
-                  Subscriptions to Pro or Premium plans provide expanded flock capacity and advanced features. In accordance with consumer protection standards, users are entitled to request a full refund within seven (7) calendar days of transaction completion directly inside the app.{'\n\n'}
-                  <Text style={{ fontWeight: '700', color: colors.text }}>MANDATORY CUTOFF:</Text> Once the 7-day grace period has passed, transactions become strictly non-refundable and cannot be approved or rolled back. Approved refunds are subject to selective rollback rules to safeguard all existing flock data.
+                  Clucko offers Free Trial, Pro, and Premium tiers. All pricing is dynamic and subject to variation at the sole discretion of the platform development team. No fixed subscription amounts are codified in these terms; all users are expected to remain vigilant and review current in-app pricing schedules prior to purchase. Payments are securely processed via PayMongo (GCash, Maya, Card).{'\n\n'}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>7-DAY REFUND WINDOW:</Text> In accordance with consumer protection standards, users may request a refund within seven (7) calendar days of transaction completion directly inside the app. Once the 7-day grace period has passed, transactions become strictly non-refundable and cannot be approved or rolled back.{'\n\n'}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>PLAN EXPIRY &amp; 3-DAY GRACE PERIOD:</Text> At the end of a paid billing cycle, a 3-day grace period is provided. If not renewed, the account is automatically downgraded to the Standard Free Tier. All historical flock records and data remain safely preserved, but new additions are locked until quota compliance or renewal. If an account is deactivated by developers for terms violation, remaining subscription balances are forfeited.
                 </Text>
               </View>
 
@@ -1026,6 +1028,13 @@ export default function SignupScreen() {
                 <Text style={[styles.legalSectionHeading, { color: colors.text }]}>5. Data Subject Rights & Erasure (RA 10173)</Text>
                 <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
                   Under the Philippine Data Privacy Act of 2012, you have the right to access, rectify, or permanently erase your data. You may delete your account and all flock records directly in Profile → Preferences → Danger Zone → Delete Account, or contact our Data Protection Officer at jasphertadlan@gmail.com (Davao City, Philippines).
+                </Text>
+              </View>
+
+              <View style={styles.legalSection}>
+                <Text style={[styles.legalSectionHeading, { color: colors.text }]}>6. Account Deactivation &amp; Audit Retention</Text>
+                <Text style={[styles.legalSectionText, { color: colors.textSecondary }]}>
+                  When an account is deactivated by platform developers for security violations, terms breach, or fraud, audit logs and account association records are retained in compliance with RA 10173 Section 12 for forensic integrity and legal reporting. Deactivated users cannot reactivate their account, and platform developers retain full administrative authority.
                 </Text>
               </View>
             </ScrollView>

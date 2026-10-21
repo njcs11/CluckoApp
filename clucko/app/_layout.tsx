@@ -2,7 +2,6 @@ import { DarkModeProvider } from '@/context/DarkModeContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { TourProvider } from '@/context/TourContext';
 import InteractiveProductTour from '../components/ui/InteractiveProductTour';
-import AccountSuspendedModal from '../components/ui/AccountSuspendedModal';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
@@ -10,7 +9,7 @@ import { apiCheckHeartbeatStatus } from '../lib/api';
 
 export default function RootLayout() {
   useEffect(() => {
-    // Proactively verify session status every 5 seconds to instantly lock out and show appeal modal if account is suspended
+    // Proactively verify session status every 5 seconds to instantly lock out and redirect if account is deactivated
     const interval = setInterval(() => {
       apiCheckHeartbeatStatus();
     }, 5000);
@@ -47,9 +46,8 @@ export default function RootLayout() {
             <Stack.Screen name="server-settings" options={{ animation: 'ios_from_right', animationDuration: 280 }} />
           </Stack>
           <InteractiveProductTour />
-          <AccountSuspendedModal />
         </TourProvider>
       </NotificationProvider>
     </DarkModeProvider>
   );
-}
+}

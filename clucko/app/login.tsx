@@ -96,6 +96,11 @@ export default function LoginScreen() {
   const [emailError, setEmailError] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [deactivatedNotice, setDeactivatedNotice] = useState<{
+    reason?: string;
+    deactivated_by?: string;
+    email?: string;
+  } | null>(null);
 
   useEffect(() => {
     const onShow = (e: any) => {
@@ -179,7 +184,7 @@ export default function LoginScreen() {
   const emailInputRef = useRef<TextInput>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
-  // Load last remembered email on mount
+  // Load last remembered email and any deactivation notice on mount
   useEffect(() => {
     (async () => {
       try {
@@ -187,6 +192,12 @@ export default function LoginScreen() {
         if (lastEmail) {
           setEmail(lastEmail);
           setEmailTouched(true);
+        }
+        const noticeStr = await AsyncStorage.getItem('clucko_deactivated_notice');
+        if (noticeStr) {
+          try {
+            setDeactivatedNotice(JSON.parse(noticeStr));
+          } catch {}
         }
       } catch {
         // Ignore storage errors
@@ -262,6 +273,8 @@ export default function LoginScreen() {
       const loginRes = await apiLogin(cleanEmail, password);
       // Remember email for subsequent logins
       await AsyncStorage.setItem('last_login_email', cleanEmail);
+      await AsyncStorage.removeItem('clucko_deactivated_notice');
+      setDeactivatedNotice(null);
       if (loginRes?.user?.id) {
         await loadDarkModePreference(String(loginRes.user.id));
       }
@@ -279,7 +292,18 @@ export default function LoginScreen() {
       });
       router.replace('/(tabs)/home');
     } catch (err: any) {
-      if (err?.suspended || err?.message?.toLowerCase().includes('suspended')) {
+      if (err?.deactivated || err?.suspended || err?.message?.toLowerCase().includes('deactivat') || err?.message?.toLowerCase().includes('suspended')) {
+        const noticeStr = await AsyncStorage.getItem('clucko_deactivated_notice');
+        if (noticeStr) {
+          try {
+            setDeactivatedNotice(JSON.parse(noticeStr));
+          } catch {}
+        } else {
+          setDeactivatedNotice({
+            reason: err?.reason || err?.message || 'Account deactivated by platform developers',
+            deactivated_by: 'developer'
+          });
+        }
         return;
       }
       triggerShake();
@@ -305,6 +329,8 @@ export default function LoginScreen() {
     try {
       const res = await performGoogleSignIn();
       if (res.success) {
+        await AsyncStorage.removeItem('clucko_deactivated_notice');
+        setDeactivatedNotice(null);
         if (res?.user?.id) {
           await loadDarkModePreference(String(res.user.id));
         }
@@ -322,16 +348,42 @@ export default function LoginScreen() {
         });
         router.replace('/(tabs)/home');
       } else if (res.error && res.error !== 'Sign in was cancelled.') {
-        if (!res.error.toLowerCase().includes('suspended') && !res.error.toLowerCase().includes('lockout')) {
+        if (res.error.toLowerCase().includes('deactivat') || res.error.toLowerCase().includes('suspended')) {
+          const noticeStr = await AsyncStorage.getItem('clucko_deactivated_notice');
+          if (noticeStr) {
+            try {
+              setDeactivatedNotice(JSON.parse(noticeStr));
+            } catch {}
+          } else {
+            setDeactivatedNotice({
+              reason: res.error,
+              deactivated_by: 'developer'
+            });
+          }
+          return;
+        }
+        if (!res.error.toLowerCase().includes('lockout')) {
           triggerShake();
           displayErrorToast(res.error);
         }
       }
     } catch (err: any) {
-      if (!err?.message?.toLowerCase().includes('suspended') && !err?.suspended) {
-        triggerShake();
-        displayErrorToast(err?.message || 'Could not complete Google Sign-In.');
+      if (err?.deactivated || err?.suspended || err?.message?.toLowerCase().includes('deactivat') || err?.message?.toLowerCase().includes('suspended')) {
+        const noticeStr = await AsyncStorage.getItem('clucko_deactivated_notice');
+        if (noticeStr) {
+          try {
+            setDeactivatedNotice(JSON.parse(noticeStr));
+          } catch {}
+        } else {
+          setDeactivatedNotice({
+            reason: err?.reason || err?.message || 'Account deactivated by platform developers',
+            deactivated_by: 'developer'
+          });
+        }
+        return;
       }
+      triggerShake();
+      displayErrorToast(err?.message || 'Could not complete Google Sign-In.');
     } finally {
       setGoogleLoading(false);
     }
@@ -367,6 +419,53 @@ export default function LoginScreen() {
               Sign in to manage your flock, scans, and farms
             </Text>
           </View>
+
+          {/* Developer Deactivation Notice Banner */}
+          {deactivatedNotice && (
+            <View
+              style={[
+                styles.deactivatedBanner,
+                {
+                  backgroundColor: isDarkMode ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
+                  borderColor: isDarkMode ? '#EF444460' : '#FECACA',
+                },
+              ]}
+            >
+              <View style={styles.deactivatedBannerHeader}>
+                <View style={styles.deactivatedIconCircle}>
+                  <Ionicons name="alert-circle" size={22} color="#EF4444" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.deactivatedBannerTitle, { color: isDarkMode ? '#FCA5A5' : '#991B1B' }]}>
+                    Account Deactivated
+                  </Text>
+                  <Text style={[styles.deactivatedBannerSubtitle, { color: isDarkMode ? '#F87171' : '#B91C1C' }]}>
+                    Action taken by Platform Developers
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={async () => {
+                    setDeactivatedNotice(null);
+                    await AsyncStorage.removeItem('clucko_deactivated_notice');
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="Dismiss banner"
+                >
+                  <Ionicons name="close" size={20} color={isDarkMode ? '#FCA5A5' : '#991B1B'} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.deactivatedBannerBody}>
+                <Text style={[styles.deactivatedBannerReason, { color: isDarkMode ? '#FEE2E2' : '#7F1D1D' }]}>
+                  <Text style={{ fontWeight: '700' }}>Reason: </Text>
+                  {deactivatedNotice.reason || 'Deactivated by platform administrators'}
+                </Text>
+                <Text style={[styles.deactivatedBannerNote, { color: isDarkMode ? '#EF4444B0' : '#991B1BA0' }]}>
+                  In accordance with the Clucko Terms of Service and Platform Safety Policies, this account has been deactivated by the developers. This administrative action is final and cannot be reactivated by farm owners.
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Social Sign-In (Google) */}
           <View style={styles.socialContainer}>
@@ -943,5 +1042,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  deactivatedBanner: {
+    borderWidth: 1.5,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    gap: 10,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  deactivatedBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  deactivatedIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(239, 68, 68, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deactivatedBannerTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  deactivatedBannerSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  deactivatedBannerBody: {
+    marginTop: 4,
+    gap: 6,
+  },
+  deactivatedBannerReason: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  deactivatedBannerNote: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontStyle: 'italic',
   },
 });

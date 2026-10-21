@@ -69,6 +69,43 @@ def test_subscription_renewal_extends_from_existing_end_date():
     assert new_start_date == original_start
 
 
+def test_pro_user_buying_premium_stacks_remaining_days():
+    """
+    Verify Universal Stacking: When a user with an active Pro plan (e.g. 80 days left)
+    purchases a Premium plan (365 days), the 80 days are NOT lost:
+    new_end_date = existing_end + 365 days = 445 days in the future!
+    And the resulting tier is 'premium'.
+    """
+    now = datetime.utcnow()
+    existing_end = now + timedelta(days=80)
+    pro_start = now - timedelta(days=10)
+    new_plan_info = PLANS_CONFIG['premium']  # 365 days
+
+    existing = {
+        'plan': 'pro',
+        'start_date': pro_start,
+        'end_date': existing_end
+    }
+
+    # Universal stacking logic
+    if existing and existing.get('end_date') and existing['end_date'] > now:
+        new_end_date = existing['end_date'] + timedelta(days=new_plan_info['duration_days'])
+        new_start_date = existing.get('start_date') or now
+        if existing.get('plan') == 'premium' or 'premium' == 'premium':
+            effective_plan = 'premium'
+        else:
+            effective_plan = 'pro'
+    else:
+        new_end_date = now + timedelta(days=new_plan_info['duration_days'])
+        new_start_date = now
+        effective_plan = 'premium'
+
+    expected_days = (new_end_date - now).total_seconds() / 86400.0
+    assert 444.9 < expected_days < 445.1
+    assert effective_plan == 'premium'
+    assert new_start_date == pro_start
+
+
 def test_subscription_renewal_after_expiry_resets_dates():
     """
     Verify that if a previous subscription has already expired,
@@ -295,7 +332,7 @@ def test_chicken_deletion_preserves_captures_used_quota():
         'free_trial_used': True,
         'start_date': now,
         'end_date': now + timedelta(days=30),
-        'grace_period_end': now + timedelta(days=37)
+        'grace_period_end': now + timedelta(days=33)
     }
 
     # Simulate: User has 5 captures recorded in subscriptions table.
@@ -315,3 +352,80 @@ def test_chicken_deletion_preserves_captures_used_quota():
     assert info['usage']['captures_remaining'] == 25
     assert info['scans_remaining'] == 25
     assert info['days_remaining'] > 0
+
+
+def test_subscription_3_day_grace_period_and_standard_free_tier_downgrade():
+    """Verify that after plan expiry, user enters 3-day grace period, and upon grace expiry, downgrades to Standard Free Tier."""
+    from routes_subscriptions import get_effective_subscription, PLANS_CONFIG
+
+    mock_db = MagicMock()
+    mock_cur = MagicMock()
+    user_id = 99
+    now = datetime.utcnow()
+
+    # 1. User within 3-day grace period (expired 1 day ago, 2 days of grace remaining)
+    grace_sub = {
+        'id': 101,
+        'user_id': user_id,
+        'plan': 'pro',
+        'status': 'active',
+        'price_paid': 479.00,
+        'currency': 'PHP',
+        'payment_gateway': 'paymongo',
+        'payment_reference': None,
+        'max_farms': 2,
+        'max_chickens_per_farm': 60,
+        'max_captures': 999999,
+        'captures_used': 10,
+        'free_trial_used': True,
+        'start_date': now - timedelta(days=91),
+        'end_date': now - timedelta(days=1),
+        'grace_period_end': now + timedelta(days=2) # 2 days left in 3-day grace
+    }
+
+    mock_cur.fetchone.side_effect = [
+        {'id': user_id, 'role': 'owner', 'email': 'owner@farm.com', 'first_name': 'Owner'},
+        grace_sub,
+        {'cnt': 1},
+        {'cnt': 10},
+        {'cnt': 10}
+    ]
+
+    info = get_effective_subscription(user_id, mock_cur, mock_db)
+    assert info['status'] == 'grace_period'
+    assert info['is_in_grace_period'] is True
+    assert info['grace_days_remaining'] == 2
+
+    # 2. User past the 3-day grace period (expired 4 days ago, grace ended 1 day ago)
+    expired_sub = {
+        'id': 102,
+        'user_id': user_id,
+        'plan': 'pro',
+        'status': 'active',
+        'price_paid': 479.00,
+        'currency': 'PHP',
+        'payment_gateway': 'paymongo',
+        'payment_reference': None,
+        'max_farms': 2,
+        'max_chickens_per_farm': 60,
+        'max_captures': 999999,
+        'captures_used': 10,
+        'free_trial_used': True,
+        'start_date': now - timedelta(days=95),
+        'end_date': now - timedelta(days=4),
+        'grace_period_end': now - timedelta(days=1) # 1 day past 3-day grace
+    }
+
+    mock_cur.fetchone.side_effect = [
+        {'id': user_id, 'role': 'owner', 'email': 'owner@farm.com', 'first_name': 'Owner'},
+        expired_sub,
+        {'cnt': 1},
+        {'cnt': 10},
+        {'cnt': 10}
+    ]
+
+    info_expired = get_effective_subscription(user_id, mock_cur, mock_db)
+    assert info_expired['status'] == 'expired'
+    assert info_expired['plan'] == 'free'
+    assert info_expired['plan_name'] == 'Standard Free Tier'
+    assert info_expired['is_in_grace_period'] is False

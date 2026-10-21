@@ -289,16 +289,17 @@ input:focus, textarea:focus, select:focus {
 .admin-filter-bar {
   display: flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
-  gap: 16px !important;
+  justify-content: flex-start !important;
+  gap: 12px !important;
   flex-wrap: wrap !important;
 }
 
 .admin-filter-bar .search-input-wrap {
   position: relative !important;
-  flex: 1 1 360px !important;
-  min-width: 280px !important;
-  max-width: 100% !important;
+  flex: 0 0 180px !important;
+  width: 180px !important;
+  min-width: 140px !important;
+  max-width: 180px !important;
 }
 
 .admin-filter-bar .search-input,
@@ -308,7 +309,7 @@ input:focus, textarea:focus, select:focus {
   max-width: 100% !important;
   min-width: 100% !important;
   box-sizing: border-box !important;
-  padding: 9px 36px 9px 38px !important;
+  padding: 8px 32px 8px 36px !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════

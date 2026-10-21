@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import request, jsonify
 from app import app
 from db import get_db, token_required
@@ -45,7 +45,7 @@ PLANS_CONFIG = {
             'Valid for 3 months (90 days)',
             'Multi-caretaker management',
             'AI Visual Focus Heatmaps',
-            'Priority 7-day grace period',
+            'Priority 3-day grace period',
         ],
         'badge': 'Popular',
     },
@@ -70,7 +70,7 @@ PLANS_CONFIG = {
         'badge': 'Best Value',
     },
     'free': {
-        'name': 'Standard Free Plan',
+        'name': 'Standard Free Tier',
         'price': 0,
         'currency': 'PHP',
         'duration_days': 0,
@@ -83,7 +83,7 @@ PLANS_CONFIG = {
             'Existing data safely retained (never deleted)',
             'Upgrade anytime to unlock more farms or chickens',
         ],
-        'badge': 'Free Tier',
+        'badge': 'Standard Free Tier',
     }
 }
 
@@ -126,6 +126,13 @@ PAYMONGO_PUBLIC_KEY = os.environ.get('PAYMONGO_PUBLIC_KEY', '')
 STRIPE_SECRET_KEY   = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 
+def normalize_dt(dt):
+    if dt is None:
+        return None
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
 def get_effective_subscription(user_id, cur, db):
     """
     Retrieves or initializes the active subscription for an owner or caretaker.
@@ -162,7 +169,7 @@ def get_effective_subscription(user_id, cur, db):
     if not sub:
         # Auto-provision Free Trial for target user
         trial_end = now + timedelta(days=30)
-        trial_grace = trial_end + timedelta(days=7)
+        trial_grace = trial_end + timedelta(days=3)
         cur.execute('''
             INSERT INTO subscriptions
             (user_id, plan, status, price_paid, currency, payment_gateway,
@@ -178,8 +185,8 @@ def get_effective_subscription(user_id, cur, db):
 
     # 3. Evaluate Status & Expiration Flow
     stored_plan = sub['plan']
-    end_date = sub['end_date']
-    grace_period_end = sub['grace_period_end']
+    end_date = normalize_dt(sub['end_date'])
+    grace_period_end = normalize_dt(sub['grace_period_end'])
 
     effective_status = 'active'
     effective_plan = stored_plan
@@ -189,20 +196,20 @@ def get_effective_subscription(user_id, cur, db):
     grace_days_remaining = 0
 
     if stored_plan in ('pro', 'premium', 'free_trial'):
-        if now <= end_date:
+        if end_date and now <= end_date:
             effective_status = 'active'
             total_seconds_left = max(0.0, (end_date - now).total_seconds())
             days_remaining = max(1, math.ceil(total_seconds_left / 86400.0))
-        elif now <= grace_period_end:
-            # 1. ⚠️ THE GRACE PERIOD (0 to 7 Days After Expiration)
-            # Premium features remain fully active for a few days while user can renew
+        elif grace_period_end and now <= grace_period_end:
+            # 1. ⚠️ THE GRACE PERIOD (0 to 3 Days After Expiration)
+            # Premium features remain fully active for 3 days while user can renew
             effective_status = 'grace_period'
             is_in_grace_period = True
             total_grace_seconds = max(0.0, (grace_period_end - now).total_seconds())
             grace_days_remaining = max(1, math.ceil(total_grace_seconds / 86400.0))
         else:
-            # 2. ⬇️ THE DOWNGRADE TO FREE TIER
-            # System confirms expiration past grace: automatically switched to regular Free Plan.
+            # 2. ⬇️ THE DOWNGRADE TO STANDARD FREE TIER
+            # System confirms expiration past grace: automatically switched to Standard Free Tier.
             # Data & progress are preserved! But quotas restrict creating additional farms/chickens.
             effective_status = 'expired'
             effective_plan = 'free'
@@ -551,10 +558,11 @@ def create_checkout():
             cur.execute('SELECT plan, status, end_date FROM subscriptions WHERE user_id=%s', (request.user_id,))
             current_sub = cur.fetchone()
             now = datetime.utcnow()
-            if current_sub and current_sub.get('plan') == 'premium' and current_sub.get('status') == 'active' and current_sub.get('end_date') and current_sub['end_date'] > now:
+            cur_end = normalize_dt(current_sub.get('end_date')) if current_sub else None
+            if current_sub and current_sub.get('plan') == 'premium' and current_sub.get('status') == 'active' and cur_end and cur_end > now:
                 if plan_key == 'pro':
                     return jsonify({
-                        'error': f"You currently have an active Premium Account valid until {current_sub['end_date'].strftime('%B %d, %Y')}. Downgrading to Pro is only allowed after your Premium cycle ends."
+                        'error': f"You currently have an active Premium Account valid until {cur_end.strftime('%B %d, %Y')}. Downgrading to Pro is only allowed after your Premium cycle ends."
                     }), 400
 
             # Generate reference
@@ -713,19 +721,29 @@ def verify_payment():
             duration_days = plan_info['duration_days']
             now = datetime.utcnow()
 
-            # Rule 1 & Billing Cycle matching:
-            # If user already has an active subscription of the same tier, EXTEND from current end_date!
+            # Universal Subscription Stacking:
+            # If user already has an active subscription, EXTEND from current end_date!
             cur.execute('SELECT * FROM subscriptions WHERE user_id=%s', (request.user_id,))
             existing = cur.fetchone()
 
-            if existing and existing.get('plan') == plan_key and existing.get('end_date') and existing['end_date'] > now:
-                new_end_date = existing['end_date'] + timedelta(days=duration_days)
-                new_start_date = existing.get('start_date') or now
+            existing_end = normalize_dt(existing.get('end_date')) if existing else None
+
+            # Stacking Rule: If existing unexpired plan is active, ALWAYS stack onto existing end_date!
+            if existing and existing_end and existing_end > now:
+                new_end_date = existing_end + timedelta(days=duration_days)
+                new_start_date = normalize_dt(existing.get('start_date')) or now
+                # If either existing plan or new plan is premium, the resulting tier is premium!
+                if existing.get('plan') == 'premium' or plan_key == 'premium':
+                    effective_plan = 'premium'
+                else:
+                    effective_plan = 'pro'
             else:
                 new_end_date = now + timedelta(days=duration_days)
                 new_start_date = now
+                effective_plan = plan_key
 
-            new_grace_date = new_end_date + timedelta(days=7)
+            effective_plan_info = PLANS_CONFIG.get(effective_plan, plan_info)
+            new_grace_date = new_end_date + timedelta(days=3)
 
             if existing:
                 cur.execute('''
@@ -744,12 +762,12 @@ def verify_payment():
                         updated_at = %s
                     WHERE user_id = %s
                 ''', (
-                    plan_key,
+                    effective_plan,
                     plan_info['price'],
                     session_id,
-                    plan_info['max_farms'],
-                    plan_info['max_chickens_per_farm'],
-                    plan_info['max_captures'],
+                    effective_plan_info['max_farms'],
+                    effective_plan_info['max_chickens_per_farm'],
+                    effective_plan_info['max_captures'],
                     new_start_date,
                     new_end_date,
                     new_grace_date,
@@ -765,12 +783,12 @@ def verify_payment():
                     VALUES (%s, %s, 'active', %s, 'PHP', 'paymongo', %s, %s, %s, %s, %s, %s, %s)
                 ''', (
                     request.user_id,
-                    plan_key,
+                    effective_plan,
                     plan_info['price'],
                     session_id,
-                    plan_info['max_farms'],
-                    plan_info['max_chickens_per_farm'],
-                    plan_info['max_captures'],
+                    effective_plan_info['max_farms'],
+                    effective_plan_info['max_chickens_per_farm'],
+                    effective_plan_info['max_captures'],
                     new_start_date,
                     new_end_date,
                     new_grace_date
@@ -795,7 +813,7 @@ def verify_payment():
                 ''', (
                     farm_row['id'],
                     request.user_id,
-                    f"🎉 {plan_info['name']} Activated via GCash!",
+                    f"🎉 {effective_plan_info['name']} Activated via GCash!",
                     f"GCash payment of ₱{plan_info['price']} confirmed. Valid until {new_end_date.strftime('%B %d, %Y')}."
                 ))
             db.commit()
@@ -804,7 +822,7 @@ def verify_payment():
             return jsonify({
                 'success': True,
                 'paid': True,
-                'message': f"Payment confirmed! Successfully activated {plan_info['name']}.",
+                'message': f"Payment confirmed! Successfully activated {effective_plan_info['name']}.",
                 'subscription': sub_info
             })
     finally:
@@ -863,15 +881,24 @@ def paymongo_webhook():
                     
                     cur.execute('SELECT * FROM subscriptions WHERE user_id=%s', (user_id,))
                     existing = cur.fetchone()
+
+                    existing_end = normalize_dt(existing.get('end_date')) if existing else None
                     
-                    if existing and existing.get('plan') == plan_key and existing.get('end_date') and existing['end_date'] > now:
-                        new_end_date = existing['end_date'] + timedelta(days=plan_info['duration_days'])
-                        new_start_date = existing.get('start_date') or now
+                    # Universal stacking rule:
+                    if existing and existing_end and existing_end > now:
+                        new_end_date = existing_end + timedelta(days=plan_info['duration_days'])
+                        new_start_date = normalize_dt(existing.get('start_date')) or now
+                        if existing.get('plan') == 'premium' or plan_key == 'premium':
+                            effective_plan = 'premium'
+                        else:
+                            effective_plan = 'pro'
                     else:
                         new_end_date = now + timedelta(days=plan_info['duration_days'])
                         new_start_date = now
-                    
-                    new_grace = new_end_date + timedelta(days=7)
+                        effective_plan = plan_key
+
+                    effective_plan_info = PLANS_CONFIG.get(effective_plan, plan_info)
+                    new_grace = new_end_date + timedelta(days=3)
                     
                     if existing:
                         cur.execute('''
@@ -880,8 +907,8 @@ def paymongo_webhook():
                                 payment_reference = %s, max_farms = %s, max_chickens_per_farm = %s,
                                 max_captures = %s, start_date = %s, end_date = %s, grace_period_end = %s, updated_at = %s
                             WHERE user_id = %s
-                        ''', (plan_key, plan_info['price'], session_id, plan_info['max_farms'],
-                              plan_info['max_chickens_per_farm'], plan_info['max_captures'],
+                        ''', (effective_plan, plan_info['price'], session_id, effective_plan_info['max_farms'],
+                              effective_plan_info['max_chickens_per_farm'], effective_plan_info['max_captures'],
                               new_start_date, new_end_date, new_grace, now, user_id))
                     else:
                         cur.execute('''
@@ -890,8 +917,8 @@ def paymongo_webhook():
                              payment_reference, max_farms, max_chickens_per_farm, max_captures,
                              start_date, end_date, grace_period_end)
                             VALUES (%s, %s, 'active', %s, 'PHP', 'paymongo', %s, %s, %s, %s, %s, %s, %s)
-                        ''', (user_id, plan_key, plan_info['price'], session_id,
-                              plan_info['max_farms'], plan_info['max_chickens_per_farm'], plan_info['max_captures'],
+                        ''', (user_id, effective_plan, plan_info['price'], session_id,
+                              effective_plan_info['max_farms'], effective_plan_info['max_chickens_per_farm'], effective_plan_info['max_captures'],
                               new_start_date, new_end_date, new_grace))
                     
                     cur.execute("UPDATE subscription_transactions SET status='paid', updated_at=%s WHERE checkout_session_id=%s", (now, session_id))
@@ -915,8 +942,8 @@ def dev_toggle_subscription():
     - 'free_trial': Sets 30-day Free Trial (1 farm, 20 chickens, 30 captures)
     - 'pro': Sets 3-Month Pro Plan (2 farms, 70 chickens, unlimited captures)
     - 'premium': Sets 1-Year Premium Plan (unlimited all)
-    - 'grace_period': Sets end_date to yesterday so account enters the 7-day grace period!
-    - 'expired_free': Sets grace_period_end to yesterday so account downgrades to Standard Free!
+    - 'grace_period': Sets end_date to yesterday so account enters the 3-day grace period!
+    - 'expired_free': Sets grace_period_end to yesterday so account downgrades to Standard Free Tier!
     """
     is_dev = os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG', '').lower() in ('1', 'true')
     user_role = getattr(request, 'user_role', '')
@@ -931,9 +958,9 @@ def dev_toggle_subscription():
     try:
         with db.cursor() as cur:
             if target_state == 'grace_period':
-                # Expired 2 days ago, grace period ends in 5 days
-                end_date = now - timedelta(days=2)
-                grace_end = now + timedelta(days=5)
+                # Expired 1 day ago, grace period ends in 2 days
+                end_date = now - timedelta(days=1)
+                grace_end = now + timedelta(days=2)
                 cur.execute('''
                     UPDATE subscriptions
                     SET plan = 'pro',
@@ -945,8 +972,8 @@ def dev_toggle_subscription():
                 ''', (end_date, grace_end, now, request.user_id))
 
             elif target_state == 'expired_free':
-                # Expired 10 days ago (past 7-day grace), downgraded to standard Free Plan
-                end_date = now - timedelta(days=10)
+                # Expired 6 days ago (past 3-day grace), downgraded to Standard Free Tier
+                end_date = now - timedelta(days=6)
                 grace_end = now - timedelta(days=3)
                 cur.execute('''
                     UPDATE subscriptions
@@ -965,7 +992,7 @@ def dev_toggle_subscription():
                 p = PLANS_CONFIG[target_state]
                 dur = p['duration_days'] or 30
                 end_date = now + timedelta(days=dur)
-                grace_end = end_date + timedelta(days=7)
+                grace_end = end_date + timedelta(days=3)
                 cur.execute('''
                     UPDATE subscriptions
                     SET plan = %s,

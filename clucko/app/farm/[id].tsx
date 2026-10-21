@@ -311,6 +311,14 @@ export default function FarmDetailScreen() {
   };
 
   const handleToggleCaretakerStatus = (member: any) => {
+    if (member.deactivated_by === 'developer' || member.deactivated_by === 'admin' || member.deactivated_by === 'superadmin') {
+      notify({
+        title: 'Action Prohibited',
+        message: 'This caretaker account was deactivated by platform developers and cannot be reactivated by farm owners.',
+        type: 'alert',
+      });
+      return;
+    }
     const nextStatus = member.is_active === false;
     setCaretakerToToggle({ member, nextStatus });
   };
@@ -587,6 +595,7 @@ export default function FarmDetailScreen() {
             ) : (
               caretakers.map((member: any) => {
                 const isActive = member.is_active !== false;
+                const isDevDeactivated = !isActive && (member.deactivated_by === 'developer' || member.deactivated_by === 'admin' || member.deactivated_by === 'superadmin');
                 const isCurrentUser = (currentUserId != null && member.id === currentUserId) ||
                   (currentUserEmail != null && member.email?.toLowerCase() === currentUserEmail);
                 const isOnline = member.is_online === true || isCurrentUser;
@@ -692,43 +701,67 @@ export default function FarmDetailScreen() {
                             style={{
                               fontSize: 10,
                               fontWeight: '700',
-                              color: isActive ? colors.primary : '#C62828',
+                              color: isActive ? colors.primary : (isDevDeactivated ? '#EF4444' : '#C62828'),
                               textTransform: 'uppercase',
                               letterSpacing: 0.3,
                             }}
                           >
-                            {isActive ? 'Active' : 'Deactivated'}
+                            {isActive ? 'Active' : (isDevDeactivated ? 'Deactivated (Dev)' : 'Deactivated')}
                           </Text>
                         </View>
 
                         {userRole === 'owner' && (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                            <TouchableOpacity
-                              style={[
-                                styles.statusToggleBtn,
-                                {
-                                  backgroundColor: isActive ? 'rgba(255, 152, 0, 0.12)' : (isDarkMode ? 'rgba(143, 224, 176, 0.12)' : 'rgba(76, 175, 80, 0.12)'),
-                                  borderColor: isActive ? 'rgba(255, 152, 0, 0.3)' : (isDarkMode ? 'rgba(143, 224, 176, 0.3)' : 'rgba(76, 175, 80, 0.3)'),
-                                },
-                              ]}
-                              onPress={() => handleToggleCaretakerStatus(member)}
-                              activeOpacity={0.7}
-                            >
-                              <Ionicons
-                                name={isActive ? 'pause-circle-outline' : 'play-circle-outline'}
-                                size={13}
-                                color={isActive ? '#E65100' : colors.primary}
-                              />
-                              <Text
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: '600',
-                                  color: isActive ? '#E65100' : colors.primary,
-                                }}
+                            {isDevDeactivated ? (
+                              <View
+                                style={[
+                                  styles.statusToggleBtn,
+                                  {
+                                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                    borderColor: 'rgba(239, 68, 68, 0.25)',
+                                    opacity: 0.85,
+                                  },
+                                ]}
                               >
-                                {isActive ? 'Deactivate' : 'Activate'}
-                              </Text>
-                            </TouchableOpacity>
+                                <Ionicons name="lock-closed" size={12} color="#EF4444" />
+                                <Text
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: '600',
+                                    color: '#EF4444',
+                                  }}
+                                >
+                                  Locked by Dev
+                                </Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                style={[
+                                  styles.statusToggleBtn,
+                                  {
+                                    backgroundColor: isActive ? 'rgba(255, 152, 0, 0.12)' : (isDarkMode ? 'rgba(143, 224, 176, 0.12)' : 'rgba(76, 175, 80, 0.12)'),
+                                    borderColor: isActive ? 'rgba(255, 152, 0, 0.3)' : (isDarkMode ? 'rgba(143, 224, 176, 0.3)' : 'rgba(76, 175, 80, 0.3)'),
+                                  },
+                                ]}
+                                onPress={() => handleToggleCaretakerStatus(member)}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons
+                                  name={isActive ? 'pause-circle-outline' : 'play-circle-outline'}
+                                  size={13}
+                                  color={isActive ? '#E65100' : colors.primary}
+                                />
+                                <Text
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: '600',
+                                    color: isActive ? '#E65100' : colors.primary,
+                                  }}
+                                >
+                                  {isActive ? 'Deactivate' : 'Activate'}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
 
                             <TouchableOpacity
                               style={styles.removeBtn}
