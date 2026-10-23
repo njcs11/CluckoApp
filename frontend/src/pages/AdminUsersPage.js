@@ -48,9 +48,23 @@ export default function AdminUsersPage() {
     email: '',
     phone_number: '',
     role: 'admin',
-    password: ''
+    password: '',
+    farm_name: '',
+    farm_id: ''
   });
   const [createdAccountResult, setCreatedAccountResult] = useState(null);
+  const [farmsList, setFarmsList] = useState([]);
+
+  const fetchFarmsList = async () => {
+    try {
+      const res = await axios.get('/api/admin/farms-list');
+      if (res.data && res.data.success) {
+        setFarmsList(res.data.farms || []);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch farms list for caretaker selector:', err.message);
+    }
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -122,6 +136,28 @@ export default function AdminUsersPage() {
     } catch (err) {
       console.error('Export error:', err);
       toast.error('Failed to export user directory file', { id: toastId });
+    }
+  };
+
+  // Helper: Format DateTime to Philippine Standard Time (PHT, UTC+8)
+  const formatPhtDateTime = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const s = String(dateStr).trim();
+      const hasTz = s.endsWith('Z') || s.includes('+') || (s.includes('-') && s.lastIndexOf('-') > 10);
+      const parseStr = hasTz ? s : `${s.replace(' ', 'T')}Z`;
+      const d = new Date(parseStr);
+      return isNaN(d.getTime()) ? s : d.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateStr;
     }
   };
 
@@ -299,6 +335,7 @@ export default function AdminUsersPage() {
           role: res.data.user.role,
           name: `${res.data.user.first_name} ${res.data.user.last_name}`.trim(),
           temporary_password: res.data.temporary_password,
+          login_url: res.data.login_url,
           email_sent: res.data.email_sent
         });
         setCreateForm({
@@ -307,7 +344,9 @@ export default function AdminUsersPage() {
           email: '',
           phone_number: '',
           role: 'admin',
-          password: ''
+          password: '',
+          farm_name: '',
+          farm_id: ''
         });
         fetchUsers();
       }
@@ -350,6 +389,7 @@ export default function AdminUsersPage() {
             onClick={() => {
               setCreateModal(true);
               setCreatedAccountResult(null);
+              fetchFarmsList();
             }}
             className="admin-btn primary"
             title="Create or invite a new Administrator or account via UI"
@@ -641,7 +681,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="text-sm text-secondary font-mono">
                         {u.last_active_at ? (
-                          new Date(u.last_active_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          formatPhtDateTime(u.last_active_at)
                         ) : (
                           'Never'
                         )}
@@ -778,7 +818,7 @@ export default function AdminUsersPage() {
                   <div className="info-item">
                     <span className="info-label">Account Created</span>
                     <span className="info-value">
-                      {activeUserDetail.user.created_at ? new Date(activeUserDetail.user.created_at).toLocaleDateString() : '—'}
+                      {formatPhtDateTime(activeUserDetail.user.created_at)}
                     </span>
                   </div>
                 </div>
@@ -1134,22 +1174,24 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                {/* Portal Link Box */}
+                {/* Portal Link / Target App Box */}
                 <div style={{ background: 'var(--bg-secondary, #1e293b)', padding: 14, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 16 }}>
                   <label style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', fontWeight: 600 }}>
-                    Admin Sign-In Portal URL
+                    {createdAccountResult.role === 'admin' ? 'Admin Sign-In Portal URL' : 'Access Target Platform'}
                   </label>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, padding: '10px 12px', background: 'var(--bg-panel, #0f172a)', borderRadius: 8, border: '1px dashed var(--border)' }}>
                     <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
-                      https://clucko-app.vercel.app/admin/login?portal=admin
+                      {createdAccountResult.role === 'admin' 
+                        ? (createdAccountResult.login_url || 'https://clucko-app.vercel.app/admin/login?portal=admin')
+                        : '📱 Clucko Mobile App (iOS / Android) • User signs in with this email & password.'}
                     </span>
                     <button
                       type="button"
                       className="admin-btn secondary"
                       style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                      onClick={() => copyToClipboard('https://clucko-app.vercel.app/admin/login?portal=admin')}
+                      onClick={() => copyToClipboard(createdAccountResult.login_url || 'https://clucko-app.vercel.app/admin/login?portal=admin')}
                     >
-                      <Copy size={13} /> Copy URL
+                      <Copy size={13} /> Copy Link
                     </button>
                   </div>
                 </div>
@@ -1168,7 +1210,10 @@ export default function AdminUsersPage() {
                     border: '1px solid var(--accent-green-border)'
                   }}
                   onClick={() => {
-                    const inviteMsg = `🐣 Clucko Platform Administration Invitation\nYou have been invited as an Administrator on Clucko.\n\nAdmin Portal: https://clucko-app.vercel.app/admin/login?portal=admin\nEmail: ${createdAccountResult.email}\nTemporary Password: ${createdAccountResult.temporary_password}\n\nPlease sign in and set your new password immediately.`;
+                    const isAdm = createdAccountResult.role === 'admin';
+                    const inviteMsg = isAdm
+                      ? `🐣 Clucko Platform Administration Invitation\nYou have been authorized as an Administrator on Clucko.\n\nAdmin Portal: ${createdAccountResult.login_url || 'https://clucko-app.vercel.app/admin/login?portal=admin'}\nEmail: ${createdAccountResult.email}\nTemporary Password: ${createdAccountResult.temporary_password}\n\nPlease sign in through the Admin Portal and update your password.`
+                      : `🐣 Welcome to Clucko Gamefowl Health AI\nYour ${createdAccountResult.role === 'owner' ? 'Farm Owner' : 'Caretaker'} account has been created.\n\nLogin Email: ${createdAccountResult.email}\nTemporary Password: ${createdAccountResult.temporary_password}\nRole: ${createdAccountResult.role === 'owner' ? 'Farm Owner' : 'Caretaker'}\n\nPlease open the Clucko Mobile App and log in with these credentials to manage your flock.`;
                     copyToClipboard(inviteMsg);
                   }}
                 >
@@ -1237,11 +1282,11 @@ export default function AdminUsersPage() {
                     <select
                       value={createForm.role}
                       onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
-                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border-color)' }}
+                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)' }}
                     >
-                      <option value="admin">Administrator (Full Admin Access)</option>
-                      <option value="owner">Farm Owner</option>
-                      <option value="caretaker">Caretaker</option>
+                      <option value="admin">Administrator (Admin Center Access)</option>
+                      <option value="owner">Farm Owner (Mobile App • Admin Override)</option>
+                      <option value="caretaker">Caretaker (Mobile App • Admin Override)</option>
                     </select>
                   </div>
                   <div className="form-field">
@@ -1255,7 +1300,55 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                <div className="form-field">
+                {/* Defensible Architectural Subtext Note for Role Selection */}
+                {createForm.role === 'admin' && (
+                  <div className="role-subtext-box admin-role-subtext">
+                    🛡️ <strong>Web Administration:</strong> Administrator accounts have full privileges to access this Admin AI Center, review system financials, audit trails, and oversee AI Vision tools.
+                  </div>
+                )}
+                {createForm.role === 'owner' && (
+                  <div className="role-subtext-box owner-role-subtext">
+                    💡 <strong>Mobile App Account:</strong> Farm Owners typically register directly via the Clucko Mobile App. Provisioning here serves as an administrative/enterprise override (e.g., in-person farm onboarding). An initial farm is automatically provisioned so the owner can immediately sign in on the mobile app.
+                  </div>
+                )}
+                {createForm.role === 'caretaker' && (
+                  <div className="role-subtext-box caretaker-role-subtext">
+                    💡 <strong>Mobile App Account:</strong> Caretakers are normally invited and assigned by Farm Owners inside the Clucko Mobile App. Creating one here directly links them to a selected farm so they can immediately sign in on the mobile app without error.
+                  </div>
+                )}
+
+                {/* Dynamic Role-Specific Inputs */}
+                {createForm.role === 'owner' && (
+                  <div className="form-field" style={{ marginTop: 12 }}>
+                    <label>Initial Farm Name (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Santos Gamefarm (defaults to User's Farm)"
+                      value={createForm.farm_name || ''}
+                      onChange={(e) => setCreateForm({ ...createForm, farm_name: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                {createForm.role === 'caretaker' && (
+                  <div className="form-field" style={{ marginTop: 12 }}>
+                    <label>Assign to Farm * (Required for Mobile App Access)</label>
+                    <select
+                      value={createForm.farm_id || ''}
+                      onChange={(e) => setCreateForm({ ...createForm, farm_id: e.target.value })}
+                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)' }}
+                    >
+                      <option value="">-- Select an Existing Farm ({farmsList.length} Available) --</option>
+                      {farmsList.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.farm_name} ({f.owner_name ? `Owner: ${f.owner_name}` : `Code: ${f.farm_code}`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="form-field" style={{ marginTop: 12 }}>
                   <label>Temporary Password (Leave blank for auto-generated)</label>
                   <input
                     type="text"
@@ -1265,7 +1358,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
-                <div style={{ background: '#F1F5F9', padding: '10px 14px', borderRadius: 6, fontSize: '0.8rem', color: '#475569', marginBottom: 16 }}>
+                <div style={{ background: 'var(--bg-secondary, #1e293b)', padding: '10px 14px', borderRadius: 6, fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 16, border: '1px solid var(--border)' }}>
                   🛡️ <strong>Security & Automated Email:</strong> The new account will be instantly active. An onboarding welcome email with credentials and direct login link will be automatically dispatched to their inbox. Every administrative account creation is permanently recorded in the BIR & ISO 27001 Audit Trail.
                 </div>
 

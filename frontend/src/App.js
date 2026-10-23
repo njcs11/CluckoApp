@@ -4,8 +4,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import axios from 'axios';
 import { 
   Camera, Database, Cpu, FlaskConical, Menu, X,
-  LayoutDashboard, Users, CreditCard, Sliders, ShieldCheck, LogOut,
-  Sun, Moon
+  LayoutDashboard, Users, CreditCard, Sliders, ShieldCheck, LogOut
 } from 'lucide-react';
 import './App.css';
 import DetectPage from './pages/DetectPage';
@@ -85,18 +84,10 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('clucko_admin_theme') || 'dark';
-  });
-
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('clucko_admin_theme', theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
-  };
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.removeItem('clucko_admin_theme');
+  }, []);
 
   let adminUser = null;
   try {
@@ -323,18 +314,6 @@ function AppLayout() {
               <span className="status-indicator-dot online" />
               <span className="footer-status-label">Clucko AI Core</span>
             </div>
-            <button 
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              aria-label="Toggle theme"
-            >
-              {theme === 'dark' ? (
-                <Sun size={13} className="theme-icon sun" />
-              ) : (
-                <Moon size={13} className="theme-icon moon" />
-              )}
-            </button>
           </div>
           <div className="footer-version-row">
             <span className="footer-badge">v2.1 MobileNetV2</span>

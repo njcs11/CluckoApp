@@ -66,25 +66,28 @@
   flex-shrink: 0;
 }
 
-/* Filter & Search Bar — Strictly 1 Line on Desktop */
+/* Filter & Search Bar — Perfectly Flush Left-to-Right Edge Distribution */
 .admin-filter-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 14px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 14px;
-  flex-wrap: nowrap;
+  padding: 12px 18px;
+  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .search-input-wrap {
   position: relative;
-  flex: 0 0 180px;
-  width: 180px;
-  min-width: 140px;
-  max-width: 180px;
+  flex: 1 1 320px;
+  width: auto;
+  min-width: 220px;
+  max-width: 480px;
+  height: 38px;
 }
 
 .search-icon {
@@ -127,10 +130,10 @@
 .filters-group {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;
-  flex: 1;
-  justify-content: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .filter-select-wrap {
@@ -1051,35 +1054,40 @@
   }
 
   .admin-filter-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 12px;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    padding: 12px !important;
   }
 
   .search-input-wrap {
     width: 100% !important;
+    max-width: 100% !important;
     min-width: 0 !important;
+    flex: 0 0 auto !important;
+    height: 40px !important;
   }
 
   .filters-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: 100%;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    justify-content: space-between !important;
   }
 
   .filter-select-wrap {
-    flex: 1 1 calc(50% - 6px);
-    min-width: 110px;
+    flex: 1 1 calc(50% - 6px) !important;
+    min-width: 110px !important;
   }
 
   .filter-select {
-    width: 100%;
+    width: 100% !important;
   }
 
   .sort-icon-wrap {
-    align-self: center;
+    align-self: center !important;
   }
 
   .bulk-actions-toolbar {
@@ -1098,4 +1106,32 @@
     justify-content: center;
     min-height: 38px;
   }
+}
+
+/* Role Architecture Subtext Callout */
+.role-subtext-box {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm, 8px);
+  font-size: 0.81rem;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+}
+
+.role-subtext-box.admin-role-subtext {
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  color: #c084fc;
+}
+
+.role-subtext-box.owner-role-subtext {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #6ee7b7;
+}
+
+.role-subtext-box.caretaker-role-subtext {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
 }

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, FeetModuleIcon, CombModuleIcon } from '../components/icons';
 import ConfirmModal from '../components/ConfirmModal';
+import { DatasetSkeleton, SkeletonBox } from '../components/SkeletonLoader';
 import './DatasetPage.css';
 
 const resolveImageUrl = (url) => {
@@ -34,6 +35,7 @@ const resolveImageUrl = (url) => {
 };
 
 export default function DatasetPage() {
+  const [initialLoading, setInitialLoading] = useState(true);
   const [diseases, setDiseases] = useState([]);
   const [modules, setModules] = useState([]);
   const [stats, setStats] = useState({});
@@ -87,6 +89,8 @@ export default function DatasetPage() {
       }
     } catch (err) {
       console.error('Error loading dataset stats:', err);
+    } finally {
+      setInitialLoading(false);
     }
   };
 
@@ -346,6 +350,10 @@ export default function DatasetPage() {
   }, [lightboxIndex, filteredImages]);
 
   const currentLightboxImg = lightboxIndex !== null ? filteredImages[lightboxIndex] : null;
+
+  if (initialLoading) {
+    return <DatasetSkeleton />;
+  }
 
   return (
     <div className="page dataset-page">
@@ -661,9 +669,10 @@ export default function DatasetPage() {
 
         {/* Gallery Grid */}
         {loadingGallery ? (
-          <div className="gallery-loading">
-            <RefreshCw size={24} className="spin" color="#4ade80" />
-            <span>Loading dataset images...</span>
+          <div className="skeleton-gallery-grid animate-in">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <SkeletonBox key={i} height="110px" borderRadius="8px" />
+            ))}
           </div>
         ) : filteredImages.length === 0 ? (
           <div className="gallery-empty">

@@ -84,7 +84,16 @@ class PostgresCursorWrapper:
                 except Exception:
                     pass
 
-        self._cur.execute(query, params)
+        try:
+            self._cur.execute(query, params)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as conn_err:
+            # Stale connection died during idle period or network fluctuation: retry once
+            try:
+                fallback_conn = psycopg2.connect(**SUPABASE_CONFIG)
+                self._cur = fallback_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                self._cur.execute(query, params)
+            except Exception:
+                raise conn_err
 
     def executemany(self, query, seq_of_params):
         query = re.sub(r'\bINTERVAL\s+(\d+)\s+([A-Za-z]+)\b', r"INTERVAL '\1 \2'", query, flags=re.IGNORECASE)
@@ -183,21 +192,41 @@ class PostgresConnectionWrapper:
             self.commit()
         self.close()
 
+def _is_conn_alive(conn):
+    if conn is None or getattr(conn, 'closed', 1) != 0:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1;")
+        return True
+    except Exception:
+        return False
+
 def get_db():
     try:
         p = get_pool()
         conn = p.getconn()
-        if conn.closed != 0:
+        if not _is_conn_alive(conn):
             try:
                 p.putconn(conn, close=True)
             except Exception:
                 pass
             conn = p.getconn()
+            if not _is_conn_alive(conn):
+                try:
+                    p.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = psycopg2.connect(**SUPABASE_CONFIG)
+                return PostgresConnectionWrapper(conn, db_pool=None)
         return PostgresConnectionWrapper(conn, db_pool=p)
     except Exception:
         # Fallback to direct connection if pool is temporarily unavailable or exhausted
-        conn = psycopg2.connect(**SUPABASE_CONFIG)
-        return PostgresConnectionWrapper(conn, db_pool=None)
+        try:
+            conn = psycopg2.connect(**SUPABASE_CONFIG)
+            return PostgresConnectionWrapper(conn, db_pool=None)
+        except Exception:
+            raise
 
 import time
 

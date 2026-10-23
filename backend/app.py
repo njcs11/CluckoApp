@@ -26,7 +26,11 @@ from flask.json.provider import DefaultJSONProvider
 class CustomJSONProvider(DefaultJSONProvider):
     def default(self, obj):
         import datetime as dt_mod
-        if isinstance(obj, (dt_mod.date, dt_mod.datetime)):
+        if isinstance(obj, dt_mod.datetime):
+            if obj.tzinfo is None:
+                return obj.isoformat() + 'Z'
+            return obj.isoformat()
+        if isinstance(obj, dt_mod.date):
             return obj.isoformat()
         return super().default(obj)
 

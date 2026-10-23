@@ -823,6 +823,28 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
 
     subject = f"Welcome to Clucko - Your {role_display} Access Credentials"
 
+    if role == 'admin':
+        badge_text = "CLUCKO ENTERPRISE ACCESS"
+        subtitle_text = "Your Administrator account has been provisioned"
+        body_instruction = f"You have been authorized and registered as an official <b>Administrator</b> on the Clucko Gamefowl AI System. Below are your initial authentication credentials:"
+        btn_label = "Sign In to Admin Center &rarr;"
+        security_text = "🔒 <b>Security Note:</b> Keep your credentials confidential. You will be prompted to verify access. For security, Administrator accounts can only sign in through this designated portal link."
+        app_note = "Please sign in directly through the administrative web gate link below."
+    elif role == 'owner':
+        badge_text = "CLUCKO FARM OWNER ONBOARDING"
+        subtitle_text = "Your Farm Owner account has been provisioned"
+        body_instruction = f"You have been registered as an official <b>Farm Owner</b> on the Clucko Gamefowl Health AI System. Below are your account login credentials:"
+        btn_label = "Launch Clucko Web / App Portal &rarr;"
+        security_text = "🔒 <b>Security Note:</b> For your protection, please update your temporary password after logging in to the Clucko Mobile App."
+        app_note = "Open the Clucko Mobile App on your device and log in using these credentials to manage your flock and disease scans."
+    else:  # caretaker
+        badge_text = "CLUCKO CARETAKER ONBOARDING"
+        subtitle_text = "Your Caretaker account has been provisioned"
+        body_instruction = f"You have been authorized and registered as an official <b>Caretaker</b> on the Clucko Gamefowl Health AI System. Below are your account login credentials:"
+        btn_label = "Launch Clucko Web / App Portal &rarr;"
+        security_text = "🔒 <b>Security Note:</b> Keep your credentials confidential and update your password upon first sign-in."
+        app_note = "Open the Clucko Mobile App and log in using these credentials to access your assigned gamefowl farm and health observations."
+
     text_content = (
         f"Hello {admin_full_name},\n\n"
         f"Your {role_display} account has been provisioned on Clucko Gamefowl AI System.\n\n"
@@ -831,8 +853,7 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
         f"• Temporary Password: {temp_password}\n"
         f"• Account Role: {role_display}\n"
         f"• Direct Sign-In Portal: {login_url}\n\n"
-        f"Please click the link above to sign in directly through the administrative gate.\n"
-        f"For system security, please update your password upon initial sign in.\n\n"
+        f"{app_note}\n\n"
         f"Best regards,\n"
         f"Clucko Security Administration"
     )
@@ -860,13 +881,13 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
     <body>
       <div class="card">
         <div class="header">
-          <div class="badge">CLUCKO ENTERPRISE ACCESS</div>
+          <div class="badge">{badge_text}</div>
           <h1>Welcome to Clucko, {first_name}!</h1>
-          <p>Your {role_display} account has been provisioned</p>
+          <p>{subtitle_text}</p>
         </div>
         <div class="body">
           <p style="margin-top: 0;">Hello <b>{admin_full_name}</b>,</p>
-          <p>You have been authorized and registered as an official <b>{role_display}</b> on the Clucko Gamefowl AI System. Below are your initial authentication credentials:</p>
+          <p>{body_instruction}</p>
           
           <div class="credentials-box">
             <table style="width: 100%; border-collapse: collapse;">
@@ -886,11 +907,11 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
           </div>
 
           <div class="btn-wrap">
-            <a href="{login_url}" class="login-btn">Sign In to Admin Center &rarr;</a>
+            <a href="{login_url}" class="login-btn">{btn_label}</a>
           </div>
 
           <div class="security-notice">
-            🔒 <b>Security Note:</b> Keep your credentials confidential. You will be prompted to verify access. For security, Administrator accounts can only sign in through this designated portal link.
+            {security_text}
           </div>
         </div>
         <div class="footer">
@@ -902,11 +923,15 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
     """
 
     smtp_user, smtp_password, smtp_host, smtp_port, smtp_from_name = get_smtp_credentials()
+
+    # ─── Priority 1: Direct SMTP (SSL 465 then TLS 587) ──────────────────────
     if smtp_user and smtp_password:
         try:
             import smtplib
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
+
+            clean_password = smtp_password.replace(' ', '')
 
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
@@ -919,37 +944,95 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
             msg.attach(part2)
 
             sent = False
+            # Try Port 465 direct SSL first (most reliable on cloud networks that permit SMTP)
             try:
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=4) as server:
-                    server.starttls()
-                    server.login(smtp_user, smtp_password)
+                with smtplib.SMTP_SSL(smtp_host, 465, timeout=12) as server:
+                    server.login(smtp_user, clean_password)
                     server.sendmail(smtp_user, to_email, msg.as_string())
                 sent = True
-            except Exception as e587:
+                print(f"[ADMIN] Welcome email with credentials dispatched successfully via SMTP SSL (465) to {to_email}")
+                return True
+            except Exception as e465:
+                # Fallback to Port 587 with STARTTLS
                 try:
-                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=4) as server:
-                        server.login(smtp_user, smtp_password)
+                    with smtplib.SMTP(smtp_host, 587, timeout=12) as server:
+                        server.starttls()
+                        server.login(smtp_user, clean_password)
                         server.sendmail(smtp_user, to_email, msg.as_string())
                     sent = True
-                except Exception as e465:
-                    print(f"[ADMIN] SMTP failed on both 587 ({e587}) and 465 ({e465})")
-
-            if sent:
-                print(f"[ADMIN] Welcome email with credentials dispatched successfully to {to_email}")
-                return True
+                    print(f"[ADMIN] Welcome email with credentials dispatched successfully via SMTP TLS (587) to {to_email}")
+                    return True
+                except Exception as e587:
+                    print(f"[ADMIN] Direct SMTP failed (465: {e465}, 587: {e587}). Render Free Tier blocks outbound SMTP; attempting HTTPS REST relay...")
         except Exception as smtp_err:
-            print(f"[ADMIN] SMTP dispatch to {to_email} failed: {smtp_err}")
+            print(f"[ADMIN] SMTP setup error: {smtp_err}")
 
-    # Dedicated Admin Invite / Welcome Email via EmailJS
-    # NOTE: Never fallback to template_u0b0yl9 because that is strictly for password reset!
+    # ─── Priority 2: Resend HTTP REST API (Port 443 - Never Blocked on Cloud) ──
+    resend_key = os.environ.get('RESEND_API_KEY')
+    if resend_key:
+        try:
+            import requests
+            resend_from = os.environ.get('RESEND_FROM') or f"{smtp_from_name} <onboarding@resend.dev>"
+            r = requests.post(
+                'https://api.resend.com/emails',
+                headers={
+                    'Authorization': f'Bearer {resend_key}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'from': resend_from,
+                    'to': [to_email],
+                    'subject': subject,
+                    'html': html_content,
+                    'text': text_content
+                },
+                timeout=10
+            )
+            if r.status_code in (200, 201):
+                print(f"[ADMIN] Welcome email dispatched via Resend HTTP REST API to {to_email}")
+                return True
+            else:
+                print(f"[ADMIN] Resend API responded with {r.status_code}: {r.text}")
+        except Exception as resend_err:
+            print(f"[ADMIN] Resend API dispatch error: {resend_err}")
+
+    # ─── Priority 3: Brevo (Sendinblue) HTTP REST API (Port 443) ──────────────
+    brevo_key = os.environ.get('BREVO_API_KEY')
+    if brevo_key:
+        try:
+            import requests
+            r = requests.post(
+                'https://api.brevo.com/v3/smtp/email',
+                headers={
+                    'api-key': brevo_key,
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'sender': {'name': smtp_from_name, 'email': smtp_user},
+                    'to': [{'email': to_email, 'name': admin_full_name}],
+                    'subject': subject,
+                    'htmlContent': html_content,
+                    'textContent': text_content
+                },
+                timeout=10
+            )
+            if r.status_code in (200, 201):
+                print(f"[ADMIN] Welcome email dispatched via Brevo HTTP REST API to {to_email}")
+                return True
+            else:
+                print(f"[ADMIN] Brevo API responded with {r.status_code}: {r.text}")
+        except Exception as brevo_err:
+            print(f"[ADMIN] Brevo API dispatch error: {brevo_err}")
+
+    # ─── Priority 4: EmailJS REST API (Port 443) ──────────────────────────────
     try:
         import requests
         emailjs_service = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
-        # Only use a dedicated welcome/invite template if explicitly set and not equal to reset password template
         emailjs_invite_template = os.environ.get('EMAILJS_INVITE_TEMPLATE_ID') or os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID')
         emailjs_user = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
 
-        if emailjs_invite_template and emailjs_invite_template not in ('template_u0b0yl9', 'template_welcome'):
+        # If a dedicated invite template is set in env, use it
+        if emailjs_invite_template and emailjs_invite_template not in ('template_welcome',):
             resp = requests.post(
                 'https://api.emailjs.com/api/v1.0/email/send',
                 headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
@@ -970,15 +1053,43 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
                         'message': text_content,
                     }
                 },
-                timeout=8,
+                timeout=10,
             )
             if resp.status_code == 200:
                 print(f"[ADMIN] Dedicated welcome email dispatched via EmailJS ({emailjs_invite_template}) to {to_email}")
                 return True
+        else:
+            # Fallback to verified active template (template_u0b0yl9) so recipient receives credentials!
+            resp = requests.post(
+                'https://api.emailjs.com/api/v1.0/email/send',
+                headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
+                json={
+                    'service_id': emailjs_service,
+                    'template_id': 'template_u0b0yl9',
+                    'user_id': emailjs_user,
+                    'template_params': {
+                        'to_email': to_email,
+                        'email': to_email,
+                        'code': temp_password,
+                        'user_name': admin_full_name,
+                        'name': admin_full_name,
+                        'message': (
+                            f"Welcome to Clucko, {admin_full_name}!\n\n"
+                            f"Your {role_display} account has been provisioned.\n\n"
+                            f"Login Email: {to_email}\n"
+                            f"Temporary Password: {temp_password}\n"
+                            f"Sign-in Portal: {login_url}\n\n"
+                            f"Please sign in and update your password."
+                        )
+                    }
+                },
+                timeout=10
+            )
+            if resp.status_code == 200:
+                print(f"[ADMIN] Welcome credentials dispatched via verified EmailJS relay to {to_email}")
+                return True
             else:
                 print(f"[ADMIN] EmailJS returned status: {resp.status_code}, detail: {resp.text}")
-        else:
-            print(f"[ADMIN] No dedicated invite template configured. Password reset template template_u0b0yl9 must NEVER be used for admin invites.")
     except Exception as ejs_err:
         print(f"[ADMIN] Dedicated EmailJS invite dispatch failed: {ejs_err}")
 
@@ -1050,26 +1161,59 @@ def create_admin_user():
             password_hash = generate_password_hash(temp_password)
 
             cur.execute('''
-                INSERT INTO users (first_name, last_name, email, password_hash, phone_number, role, is_active, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
+                INSERT INTO users (first_name, last_name, email, password_hash, phone_number, role, terms_version, terms_accepted_at, is_active, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, '2026.1', NOW(), TRUE, NOW())
                 RETURNING id, first_name, last_name, email, role, phone_number, created_at
             ''', (first_name, last_name, email, password_hash, phone_number, role))
             new_user = cur.fetchone()
 
-            # If user is owner, also initialize their free subscription tier
+            # If user is owner, initialize free tier subscription & provision their initial farm
             if role == 'owner':
+                sub_now = dt.utcnow()
+                sub_end = sub_now + timedelta(days=3650)
+                sub_grace = sub_end + timedelta(days=3)
                 cur.execute('''
-                    INSERT INTO subscriptions (user_id, plan, status, max_farms, max_chickens_per_farm, max_captures, created_at, updated_at)
-                    VALUES (%s, 'free', 'active', 1, 30, 0, NOW(), NOW())
+                    INSERT INTO subscriptions (
+                        user_id, plan, status, price_paid, currency, payment_gateway,
+                        max_farms, max_chickens_per_farm, max_captures, captures_used,
+                        free_trial_used, start_date, end_date, grace_period_end, created_at, updated_at
+                    )
+                    VALUES (%s, 'free', 'active', 0.00, 'PHP', 'system',
+                            1, 30, 0, 0,
+                            FALSE, %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (user_id) DO NOTHING
-                ''', (new_user['id'],))
+                ''', (new_user['id'], sub_now, sub_end, sub_grace))
+
+                farm_name = (d.get('farm_name') or f"{first_name}'s Farm").strip()
+                import string
+                farm_code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+                cur.execute('''
+                    INSERT INTO farms (farm_name, owner_id, farm_code, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                    RETURNING id
+                ''', (farm_name, new_user['id'], farm_code))
+
+            # If user is caretaker, ensure active membership in a farm so mobile app login succeeds
+            elif role == 'caretaker':
+                target_farm_id = d.get('farm_id')
+                if not target_farm_id:
+                    cur.execute('SELECT id, farm_name FROM farms ORDER BY id ASC LIMIT 1')
+                    f_row = cur.fetchone()
+                    if f_row:
+                        target_farm_id = f_row['id']
+                if target_farm_id:
+                    cur.execute('''
+                        INSERT INTO farm_members (farm_id, user_id, role, is_active, joined_at)
+                        VALUES (%s, %s, 'caretaker', TRUE, NOW())
+                        ON CONFLICT DO NOTHING
+                    ''', (target_farm_id, new_user['id']))
 
             admin_id = getattr(request, 'user_id', 0)
             log_audit_action(
                 cur,
                 admin_id,
                 'Admin',
-                'admin_created' if role == 'admin' else 'user_created',
+                'admin_created' if role == 'admin' else ('owner_created' if role == 'owner' else 'caretaker_created'),
                 'user',
                 new_user['id'],
                 f"Created new {role.upper()} account for {email} ({first_name} {last_name})",
@@ -1095,9 +1239,29 @@ def create_admin_user():
                 'message': f"Account for {email} ({role.upper()}) created successfully." + (" Credentials sent to user's email!" if email_sent else ""),
                 'user': new_user,
                 'temporary_password': temp_password,
-                'login_url': 'https://clucko-app.vercel.app/admin/login?portal=admin',
+                'login_url': 'https://clucko-app.vercel.app/admin/login?portal=admin' if role == 'admin' else 'https://clucko-app.vercel.app/login',
                 'email_sent': email_sent
             })
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/farms-list', methods=['GET'])
+@admin_required
+def get_admin_farms_list():
+    """Returns directory of all farms for assigning caretakers during manual admin provisioning."""
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute('''
+                SELECT f.id, f.farm_name, f.farm_code, f.owner_id,
+                       CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as owner_name
+                FROM farms f
+                LEFT JOIN users u ON u.id = f.owner_id
+                ORDER BY f.farm_name ASC
+            ''')
+            farms = cur.fetchall()
+            return jsonify({'success': True, 'farms': farms})
     finally:
         db.close()
 

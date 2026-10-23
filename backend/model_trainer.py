@@ -53,9 +53,14 @@ SYMPTOM_LABELS = {
 # ─── Lazy TF import ───────────────────────────────────────────────────────────
 def _load_tf():
     import tensorflow as tf
-    from tensorflow.keras import layers, Model  # type: ignore
-    from tensorflow.keras.applications import MobileNetV2  # type: ignore
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator  # type: ignore
+    try:
+        from tensorflow.keras import layers, Model  # type: ignore
+        from tensorflow.keras.applications import MobileNetV2  # type: ignore
+        from tensorflow.keras.preprocessing.image import ImageDataGenerator  # type: ignore
+    except (ImportError, ModuleNotFoundError):
+        from keras import layers, Model  # type: ignore
+        from keras.applications import MobileNetV2  # type: ignore
+        from keras.preprocessing.image import ImageDataGenerator  # type: ignore
     return tf, layers, Model, MobileNetV2, ImageDataGenerator
 
 
@@ -1138,7 +1143,7 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
     margin = (preds_list[0]['confidence'] - preds_list[1]['confidence']) if len(preds_list) > 1 else 100.0
 
     # Detection threshold & scope validation
-    if top['confidence'] < 52.0 or (top['confidence'] < 60.0 and margin < 8.0):
+    if top['confidence'] < 42.0:
         return _rejection(
             f"Confidence too low ({top['confidence']}%)", detected_module,
             message=f"Detection confidence too low ({top['confidence']}%). Could not reliably diagnose within our verified disease scope for {detected_module}. Try a clearer photo focusing on the {detected_module}.",
@@ -1243,8 +1248,8 @@ def predict_auto(img: Image.Image, models_dir: str, diseases_config: dict) -> di
     else:
         chosen = best_eye if (comb_ratio >= 0.010 and best_eye) else max(all_candidates, key=lambda c: c['top_prediction']['confidence'])
 
-    # Two-tier threshold: Detection threshold < 50% rejected as too uncertain
-    if chosen['top_prediction']['confidence'] < 50.0:
+    # Two-tier threshold: Detection threshold < 42% rejected as too uncertain
+    if chosen['top_prediction']['confidence'] < 42.0:
         return _rejection(
             f"Confidence too low ({chosen['top_prediction']['confidence']}%)", 'auto',
             message="Detection confidence too low. Try taking a photo closer to the chicken with better lighting.",
@@ -1280,7 +1285,10 @@ def _get_screener():
     global _screener_model
     if _screener_model is None:
         import tensorflow as tf
-        from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2  # type: ignore
+        try:
+            from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2  # type: ignore
+        except (ImportError, ModuleNotFoundError):
+            from keras.applications.mobilenet_v2 import MobileNetV2  # type: ignore
         _screener_model = MobileNetV2(weights='imagenet', include_top=True)
     return _screener_model
 
@@ -1290,10 +1298,13 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
     Two-stage chicken verification:
       Stage 1 — ImageNet screener on pre-enhanced image.
         Accepts gamefowl, birds, poultry environment (cages, coops, wire mesh),
-        and screen/laptop captures of chickens.
+        and screen/laptop/webcam captures of chickens.
       Stage 2 — Texture (Gabor feather response) + Gamefowl plumage color analysis.
     """
-    from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, decode_predictions  # type: ignore
+    try:
+        from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, decode_predictions  # type: ignore
+    except (ImportError, ModuleNotFoundError):
+        from keras.applications.mobilenet_v2 import preprocess_input, decode_predictions  # type: ignore
 
     screener = _get_screener()
 
@@ -1363,43 +1374,50 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
     feather_score = _feather_texture_score(img_enhanced)
     color_score   = _gamefowl_color_score(img_enhanced)
 
-    # ── Strict rejection: Laptop / Screen / Non-Chicken Everyday Objects ──────
-    # If the camera is aimed at a laptop, monitor, keyboard, desk, or domestic pet:
-    # Do NOT pass it into disease classification! Reject immediately.
-    if screen_score >= 0.10 or top_label_norm in SCREEN_LABELS:
-        if strict_score < 0.15 and broad_score < 0.15:
-            return False, 0.0, f"Laptop/screen detected ({top_labels}). Please photograph an actual live gamefowl."
+    # ── Head / Comb anatomical detection ──────────────────────────────────────
+    # Gamefowl eyes and heads have bright red comb / wattle tissue.
+    # ImageNet often predicts miscellaneous non-bird labels for close-up head/eye crops.
+    hsv_check = cv2.cvtColor(img_enhanced, cv2.COLOR_BGR2HSV)
+    comb_mask = ((hsv_check[:, :, 0] < 15) | (hsv_check[:, :, 0] > 165)) & (hsv_check[:, :, 1] > 60) & (hsv_check[:, :, 2] > 50)
+    comb_ratio = float(comb_mask.mean())
 
-    if non_poultry_score >= 0.20 or top_label_norm in NON_POULTRY_LABELS:
-        if strict_score < 0.12 and broad_score < 0.12:
-            return False, 0.0, f"Non-chicken object detected ({top_labels}). Please photograph a gamefowl."
-
-    # ── Reject: human face/body (unless clear chicken in frame) ───────────────
-    if human_score >= 0.25 and strict_score < 0.08:
-        return False, 0.0, f"Human detected ({top_labels})"
-
-    # ── Accept: strict chicken ────────────────────────────────────────────────
-    if strict_score >= 0.05:
+    # ── 1. Accept: strict chicken ─────────────────────────────────────────────
+    if strict_score >= 0.04:
         return True, strict_score, f"Chicken confirmed (score={strict_score:.2f})"
 
-    # ── Accept: broad bird + texture heuristic ────────────────────────────────
-    if broad_score >= 0.08 and feather_score > 0.28:
-        return True, broad_score, f"Bird/fowl + feather texture (bird={broad_score:.2f}, feather={feather_score:.2f})"
+    # ── 2. Accept: broad bird / fowl ─────────────────────────────────────────
+    if broad_score >= 0.06:
+        return True, broad_score, f"Bird/fowl confirmed (score={broad_score:.2f})"
 
-    # ── Chicken inside cage/coop ──────────────────────────────────────────────
-    # Cage/crate wire detected around chicken — accept if plumage/bird features exist
-    if cage_score >= 0.08:
-        if strict_score >= 0.03 or broad_score >= 0.05 or (feather_score > 0.35 and color_score > 0.25):
+    # ── 3. Accept: Head / Comb anatomical detection ──────────────────────────
+    if comb_ratio >= 0.006:
+        return True, comb_ratio, f"Gamefowl head/comb detected (comb_ratio={comb_ratio:.3f})"
+
+    # ── 4. Screen/laptop capture: Allow if bird/gamefowl features exist ────────
+    # When user photographs a laptop or monitor displaying a chicken:
+    if screen_score >= 0.05 or top_label_norm in SCREEN_LABELS:
+        if strict_score >= 0.02 or broad_score >= 0.03 or feather_score > 0.22 or color_score > 0.15 or comb_ratio >= 0.004:
+            return True, max(strict_score, broad_score, feather_score), f"Screen photo of chicken accepted (screen={screen_score:.2f}, feather={feather_score:.2f})"
+
+    # ── 5. Chicken inside cage/coop ───────────────────────────────────────────
+    if cage_score >= 0.05:
+        if strict_score >= 0.02 or broad_score >= 0.03 or feather_score > 0.22 or color_score > 0.15 or comb_ratio >= 0.004:
             return True, max(strict_score, broad_score, feather_score), f"Caged chicken confirmed (cage={cage_score:.2f}, feather={feather_score:.2f})"
 
-    # ── Stage 2 fallback: pure texture + color heuristic ─────────────────────
-    # Only allowed if NOT recognized as an inanimate object or screen
-    if screen_score < 0.05 and non_poultry_score < 0.10 and human_score < 0.15:
-        combined = feather_score * 0.6 + color_score * 0.4
-        if combined > 0.45 and feather_score > 0.38 and color_score > 0.30:
-            return True, combined, f"Texture/color heuristic passed (feather={feather_score:.2f}, color={color_score:.2f})"
+    # ── 6. Stage 2 fallback: feather texture + plumage color heuristic ────────
+    combined = feather_score * 0.6 + color_score * 0.4
+    if combined > 0.30 or feather_score > 0.25 or color_score > 0.20:
+        return True, combined, f"Texture/color heuristic passed (feather={feather_score:.2f}, color={color_score:.2f})"
 
-    return False, 0.0, f"Not a chicken — detected: {top_labels}"
+    # ── 7. Rejections: Only reject if definitely human or everyday object ─────
+    if human_score >= 0.40 and strict_score < 0.02 and broad_score < 0.02 and comb_ratio < 0.004:
+        return False, 0.0, f"Human detected ({top_labels})"
+
+    if non_poultry_score >= 0.50 and strict_score == 0 and broad_score == 0 and comb_ratio < 0.003 and feather_score < 0.20:
+        return False, 0.0, f"Non-chicken object detected ({top_labels}). Please photograph a gamefowl."
+
+    # Borderline poultry capture — pass through to specialized gamefowl model
+    return True, 0.35, f"Borderline poultry capture passed to diagnostic model ({top_labels})"
 
 
 def warmup_models(models_dir: str):

@@ -444,7 +444,28 @@
   border-radius: var(--radius);
   padding: 24px 20px 28px;
   position: relative;
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.analytics-chart-canvas::-webkit-scrollbar {
+  height: 6px;
+}
+
+.analytics-chart-canvas::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.analytics-chart-canvas::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+.analytics-chart-canvas::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-green);
 }
 
 .chart-viewport {
@@ -648,13 +669,26 @@
 
 .past-5-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.past-5-table-wrap::-webkit-scrollbar {
+  height: 5px;
+}
+
+.past-5-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
 }
 
 .past-5-table {
   width: 100%;
+  min-width: 520px;
   border-collapse: collapse;
   font-size: 12.5px;
   text-align: left;
@@ -981,4 +1015,138 @@
 
 .text-sm {
   font-size: 12px;
+}
+
+/* ══════════ RESPONSIVE OVERVIEW & KPIS LAYOUT (Mobile Optimization) ══════════ */
+.mobile-chart-hint {
+  display: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px 0 10px;
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .mobile-chart-hint {
+    display: block;
+  }
+
+  .admin-dashboard-container {
+    padding: 16px 12px 36px;
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .admin-page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .admin-header-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .admin-header-actions .admin-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .dashboard-grid-row {
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-panel {
+    padding: 16px 14px;
+    gap: 14px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .panel-stat-pill {
+    align-self: flex-start;
+  }
+
+  .spike-annotation-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .spike-info {
+    font-size: 12px;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  .analytics-chart-canvas {
+    padding: 16px 12px 20px;
+  }
+
+  .chart-viewport {
+    min-width: 440px;
+    height: 220px;
+  }
+
+  .chart-y-axis {
+    bottom: 28px;
+  }
+
+  .y-label {
+    min-width: 70px;
+    font-size: 9.5px;
+  }
+
+  .chart-series-row {
+    padding-left: 80px;
+    gap: 14px;
+    height: calc(100% - 28px);
+    margin-bottom: 28px;
+  }
+
+  .chart-data-col {
+    max-width: 90px;
+  }
+
+  .bar-vertical-track {
+    width: 36px;
+  }
+
+  .label-amount {
+    font-size: 11px;
+    padding: 2px 5px;
+  }
+
+  .past-5-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .past-5-table th,
+  .past-5-table td {
+    padding: 8px 10px;
+    font-size: 11.5px;
+  }
 }

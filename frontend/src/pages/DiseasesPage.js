@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { Plus, Trash2, FlaskConical, ChevronDown, ChevronUp, Folder, Info, Layers, X, Sparkles } from 'lucide-react';
 import { DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, CombModuleIcon, FeetModuleIcon } from '../components/icons';
 import ConfirmModal from '../components/ConfirmModal';
+import { DiseasesSkeleton } from '../components/SkeletonLoader';
 import './DiseasesPage.css';
 
 const SEVERITY_OPTIONS = ['none', 'moderate', 'high', 'critical'];
@@ -21,6 +22,7 @@ const DEFAULT_SYMPTOMS = {
 };
 
 export default function DiseasesPage() {
+  const [loading, setLoading] = useState(true);
   const [diseases, setDiseases] = useState([]);
   const [modules, setModules] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -75,6 +77,8 @@ export default function DiseasesPage() {
       }
     } catch (err) {
       toast.error('Failed to load diseases or anatomical modules');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -222,6 +226,10 @@ export default function DiseasesPage() {
     if (filterModule === 'all') return true;
     return d.module === filterModule;
   });
+
+  if (loading) {
+    return <DiseasesSkeleton />;
+  }
 
   return (
     <div className="page diseases-page">

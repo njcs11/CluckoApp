@@ -84,6 +84,29 @@ export default function AdminAuditLogsPage() {
     }
   };
 
+  // Helper: Format DateTime to Philippine Standard Time (PHT, UTC+8) with seconds precision
+  const formatPhtDateTime = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const s = String(dateStr).trim();
+      const hasTz = s.endsWith('Z') || s.includes('+') || (s.includes('-') && s.lastIndexOf('-') > 10);
+      const parseStr = hasTz ? s : `${s.replace(' ', 'T')}Z`;
+      const d = new Date(parseStr);
+      return isNaN(d.getTime()) ? s : d.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const getActionBadgeClass = (action) => {
     const act = (action || '').toLowerCase();
     // 1. Approvals & Adjustments -> GREEN
@@ -238,9 +261,7 @@ export default function AdminAuditLogsPage() {
                   <tr key={log.id}>
                     <td className="font-mono text-muted">#{log.id}</td>
                     <td className="text-secondary text-sm font-mono whitespace-nowrap">
-                      {log.created_at ? new Date(log.created_at).toLocaleString('en-US', {
-                        month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
-                      }) : '—'}
+                      {formatPhtDateTime(log.created_at)}
                     </td>
                     <td>
                       <div className="operator-cell">

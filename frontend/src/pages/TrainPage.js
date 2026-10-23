@@ -19,9 +19,11 @@ import {
 } from 'lucide-react';
 import { useTrain } from '../context/TrainContext';
 import { PipelineActivityIcon, DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, CluckoIcon } from '../components/icons';
+import { TrainSkeleton } from '../components/SkeletonLoader';
 import './TrainPage.css';
 
 export default function TrainPage() {
+  const [initialLoading, setInitialLoading] = useState(true);
   const { trainStatus, activeModule, setActiveModule, startTraining, resetTraining, refreshStatus } = useTrain();
   const [modelStatus, setModelStatus] = useState(null);
   const [modules, setModules] = useState([]);
@@ -47,6 +49,8 @@ export default function TrainPage() {
       setModules(mRes.data.modules || []);
     } catch (err) {
       console.error('Error loading training info:', err);
+    } finally {
+      setInitialLoading(false);
     }
   };
 
@@ -112,6 +116,10 @@ export default function TrainPage() {
   };
 
   const currentStageIndex = getStageIndex(currentModuleState.stage, currentModuleState.status);
+
+  if (initialLoading) {
+    return <TrainSkeleton />;
+  }
 
   return (
     <div className="page train-page">

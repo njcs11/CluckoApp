@@ -8,6 +8,7 @@ import {
   Table as TableIcon, FileSpreadsheet, ArrowDownRight
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { AdminDashboardSkeleton } from '../components/SkeletonLoader';
 import './AdminDashboardPage.css';
 
 export default function AdminDashboardPage() {
@@ -56,13 +57,30 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Helper: Format DateTime to Philippine Standard Time (PHT, UTC+8)
+  const formatPhtDateTime = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const s = String(dateStr).trim();
+      const hasTz = s.endsWith('Z') || s.includes('+') || (s.includes('-') && s.lastIndexOf('-') > 10);
+      const parseStr = hasTz ? s : `${s.replace(' ', 'T')}Z`;
+      const d = new Date(parseStr);
+      return isNaN(d.getTime()) ? s : d.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   if (loading) {
-    return (
-      <div className="admin-page-loading">
-        <div className="spinner-large" />
-        <p>Loading Platform Analytics & Controls...</p>
-      </div>
-    );
+    return <AdminDashboardSkeleton />;
   }
 
   const revenue = data?.revenue || { total_collected: 0, total_refunded: 0, net_revenue: 0, this_month: 0, growth_pct: 0 };
@@ -232,6 +250,13 @@ export default function AdminDashboardPage() {
               <div className="spike-info">
                 Highest single-day cash volume: <strong>₱{peakItem.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> on <strong>{peakItem.date}</strong> ({peakItem.count} paid subscriptions).
               </div>
+            </div>
+          )}
+
+          {/* Mobile Swipe Hint */}
+          {timeline.length > 2 && (
+            <div className="mobile-chart-hint">
+              <span>← Swipe horizontally to explore full 30-day timeline →</span>
             </div>
           )}
 
@@ -530,7 +555,7 @@ export default function AdminDashboardPage() {
                       {tx.status === 'pending' && <span className="status-badge pending">PENDING</span>}
                     </td>
                     <td className="text-secondary text-sm">
-                      {tx.created_at ? new Date(tx.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {formatPhtDateTime(tx.created_at)}
                     </td>
                   </tr>
                 ))

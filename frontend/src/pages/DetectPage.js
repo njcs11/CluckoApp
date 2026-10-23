@@ -4,6 +4,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X, ShieldAlert } from 'lucide-react';
 import { DynamicModuleIcon, CluckoBrandBadge, EyeModuleIcon, WingModuleIcon } from '../components/icons';
+import { SkeletonBox } from '../components/SkeletonLoader';
 import { useDetect } from '../context/DetectContext';
 import './DetectPage.css';
 
@@ -104,17 +105,24 @@ export default function DetectPage() {
           <div className="card-title camera-title-row">
             <span>Camera / Image Input</span>
             <div className="module-pill-group">
-              {modules.map(m => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={`mod-pill ${scanModule === m.id ? 'active' : ''}`}
-                  onClick={() => setScanModule(m.id)}
-                  title={`Target ${m.name} diseases`}
-                >
-                  <DynamicModuleIcon module={m.id} icon={m.icon} size={13} style={{ marginRight: 4 }} /> {m.name}
-                </button>
-              ))}
+              {modules.length === 0 ? (
+                <>
+                  <SkeletonBox width="60px" height="26px" borderRadius="20px" />
+                  <SkeletonBox width="65px" height="26px" borderRadius="20px" />
+                </>
+              ) : (
+                modules.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={`mod-pill ${scanModule === m.id ? 'active' : ''}`}
+                    onClick={() => setScanModule(m.id)}
+                    title={`Target ${m.name} diseases`}
+                  >
+                    <DynamicModuleIcon module={m.id} icon={m.icon} size={13} style={{ marginRight: 4 }} /> {m.name}
+                  </button>
+                ))
+              )}
             </div>
           </div>
 
@@ -215,11 +223,39 @@ export default function DetectPage() {
           )}
 
           {loading && (
-            <div className="card result-placeholder">
-              <CluckoBrandBadge size={46} iconSize={26} glow={true} pulse={true} />
-              <p className="placeholder-text" style={{ color: 'var(--accent-green-bright)', fontWeight: 600 }}>
-                Running MobileNetV2 Neural Analysis...
-              </p>
+            <div className="results animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="card result-placeholder" style={{ padding: '24px' }}>
+                <CluckoBrandBadge size={46} iconSize={26} glow={true} pulse={true} />
+                <p className="placeholder-text" style={{ color: 'var(--accent-green-bright)', fontWeight: 600, marginTop: '10px' }}>
+                  Running MobileNetV2 Neural Analysis...
+                </p>
+              </div>
+
+              {/* Shimmer Diagnostics Skeleton Cards */}
+              <div className="card disease-flag" style={{ padding: '20px', borderColor: 'var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <SkeletonBox width="130px" height="14px" />
+                  <SkeletonBox width="70px" height="20px" borderRadius="12px" />
+                </div>
+                <SkeletonBox width="65%" height="28px" borderRadius="6px" style={{ marginBottom: '16px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                  <SkeletonBox width="80px" height="12px" />
+                  <SkeletonBox width="100%" height="8px" borderRadius="4px" />
+                  <SkeletonBox width="45px" height="14px" />
+                </div>
+                <SkeletonBox width="90%" height="14px" />
+              </div>
+
+              <div className="card predictions-card" style={{ padding: '20px' }}>
+                <SkeletonBox width="160px" height="16px" style={{ marginBottom: '16px' }} />
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '12px' }}>
+                    <SkeletonBox width="120px" height="14px" />
+                    <SkeletonBox width="100%" height="6px" borderRadius="3px" />
+                    <SkeletonBox width="40px" height="14px" />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -243,6 +279,30 @@ export default function DetectPage() {
               {/* Top Disease Flag */}
               {!result.rejected && (
                 <>
+                  {result.module_mismatch && result.module_notice && (
+                    <div className="card module-auto-correct-banner" style={{
+                      background: 'rgba(59, 130, 246, 0.12)',
+                      border: '1px solid rgba(59, 130, 246, 0.35)',
+                      borderRadius: '12px',
+                      padding: '12px 16px',
+                      marginBottom: '1rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      color: '#93c5fd'
+                    }}>
+                      <Sparkles size={20} color="#60a5fa" style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#bfdbfe', fontSize: '0.9rem', marginBottom: '2px' }}>
+                          Smart Anatomical Auto-Correction
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#cbd5e1', lineHeight: '1.4' }}>
+                          {result.module_notice}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="card disease-flag" style={{borderColor: result.top_prediction.color}}>
                     <div className="flag-header">
                       <span className="flag-label">FLAGGED DISEASE</span>
