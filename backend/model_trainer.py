@@ -701,19 +701,33 @@ def train(
     }
 
 
+# ─── Model Cache ──────────────────────────────────────────────────────────────
+_cached_custom_models = {}
+
+def get_cached_model(module: str, models_dir: str):
+    """Retrieve trained disease model from RAM cache, reloading only if the .h5 file on disk has changed."""
+    model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model for '{module}' module not trained yet")
+
+    mtime = os.path.getmtime(model_path)
+    entry = _cached_custom_models.get(module)
+    if entry and entry.get('mtime') == mtime and entry.get('model') is not None:
+        return entry['model']
+
+    tf, *_ = _load_tf()
+    model = tf.keras.models.load_model(model_path)
+    _cached_custom_models[module] = {'model': model, 'mtime': mtime}
+    return model
+
+
 # ─── Prediction (per module) ──────────────────────────────────────────────────
 def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: str) -> dict:
     """Classification only — no chicken screening. Raises FileNotFoundError
     if the module's model hasn't been trained yet."""
-    tf, *_ = _load_tf()
+    model = get_cached_model(module, models_dir)
 
-    model_path = os.path.join(models_dir, f'gamefowl_model_{module}.h5')
     label_path = os.path.join(models_dir, f'labels_{module}.json')
-
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model for '{module}' module not trained yet")
-
-    model = tf.keras.models.load_model(model_path)
     with open(label_path) as f:
         label_map = json.load(f)
 
@@ -1108,12 +1122,11 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
     res['detected_module'] = detected_module
     res['module_notice'] = module_notice
 
-    # Attach Grad-CAM heatmap visualization
+    # Attach Grad-CAM heatmap visualization (reusing cached model)
     try:
         model_path = os.path.join(models_dir, f'gamefowl_model_{detected_module}.h5')
         if os.path.exists(model_path):
-            tf, *_ = _load_tf()
-            loaded_model = tf.keras.models.load_model(model_path)
+            loaded_model = get_cached_model(detected_module, models_dir)
             res['gradcam_image'] = generate_gradcam(img, loaded_model)
     except Exception as e:
         print(f"Grad-CAM generation notice: {e}")
@@ -1216,13 +1229,12 @@ def predict_auto(img: Image.Image, models_dir: str, diseases_config: dict) -> di
     if best_wing:
         result['modules_checked']['wing'] = best_wing['top_prediction']
 
-    # Attach Grad-CAM heatmap visualization
+    # Attach Grad-CAM heatmap visualization (reusing cached model)
     try:
         chosen_module = chosen['module']
         model_path = os.path.join(models_dir, f'gamefowl_model_{chosen_module}.h5')
         if os.path.exists(model_path):
-            tf, *_ = _load_tf()
-            loaded_model = tf.keras.models.load_model(model_path)
+            loaded_model = get_cached_model(chosen_module, models_dir)
             result['gradcam_image'] = generate_gradcam(img, loaded_model)
     except Exception as e:
         print(f"Grad-CAM generation notice: {e}")
@@ -1361,6 +1373,25 @@ def _is_likely_chicken(img: Image.Image) -> tuple:
     return False, 0.0, f"Not a chicken — detected: {top_labels}"
 
 
+def warmup_models(models_dir: str):
+    """Pre-warm ImageNet screener and all trained disease models in RAM."""
+    try:
+        print("[AI WARMUP] Pre-warming ImageNet screener...")
+        _ = _get_screener()
+        print("[AI WARMUP] Screener ready.")
+        for mod in ['eye', 'wing']:
+            m_path = os.path.join(models_dir, f'gamefowl_model_{mod}.h5')
+            if os.path.exists(m_path):
+                print(f"[AI WARMUP] Caching {mod} model into RAM...")
+                _ = get_cached_model(mod, models_dir)
+                print(f"[AI WARMUP] {mod} model cached.")
+        print("[AI WARMUP] All AI models pre-warmed and hot in memory!")
+        return True
+    except Exception as e:
+        print(f"[AI WARMUP] Notice during warmup: {e}")
+        return False
+
+
 def _feather_texture_score(img_cv: np.ndarray) -> float:
     """
     Score how 'feathery' the image is using Gabor filter bank.
@@ -1406,10 +1437,9 @@ def _gamefowl_color_score(img_cv: np.ndarray) -> float:
     # Red/orange: 0-20 and 160-180
     # Yellow/gold: 20-35
     # Green/iridescent: 35-85
-    # Black feathers → low value; white feathers → high value, low sat
     red_orange = ((h_vals < 20) | (h_vals > 160)).mean()
     yellow_gold = ((h_vals >= 20) & (h_vals < 35)).mean()
     iridescent  = ((h_vals >= 35) & (h_vals < 85)).mean()
 
     score = red_orange * 0.5 + yellow_gold * 0.3 + iridescent * 0.2
-    return float(np.clip(score * 2.5, 0, 1))  # scale up since these are partial ratios
+    return float(np.clip(score * 2.5, 0, 1))

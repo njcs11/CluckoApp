@@ -82,9 +82,30 @@ def convert_existing_heic():
 
 convert_existing_heic()
 
+# ─── Background AI Model Warmup ───────────────────────────────────────────────
+_is_warmed_up = False
+
+def _run_ai_warmup():
+    global _is_warmed_up
+    try:
+        from model_trainer import warmup_models
+        warmup_models(MODELS_DIR)
+        _is_warmed_up = True
+    except Exception as e:
+        print(f"[WARMUP] Notice during background pre-warming: {e}")
+
+threading.Thread(target=_run_ai_warmup, daemon=True).start()
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'Clucko backend is running'})
+    return jsonify({'status': 'ok', 'message': 'Clucko backend is running', 'ai_warmed': _is_warmed_up})
+
+@app.route('/api/warmup', methods=['GET', 'POST'])
+def warmup_endpoint():
+    global _is_warmed_up
+    if not _is_warmed_up:
+        _run_ai_warmup()
+    return jsonify({'status': 'ok', 'ai_warmed': True})
 
 
 def load_modules():

@@ -13,6 +13,11 @@ export function DetectProvider({ children }) {
   const [gradcamLoading, setGradcamLoading] = useState(false);
   const [gradcamData, setGradcamData] = useState(null);
 
+  // Pre-warm the backend AI models in the background when the app loads
+  React.useEffect(() => {
+    axios.get('/api/warmup').catch(() => {});
+  }, []);
+
   const analyze = useCallback(async (imageToAnalyze = null, moduleToUse = null) => {
     const targetImage = (typeof imageToAnalyze === 'string' && imageToAnalyze ? imageToAnalyze : null) || capturedImage;
     const targetModule = (typeof moduleToUse === 'string' && moduleToUse ? moduleToUse : null) || scanModule;
@@ -26,7 +31,7 @@ export function DetectProvider({ children }) {
       const { data } = await axios.post('/api/detect', {
         image: targetImage,
         module: targetModule
-      }, { timeout: 60000 });
+      }, { timeout: 65000 });
       setResult(data);
       if (data.rejected) {
         toast.error('Detection rejected — see details below', { id: toastId });
@@ -35,7 +40,28 @@ export function DetectProvider({ children }) {
       }
       return data;
     } catch (err) {
-      const msg = err.response?.data?.error || (err.code === 'ECONNABORTED' ? 'AI Model is warming up on the cloud. Please try once more.' : 'Detection failed');
+      if (err.code === 'ECONNABORTED') {
+        // Cold-start retry: cloud container was waking up, retry seamlessly
+        try {
+          toast.loading('AI server is waking up on the cloud. Re-evaluating now...', { id: toastId });
+          const { data } = await axios.post('/api/detect', {
+            image: targetImage,
+            module: targetModule
+          }, { timeout: 65000 });
+          setResult(data);
+          if (data.rejected) {
+            toast.error('Detection rejected — see details below', { id: toastId });
+          } else {
+            toast.success(`Diagnosis complete: ${data.top_prediction?.disease_name || 'Processed'}`, { id: toastId });
+          }
+          return data;
+        } catch (retryErr) {
+          const retryMsg = retryErr.response?.data?.error || 'AI server cold start timed out. Please try once more.';
+          toast.error(retryMsg, { id: toastId });
+          return;
+        }
+      }
+      const msg = err.response?.data?.error || 'Detection failed';
       toast.error(msg, { id: toastId });
     } finally {
       setLoading(false);
