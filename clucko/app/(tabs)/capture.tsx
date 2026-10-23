@@ -598,7 +598,10 @@ export default function CaptureScreen() {
   const applyDetectionResult = (result: any, base64Image?: string) => {
     const top = result.top_prediction;
     const isHealthy = !top || String(top.disease_id).startsWith('healthy');
-    const symptomLabels = (result.detected_symptoms || []).map((s: any) => s.label);
+    const symptomLabels = (result.detected_symptoms || []).map((s: any) => {
+      if (typeof s === 'string') return s;
+      return s.confidence ? `${s.label} (${Math.round(s.confidence)}%)` : s.label;
+    });
 
     const scan = {
       disease: isHealthy ? null : top.disease_name,
@@ -609,6 +612,7 @@ export default function CaptureScreen() {
       module: result.module || selectedPart || 'eye',
       modulesChecked: result.modules_checked || {},
       symptoms: symptomLabels.length > 0 ? symptomLabels : ['No abnormalities detected'],
+      recommendations: result.recommendations || null,
       highConfidenceAlert: Boolean(result.high_confidence_alert),
       base64Image: base64Image || lastPhotoBase64,
       gradcamImage: result.gradcam_image || null,
@@ -2245,7 +2249,9 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
     }
   }, [scanResult.gradcamImage]);
 
-  const recommendations = isHealthy
+  const recommendations = scanResult.recommendations && scanResult.recommendations.length > 0
+    ? scanResult.recommendations
+    : isHealthy
     ? ['Continue regular monitoring', 'Optimal health markers observed', 'Next scan recommended in 7 days']
     : ['Isolate affected chicken immediately', 'Disinfect coop & waterers', 'Consult a licensed poultry veterinarian'];
 

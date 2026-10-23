@@ -40,6 +40,7 @@ After ~30 seconds, your browser opens automatically at:
 ```bash
 Install dependencies
 cd clucko
+
 npm install
 
 Start the app

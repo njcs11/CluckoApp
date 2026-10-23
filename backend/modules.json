@@ -13,7 +13,7 @@
       "id": "wing",
       "name": "Wing",
       "display_name": "Wing & Posture Module",
-      "description": "Wing droop, posture anomalies, and neuromuscular paralysis (e.g. Newcastle Disease, Marek's)",
+      "description": "Wing droop, posture anomalies, and neuromuscular paralysis (e.g. Newcastle Disease)",
       "icon": "wing",
       "color": "#3b82f6",
       "is_default": true

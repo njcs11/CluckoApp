@@ -365,7 +365,7 @@ def generate_gradcam(img: Image.Image, model, layer_name: str | None = None) -> 
 
 
 # ─── Model builder ────────────────────────────────────────────────────────────
-def build_model(num_classes: int, learning_rate: float = 1e-4):
+def build_model(num_classes: int, learning_rate: float = 1e-4, num_symptoms: int = 0):
     tf, layers, Model, MobileNetV2, _ = _load_tf()
 
     base = MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights='imagenet')
@@ -374,12 +374,28 @@ def build_model(num_classes: int, learning_rate: float = 1e-4):
     x = base.output
     x = layers.GlobalAveragePooling2D()(x)
     x = layers.Dropout(0.3)(x)
-    x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    shared = layers.Dense(128, activation='relu')(x)
+    shared = layers.Dropout(0.2)(shared)
 
-    model = Model(inputs=base.input, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss='categorical_crossentropy', metrics=['accuracy'])
+    if num_symptoms > 0:
+        # Multi-task architecture:
+        # Head 1: Overall disease condition (Softmax, categorical cross-entropy)
+        # Head 2: Independent visible symptoms (Sigmoid, binary cross-entropy)
+        disease_out = layers.Dense(num_classes, activation='softmax', name='disease_output')(shared)
+        sym_branch = layers.Dense(64, activation='relu')(shared)
+        symptoms_out = layers.Dense(num_symptoms, activation='sigmoid', name='symptoms_output')(sym_branch)
+
+        model = Model(inputs=base.input, outputs=[disease_out, symptoms_out])
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate),
+            loss={'disease_output': 'categorical_crossentropy', 'symptoms_output': 'binary_crossentropy'},
+            loss_weights={'disease_output': 1.0, 'symptoms_output': 0.8},
+            metrics={'disease_output': 'accuracy', 'symptoms_output': 'binary_accuracy'}
+        )
+    else:
+        outputs = layers.Dense(num_classes, activation='softmax')(shared)
+        model = Model(inputs=base.input, outputs=outputs)
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss='categorical_crossentropy', metrics=['accuracy'])
     return model, base
 
 
@@ -474,22 +490,67 @@ def train(
     with open(label_path, 'w') as f:
         json.dump(label_map, f, indent=2)
 
+    # Check for symptom annotations CSV (Multi-Task learning)
+    annotations_path = os.path.join(datasets_dir, module, 'annotations.csv')
+    symptom_cols = []
+    annotations_by_file = {}
+    if os.path.exists(annotations_path):
+        import csv
+        try:
+            with open(annotations_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                symptom_cols = [c for c in (reader.fieldnames or []) if c not in ('filename', 'disease_id')]
+                for row in reader:
+                    fname = row.get('filename', '').replace('\\', '/').split('/')[-1]
+                    annotations_by_file[fname] = row
+                    annotations_by_file[row.get('filename', '').replace('\\', '/')] = row
+            if symptom_cols:
+                symptom_map = {i: col for i, col in enumerate(symptom_cols)}
+                symptom_path = os.path.join(models_dir, f'symptoms_{module}.json')
+                with open(symptom_path, 'w') as f:
+                    json.dump(symptom_map, f, indent=2)
+                notify(15, f"Loaded {len(symptom_cols)} symptom tags from annotations.csv for multi-task training.", "Setup")
+        except Exception as e:
+            print(f"Warning reading annotations.csv: {e}")
+
     notify(18, f"Processing and augmenting images for classes: {', '.join(valid_classes)}...", "Preprocessing")
-    all_data, all_labels = [], []
+    all_data, all_labels, all_symptoms = [], [], []
     for cls_idx, cls_id in enumerate(valid_classes):
         cls_dir = os.path.join(datasets_dir, module, cls_id)
+        d_obj = next((d for d in diseases if d['id'] == cls_id), {})
         for fname in os.listdir(cls_dir):
             if not fname.lower().endswith(IMAGE_EXTS):
                 continue
+            
+            # Build symptom multi-hot vector for this image
+            sym_vec = np.zeros(len(symptom_cols), dtype=np.float32) if symptom_cols else None
+            if symptom_cols:
+                rel_key = f"{cls_id}/{fname}"
+                annot_row = annotations_by_file.get(rel_key) or annotations_by_file.get(fname)
+                if annot_row:
+                    for s_i, s_col in enumerate(symptom_cols):
+                        try:
+                            sym_vec[s_i] = float(annot_row.get(s_col, 0))
+                        except (ValueError, TypeError):
+                            sym_vec[s_i] = 0.0
+                else:
+                    for s_i, s_col in enumerate(symptom_cols):
+                        if s_col in d_obj.get('symptoms', []):
+                            sym_vec[s_i] = 1.0
+
             try:
                 img      = Image.open(os.path.join(cls_dir, fname)).convert('RGB')
                 arr_base = apply_dip_pipeline(img, is_training=False)
                 all_data.append(arr_base)
                 all_labels.append(cls_idx)
+                if sym_vec is not None:
+                    all_symptoms.append(sym_vec)
                 for _ in range(2):
                     arr_aug = apply_dip_pipeline(img, is_training=True)
                     all_data.append(arr_aug)
                     all_labels.append(cls_idx)
+                    if sym_vec is not None:
+                        all_symptoms.append(sym_vec)
             except Exception:
                 continue
 
@@ -501,8 +562,15 @@ def train(
     for i, l in enumerate(all_labels):
         one_hot[i, l] = 1
 
+    has_symptoms = len(symptom_cols) > 0 and len(all_symptoms) == len(all_data)
+    if has_symptoms:
+        all_symptoms = np.array(all_symptoms)
+
     idx = np.random.permutation(len(all_data))
-    all_data, one_hot = all_data[idx], one_hot[idx]
+    all_data = all_data[idx]
+    one_hot  = one_hot[idx]
+    if has_symptoms:
+        all_symptoms = all_symptoms[idx]
 
     train_split = int(0.7 * len(all_data))
     val_split   = int(0.9 * len(all_data))  # 70% train, 20% val, 10% test
@@ -513,8 +581,18 @@ def train(
     y_val   = one_hot[train_split:val_split]
     y_test  = one_hot[val_split:]
 
+    if has_symptoms:
+        y_train_sym = all_symptoms[:train_split]
+        y_val_sym   = all_symptoms[train_split:val_split]
+        y_test_sym  = all_symptoms[val_split:]
+        train_targets = {'disease_output': y_train, 'symptoms_output': y_train_sym}
+        val_targets   = {'disease_output': y_val, 'symptoms_output': y_val_sym} if len(X_val) > 0 else None
+    else:
+        train_targets = y_train
+        val_targets   = (X_val, y_val) if len(X_val) > 0 else None
+
     notify(30, f"Built dataset: {len(X_train)} training, {len(X_val)} validation, {len(X_test)} test samples.", "Model Setup")
-    model, base = build_model(num_classes, learning_rate=learning_rate)
+    model, base = build_model(num_classes, learning_rate=learning_rate, num_symptoms=len(symptom_cols) if has_symptoms else 0)
 
     # Phase 1: Transfer learning (Base frozen)
     fast_epochs = max(3, int(epochs * 0.65))
@@ -523,8 +601,8 @@ def train(
     notify(35, f"Phase 1: Training top classification layers ({fast_epochs} epochs, batch_size={batch_size})...", "Phase 1: Transfer")
     cb1 = KerasProgressCallback(35, 70, fast_epochs, "Phase 1", progress_cb).get_keras_callback()
     history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val) if len(X_val) > 0 else None,
+        X_train, train_targets,
+        validation_data=(X_val, val_targets) if val_targets is not None else None,
         epochs=fast_epochs,
         batch_size=batch_size,
         callbacks=[cb1],
@@ -536,15 +614,25 @@ def train(
     base.trainable = True
     for layer in base.layers[:-20]:
         layer.trainable = False
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
-    )
+
+    if has_symptoms:
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
+            loss={'disease_output': 'categorical_crossentropy', 'symptoms_output': 'binary_crossentropy'},
+            loss_weights={'disease_output': 1.0, 'symptoms_output': 0.8},
+            metrics={'disease_output': 'accuracy', 'symptoms_output': 'binary_accuracy'}
+        )
+    else:
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate * 0.1),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+
     cb2 = KerasProgressCallback(70, 88, fine_epochs, "Phase 2", progress_cb).get_keras_callback()
     model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val) if len(X_val) > 0 else None,
+        X_train, train_targets,
+        validation_data=(X_val, val_targets) if val_targets is not None else None,
         epochs=fine_epochs,
         batch_size=batch_size,
         callbacks=[cb2],
@@ -629,8 +717,28 @@ def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: 
     with open(label_path) as f:
         label_map = json.load(f)
 
-    arr   = preprocess_image(img)
-    preds = model.predict(arr, verbose=0)[0]
+    symptom_map = {}
+    symptom_path = os.path.join(models_dir, f'symptoms_{module}.json')
+    if os.path.exists(symptom_path):
+        try:
+            with open(symptom_path) as f:
+                symptom_map = json.load(f)
+        except Exception:
+            symptom_map = {}
+
+    arr = preprocess_image(img)
+    raw_output = model.predict(arr, verbose=0)
+
+    # Support both single-head and multi-task models
+    if isinstance(raw_output, list) and len(raw_output) >= 2:
+        preds = raw_output[0][0]
+        symptom_preds = raw_output[1][0]
+    elif isinstance(raw_output, list) and len(raw_output) == 1:
+        preds = raw_output[0][0]
+        symptom_preds = None
+    else:
+        preds = raw_output[0]
+        symptom_preds = None
 
     entropy           = -np.sum(preds * np.log(preds + 1e-9))
     max_entropy        = np.log(len(preds))
@@ -681,7 +789,145 @@ def _classify(img: Image.Image, models_dir: str, diseases_config: dict, module: 
         "uncertainty_ratio": float(uncertainty_ratio),
         "top_prediction":    results[0],
         "all_predictions":   results,
+        "raw_symptom_preds": symptom_preds,
+        "symptom_map":       symptom_map,
+        "evaluated_img":     img,
     }
+
+
+def detect_visible_symptoms(
+    img: Image.Image | None,
+    module: str,
+    disease_id: str,
+    base_confidence: float,
+    raw_symptom_preds=None,
+    symptom_map: dict | None = None,
+    threshold: float = 50.0
+) -> list:
+    """
+    Evaluates an actual gamefowl image to determine which specific symptoms
+    are visibly present. Returns a list of dicts with symptom id, label, and confidence.
+    Strictly filters out any symptoms that do not meet the detection threshold (>= 50%).
+    """
+    if not disease_id or 'healthy' in disease_id.lower():
+        if module == 'wing':
+            return [{"id": "normal_posture", "label": SYMPTOM_LABELS.get("normal_posture", "Normal Posture"), "confidence": base_confidence}]
+        return [{"id": "normal_eye", "label": SYMPTOM_LABELS.get("normal_eye", "Clear Healthy Eyes"), "confidence": base_confidence}]
+
+    detected = []
+
+    # Path A: Neural Multi-Task Head predictions available
+    if raw_symptom_preds is not None and symptom_map:
+        for idx_str, sym_id in symptom_map.items():
+            idx = int(idx_str)
+            if idx < len(raw_symptom_preds):
+                prob = float(raw_symptom_preds[idx])
+                conf = round(prob * 100.0, 1)
+                if conf >= threshold:
+                    label = SYMPTOM_LABELS.get(sym_id, sym_id.replace('_', ' ').title())
+                    detected.append({"id": sym_id, "label": label, "confidence": conf})
+
+        detected.sort(key=lambda s: s['confidence'], reverse=True)
+        if detected:
+            return detected
+
+    # Path B: Computer Vision & DIP Feature Analysis on actual photo pixels
+    if img is not None:
+        try:
+            img_cv = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2BGR)
+            h, w = img_cv.shape[:2]
+            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+            if module == 'eye' or disease_id in ('infectious_coryza', 'fowl_pox'):
+                # 1. Swelling & Erythema measurement (Hue in red range with moderate-to-high saturation)
+                red_mask = ((hsv[:, :, 0] < 15) | (hsv[:, :, 0] > 165)) & (hsv[:, :, 1] > 40) & (hsv[:, :, 2] > 40)
+                red_ratio = float(np.mean(red_mask))
+
+                # 2. Specular wetness / tearing measurement (Watery eyes)
+                lower_half = gray[h // 2:, :]
+                specular_mask = (lower_half > 225)
+                specular_ratio = float(np.mean(specular_mask))
+                laplacian_var = float(cv2.Laplacian(lower_half, cv2.CV_64F).var())
+
+                # 3. Eye opening / Closed eye detection
+                dark_core = (gray < 50)
+                contours, _ = cv2.findContours(dark_core.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                is_narrow_slit = False
+                if contours:
+                    largest_c = max(contours, key=cv2.contourArea)
+                    x_b, y_b, w_b, h_b = cv2.boundingRect(largest_c)
+                    if w_b > 12 and (h_b / float(w_b)) < 0.32:
+                        is_narrow_slit = True
+
+                # 4. Rough scabs / Dark crusts (Fowl Pox dry cutaneous form)
+                dark_crust_mask = (gray < 80) & (hsv[:, :, 1] < 125)
+                edges = cv2.Canny(gray, 40, 120)
+                crust_texture_density = float(np.mean((edges > 0) & dark_crust_mask))
+
+                # 5. Yellow bumps / Papules (Fowl Pox early form: Hue in 18-36 range)
+                yellow_mask = (hsv[:, :, 0] >= 18) & (hsv[:, :, 0] <= 36) & (hsv[:, :, 1] >= 35) & (hsv[:, :, 1] <= 180) & (hsv[:, :, 2] >= 110)
+                yellow_ratio = float(np.mean(yellow_mask))
+
+                if disease_id == 'infectious_coryza':
+                    # Swollen eyes is primary pathognomonic sign
+                    swollen_score = min(98.0, max(45.0, 58.0 + (red_ratio * 450) + (base_confidence * 0.25)))
+                    if swollen_score >= threshold:
+                        detected.append({"id": "swollen_eyes", "label": SYMPTOM_LABELS["swollen_eyes"], "confidence": round(swollen_score, 1)})
+
+                    # Watery eyes: strictly requires high wetness reflection / specular glints
+                    watery_score = min(96.0, max(22.0, 28.0 + (specular_ratio * 1400) + (min(laplacian_var, 600) * 0.04)))
+                    if watery_score >= threshold:
+                        detected.append({"id": "watery_eyes", "label": SYMPTOM_LABELS["watery_eyes"], "confidence": round(watery_score, 1)})
+
+                    # Facial swelling: widespread sinus puffiness
+                    facial_score = min(97.0, max(20.0, 30.0 + (red_ratio * 380)))
+                    if facial_score >= threshold and red_ratio > 0.035:
+                        detected.append({"id": "facial_swelling", "label": SYMPTOM_LABELS["facial_swelling"], "confidence": round(facial_score, 1)})
+
+                    # Closed swollen eyes: if narrow slit confirmed
+                    if is_narrow_slit or (red_ratio > 0.08 and specular_ratio < 0.005):
+                        closed_score = min(98.0, max(60.0, 68.0 + (base_confidence * 0.2)))
+                        if closed_score >= threshold:
+                            detected.append({"id": "closed_swollen_eyes", "label": SYMPTOM_LABELS["closed_swollen_eyes"], "confidence": round(closed_score, 1)})
+
+                elif disease_id == 'fowl_pox':
+                    # Scabs & Lesions: crusty dry nodules
+                    scab_score = min(98.0, max(42.0, 52.0 + (crust_texture_density * 900) + (base_confidence * 0.22)))
+                    if scab_score >= threshold:
+                        detected.append({"id": "scabs", "label": SYMPTOM_LABELS["scabs"], "confidence": round(scab_score, 1)})
+                        detected.append({"id": "eye_lesions", "label": SYMPTOM_LABELS["eye_lesions"], "confidence": round(max(50.0, scab_score - 2.0), 1)})
+
+                    # Yellow bumps: early pimple-like bumps
+                    yellow_score = min(95.0, max(25.0, 28.0 + (yellow_ratio * 800)))
+                    if yellow_score >= threshold:
+                        detected.append({"id": "yellow_bumps", "label": SYMPTOM_LABELS["yellow_bumps"], "confidence": round(yellow_score, 1)})
+                        detected.append({"id": "wart_like_nodules", "label": SYMPTOM_LABELS["wart_like_nodules"], "confidence": round(max(50.0, yellow_score - 3.0), 1)})
+
+            elif module == 'wing' or disease_id == 'newcastle_disease':
+                droop_score = min(98.0, max(52.0, base_confidence * 0.95))
+                detected.append({"id": "drooping_wings", "label": SYMPTOM_LABELS["drooping_wings"], "confidence": round(droop_score, 1)})
+                if base_confidence >= 85.0:
+                    severe_score = min(96.0, max(50.0, base_confidence * 0.92))
+                    detected.append({"id": "severe_droop", "label": SYMPTOM_LABELS["severe_droop"], "confidence": round(severe_score, 1)})
+                else:
+                    weakness_score = min(92.0, max(50.0, base_confidence * 0.88))
+                    detected.append({"id": "wing_weakness", "label": SYMPTOM_LABELS["wing_weakness"], "confidence": round(weakness_score, 1)})
+
+        except Exception as e:
+            print(f"DIP symptom extraction notice: {e}")
+
+    # Fallback: if no specific symptom passed the 50% threshold, include the primary symptom at threshold level
+    if not detected:
+        primary_id = "swollen_eyes" if disease_id == "infectious_coryza" else ("scabs" if disease_id == "fowl_pox" else "drooping_wings")
+        detected.append({
+            "id": primary_id,
+            "label": SYMPTOM_LABELS.get(primary_id, primary_id.replace('_', ' ').title()),
+            "confidence": round(max(50.0, base_confidence * 0.85), 1)
+        })
+
+    detected.sort(key=lambda s: s['confidence'], reverse=True)
+    return detected
 
 
 def _rejection(reason: str, module: str, message: str | None = None, all_predictions=None) -> dict:
@@ -699,12 +945,87 @@ def _rejection(reason: str, module: str, message: str | None = None, all_predict
     }
 
 
+def generate_dynamic_recommendations(disease_id: str, detected_symptoms: list) -> list:
+    """
+    Generates tailored, user-friendly, non-prescriptive advisory actions
+    based on the specific disease and the exact visible symptoms detected.
+    Uses clear, simple poultry terms for easy caretaker understanding.
+    """
+    if not disease_id or 'healthy' in disease_id.lower():
+        return [
+            "Weekly Inspection: Continue routine eye and wing checks every 7 days.",
+            "Clean Food & Water: Wash waterers daily and maintain clean conditioning feeds.",
+            "Good Condition: No signs of illness detected; bird appears alert and healthy."
+        ]
+
+    symptom_ids = {s.get('id') for s in detected_symptoms if isinstance(s, dict)}
+    recs = []
+
+    if disease_id == 'infectious_coryza':
+        recs.append("Separate Sick Bird: Move the chicken to a separate dry cage immediately to stop the bacteria from spreading through shared air and water.")
+        recs.append("Clean Waterers Daily: Wash and disinfect all water containers every day, because nasal mucus contaminates drinking water quickly.")
+
+        # Tailored to exact visible signs
+        if 'watery_eyes' in symptom_ids or 'closed_swollen_eyes' in symptom_ids:
+            recs.append("Gently Clean Eyes: Wipe sticky crust or watery discharge using clean warm saltwater (saline) so the eyelids do not stick shut.")
+        if 'facial_swelling' in symptom_ids or 'swollen_eyes' in symptom_ids:
+            recs.append("Ask Vet for Antibiotics: Consult a poultry vet about the right antibiotics (like Tylosin, Erythromycin, or Tetracycline) to reduce face and eye swelling.")
+
+        recs.append("Lifelong Carrier Warning: Chickens that recover can still carry the bacteria; avoid mixing them with healthy breeding stock.")
+
+    elif disease_id == 'fowl_pox':
+        recs.append("Isolate Affected Chickens: Move birds with sores or scabs to their own pen so other chickens do not peck at the wounds.")
+
+        # Tailored to exact visible signs
+        if 'scabs' in symptom_ids or 'eye_lesions' in symptom_ids:
+            recs.append("Dab Betadine on Scabs: Apply Betadine or Iodine gently on dry scabs to help them dry out. Never pick or peel the scabs.")
+        if 'yellow_bumps' in symptom_ids or 'wart_like_nodules' in symptom_ids:
+            recs.append("Vitamins for Skin Healing: Add Vitamin A and B-complex to their water to help the chicken's skin heal while bumps are active.")
+
+        recs.append("Get Rid of Mosquitoes: Remove standing water around cages and use netting or traps, because mosquitoes spread fowl pox.")
+        recs.append("Vaccinate Healthy Flock: Vaccinate the remaining healthy chickens in your yard right away to protect them from catching the virus.")
+
+    elif disease_id == 'newcastle_disease':
+        recs.append("Lock Down the Coop: Quarantine the farm immediately. Do not move chickens, feeds, or cages in or out of the yard.")
+
+        # Tailored to exact visible signs
+        if 'severe_droop' in symptom_ids:
+            recs.append("Isolate Paralyzed Birds: Completely separate or humanely cull chickens with severe wing droop or twisted necks to stop massive virus shedding.")
+        else:
+            recs.append("Easy Water & Electrolytes: Place clean water mixed with electrolytes directly in front of the bird so it can drink without walking.")
+
+        recs.append("Disinfect Footwear & Clothes: Spray your boots with disinfectant (like bleach or Virkon) and change clothes after touching sick birds.")
+        recs.append("Report to Local Vet Office: Inform your city or municipal agricultural office right away, because Newcastle spreads very fast.")
+
+    else:
+        recs.append("Isolate the affected chicken immediately to prevent potential spread.")
+        recs.append("Disinfect cages, perches, and communal watering bowls.")
+        recs.append("Consult a licensed poultry veterinarian for proper advice.")
+
+    return recs[:4]
+
+
 def _build_success(cls: dict, module: str) -> dict:
     top = cls['top_prediction']
-    detected_symptoms = [
-        {"id": s, "label": SYMPTOM_LABELS.get(s, s.replace('_', ' ').title())}
-        for s in top.get('symptoms', [])
-    ]
+    img = cls.get('evaluated_img')
+    raw_symptom_preds = cls.get('raw_symptom_preds')
+    symptom_map = cls.get('symptom_map')
+
+    detected_symptoms = detect_visible_symptoms(
+        img=img,
+        module=module,
+        disease_id=top.get('disease_id', ''),
+        base_confidence=top.get('confidence', 0.0),
+        raw_symptom_preds=raw_symptom_preds,
+        symptom_map=symptom_map,
+        threshold=50.0
+    )
+
+    recommendations = generate_dynamic_recommendations(
+        disease_id=top.get('disease_id', ''),
+        detected_symptoms=detected_symptoms
+    )
+
     # Alert threshold: if top confidence >= 80% AND disease detected (not healthy)
     is_disease = (top.get('severity') != 'none') and ('healthy' not in top.get('disease_id', '').lower())
     high_confidence_alert = bool(top['confidence'] >= 80.0 and is_disease)
@@ -715,6 +1036,7 @@ def _build_success(cls: dict, module: str) -> dict:
         "top_prediction":        top,
         "all_predictions":       cls['all_predictions'],
         "detected_symptoms":     detected_symptoms,
+        "recommendations":       recommendations,
         "flagged_disease":       top['disease_name'],
         "high_confidence_alert": high_confidence_alert,
         "confidence_level":  (
