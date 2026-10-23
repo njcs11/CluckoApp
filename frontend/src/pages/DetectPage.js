@@ -2,8 +2,8 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X } from 'lucide-react';
-import { DynamicModuleIcon } from '../components/icons';
+import { Camera, RefreshCw, AlertTriangle, CheckCircle, Loader, Upload, Eye, Sparkles, X, ShieldAlert } from 'lucide-react';
+import { DynamicModuleIcon, CluckoBrandBadge, EyeModuleIcon, WingModuleIcon } from '../components/icons';
 import { useDetect } from '../context/DetectContext';
 import './DetectPage.css';
 
@@ -200,7 +200,7 @@ export default function DetectPage() {
                     <WingModuleIcon size={16} color="#22c55e" />
                     <span className="feature-card-title">Wing & Posture Head</span>
                   </div>
-                  <p className="feature-card-desc">Detects Newcastle disease, Marek's disease, wing droop, and posture anomalies</p>
+                  <p className="feature-card-desc">Detects Newcastle disease, wing droop, and posture anomalies</p>
                 </div>
 
                 <div className="detect-feature-card">
@@ -321,17 +321,31 @@ export default function DetectPage() {
               )}
 
               {/* Detected Symptoms */}
-              {!result.rejected && <div className="card symptoms-card">
-                <div className="card-title">Detected Symptoms</div>
-                <div className="symptoms-grid">
-                  {result.detected_symptoms.map(s => (
-                    <div key={s.id} className="symptom-chip">
-                      <span className="symptom-dot" />
-                      {s.label}
-                    </div>
-                  ))}
+              {!result.rejected && (
+                <div className="card symptoms-card">
+                  <div className="card-title">Detected Symptoms</div>
+                  <div className="symptoms-grid">
+                    {result.detected_symptoms.map(s => (
+                      <div key={s.id} className="symptom-chip">
+                        <span className="symptom-dot" />
+                        {s.label} {s.confidence ? `(${Math.round(s.confidence)}%)` : ''}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>}
+              )}
+
+              {/* Dynamic Care Recommendations */}
+              {!result.rejected && result.recommendations && result.recommendations.length > 0 && (
+                <div className="card recommendations-card" style={{ marginTop: '1rem' }}>
+                  <div className="card-title">Recommended Actions</div>
+                  <ul className="recommendations-list" style={{ paddingLeft: '1.25rem', margin: '0.5rem 0 0', color: 'var(--text-secondary, #cbd5e1)' }}>
+                    {result.recommendations.map((rec, i) => (
+                      <li key={i} style={{ marginBottom: '0.5rem', lineHeight: '1.4' }}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* All Predictions */}
               {!result.rejected && <div className="card predictions-card">
