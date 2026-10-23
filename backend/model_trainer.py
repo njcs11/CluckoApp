@@ -1097,6 +1097,35 @@ def predict(img: Image.Image, models_dir: str, diseases_config: dict, module: st
     module_mismatch = False
     module_notice = None
 
+    if module == 'wing' and comb_ratio >= 0.012:
+        try:
+            alt_candidates = [
+                _classify(rois['head'], models_dir, diseases_config, 'eye'),
+                _classify(rois['full'], models_dir, diseases_config, 'eye')
+            ]
+            alt_cls = max(alt_candidates, key=lambda c: c['top_prediction']['confidence'])
+            if alt_cls['top_prediction']['confidence'] >= 55.0 and alt_cls['uncertainty_ratio'] <= 0.88:
+                cls = alt_cls
+                detected_module = 'eye'
+                module_mismatch = True
+                module_notice = "Head/Eye detected: Clucko automatically adapted detection to the Eye module for higher diagnostic accuracy."
+        except Exception:
+            pass
+    elif module == 'eye' and comb_ratio < 0.004:
+        try:
+            alt_candidates = [
+                _classify(rois['wing'], models_dir, diseases_config, 'wing'),
+                _classify(rois['full'], models_dir, diseases_config, 'wing')
+            ]
+            alt_cls = max(alt_candidates, key=lambda c: c['top_prediction']['confidence'])
+            if alt_cls['top_prediction']['confidence'] >= 55.0 and alt_cls['uncertainty_ratio'] <= 0.88:
+                cls = alt_cls
+                detected_module = 'wing'
+                module_mismatch = True
+                module_notice = "Wing/Body detected: Clucko automatically adapted detection to the Wing module for higher diagnostic accuracy."
+        except Exception:
+            pass
+
 
     if cls['uncertainty_ratio'] > 0.88:
         return _rejection(
