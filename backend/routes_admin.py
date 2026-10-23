@@ -968,11 +968,11 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
             print(f"[ADMIN] SMTP setup error: {smtp_err}")
 
     # ─── Priority 2: Resend HTTP REST API (Port 443 - Never Blocked on Cloud) ──
-    resend_key = os.environ.get('RESEND_API_KEY')
+    resend_key = (os.environ.get('RESEND_API_KEY') or '').strip()
     if resend_key:
         try:
             import requests
-            resend_from = os.environ.get('RESEND_FROM') or f"{smtp_from_name} <onboarding@resend.dev>"
+            resend_from = (os.environ.get('RESEND_FROM') or f"Clucko <onboarding@resend.dev>").strip()
             r = requests.post(
                 'https://api.resend.com/emails',
                 headers={
@@ -997,7 +997,7 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
             print(f"[ADMIN] Resend API dispatch error: {resend_err}")
 
     # ─── Priority 3: Brevo (Sendinblue) HTTP REST API (Port 443) ──────────────
-    brevo_key = os.environ.get('BREVO_API_KEY')
+    brevo_key = (os.environ.get('BREVO_API_KEY') or '').strip()
     if brevo_key:
         try:
             import requests
@@ -1027,12 +1027,12 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
     # ─── Priority 4: EmailJS REST API (Port 443) ──────────────────────────────
     try:
         import requests
-        emailjs_service = os.environ.get('EMAILJS_SERVICE_ID', 'service_lzrjxzb')
-        emailjs_invite_template = os.environ.get('EMAILJS_INVITE_TEMPLATE_ID') or os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID')
-        emailjs_user = os.environ.get('EMAILJS_USER_ID', 'lJJPMqktLrmyBcQBJ')
+        emailjs_service = (os.environ.get('EMAILJS_SERVICE_ID') or 'service_lzrjxzb').strip()
+        emailjs_invite_template = (os.environ.get('EMAILJS_INVITE_TEMPLATE_ID') or os.environ.get('EMAILJS_WELCOME_TEMPLATE_ID') or '').strip()
+        emailjs_user = (os.environ.get('EMAILJS_USER_ID') or 'lJJPMqktLrmyBcQBJ').strip()
 
-        # If a dedicated invite template is set in env, use it
-        if emailjs_invite_template and emailjs_invite_template not in ('template_welcome',):
+        # If a dedicated invite template is set in env, dispatch with role credentials
+        if emailjs_invite_template:
             resp = requests.post(
                 'https://api.emailjs.com/api/v1.0/email/send',
                 headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
@@ -1047,32 +1047,10 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
                         'name': admin_full_name,
                         'temp_password': temp_password,
                         'password': temp_password,
+                        'code': temp_password,
                         'role': role_display,
                         'login_url': login_url,
                         'subject': subject,
-                        'message': text_content,
-                    }
-                },
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                print(f"[ADMIN] Dedicated welcome email dispatched via EmailJS ({emailjs_invite_template}) to {to_email}")
-                return True
-        else:
-            # Fallback to verified active template (template_u0b0yl9) so recipient receives credentials!
-            resp = requests.post(
-                'https://api.emailjs.com/api/v1.0/email/send',
-                headers={'Content-Type': 'application/json', 'Origin': 'http://localhost'},
-                json={
-                    'service_id': emailjs_service,
-                    'template_id': 'template_u0b0yl9',
-                    'user_id': emailjs_user,
-                    'template_params': {
-                        'to_email': to_email,
-                        'email': to_email,
-                        'code': temp_password,
-                        'user_name': admin_full_name,
-                        'name': admin_full_name,
                         'message': (
                             f"Welcome to Clucko, {admin_full_name}!\n\n"
                             f"Your {role_display} account has been provisioned.\n\n"
@@ -1083,13 +1061,13 @@ def send_admin_welcome_email(to_email: str, first_name: str, last_name: str, tem
                         )
                     }
                 },
-                timeout=10
+                timeout=10,
             )
             if resp.status_code == 200:
-                print(f"[ADMIN] Welcome credentials dispatched via verified EmailJS relay to {to_email}")
+                print(f"[ADMIN] Dedicated welcome email dispatched via EmailJS ({emailjs_invite_template}) to {to_email}")
                 return True
             else:
-                print(f"[ADMIN] EmailJS returned status: {resp.status_code}, detail: {resp.text}")
+                print(f"[ADMIN] EmailJS returned status {resp.status_code}: {resp.text}")
     except Exception as ejs_err:
         print(f"[ADMIN] Dedicated EmailJS invite dispatch failed: {ejs_err}")
 
