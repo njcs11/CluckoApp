@@ -189,7 +189,7 @@ export default function FarmListScreen() {
     if (!formData.farm_name.trim() || !formData.farm_location.trim()) {
       await notify({
         title: 'Missing Info',
-        message: 'Please enter at least a farm name and location.',
+        message: 'Please enter a farm name and pin the farm location on the map.',
         type: 'warning',
       });
       return;
@@ -479,26 +479,17 @@ export default function FarmListScreen() {
 
               <View style={styles.formField}>
                 <Text style={[styles.formLabel, { color: colors.text }]}>
-                  Location <Text style={{ color: colors.error }}>*</Text>
+                  Farm Location on Map <Text style={{ color: colors.error }}>*</Text>
                 </Text>
-                <TextInput
-                  style={[styles.formInput, { borderColor: colors.border, color: colors.text }]}
-                  placeholder="e.g., San Jose, Davao City"
-                  placeholderTextColor={colors.textLight}
-                  value={formData.farm_location}
-                  onChangeText={(text) => setFormData({ ...formData, farm_location: text })}
-                />
-              </View>
-
-              <View style={styles.formField}>
-                <Text style={[styles.formLabel, { color: colors.text }]}>Farm Location on Map</Text>
                 <TouchableOpacity
                   style={[styles.mapPickButton, { borderColor: colors.border }]}
                   onPress={() => setShowLocationPicker(true)}
                 >
                   <Ionicons name="map-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.mapPickButtonText, { color: colors.text }]}>
-                    {formData.latitude ? 'Location pinned ✓ (tap to change)' : 'Tap to pin on Davao City map'}
+                  <Text style={[styles.mapPickButtonText, { color: colors.text, flex: 1 }]} numberOfLines={2}>
+                    {formData.farm_location
+                      ? `${formData.farm_location} ✓ (tap to change)`
+                      : 'Tap to pin farm location on Davao City map'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -540,8 +531,19 @@ export default function FarmListScreen() {
       <LocationPickerModal
         visible={showLocationPicker}
         onClose={() => setShowLocationPicker(false)}
-        initialCoords={formData.latitude != null ? { latitude: formData.latitude, longitude: formData.longitude! } : undefined}
-        onConfirm={(coords) => setFormData({ ...formData, latitude: coords.latitude, longitude: coords.longitude })}
+        initialCoords={
+          formData.latitude != null
+            ? { latitude: formData.latitude, longitude: formData.longitude!, address: formData.farm_location }
+            : undefined
+        }
+        onConfirm={(coords) =>
+          setFormData({
+            ...formData,
+            farm_location: coords.address || formData.farm_location,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          })
+        }
       />
 
       <GuestBlockModal
@@ -756,4 +758,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-});
+});

@@ -125,11 +125,20 @@ def save_scan():
             ''', (owner_id,))
             all_preds_data = d.get('all_predictions') or []
             gradcam_img = d.get('gradcam_image')
-            if gradcam_img:
+            breed_check_data = d.get('breed_check')
+            if gradcam_img or breed_check_data:
                 if isinstance(all_preds_data, dict):
-                    all_preds_data['gradcam_image'] = gradcam_img
+                    if gradcam_img:
+                        all_preds_data['gradcam_image'] = gradcam_img
+                    if breed_check_data:
+                        all_preds_data['breed_check'] = breed_check_data
                 else:
-                    all_preds_data = {'predictions': all_preds_data, 'gradcam_image': gradcam_img}
+                    wrapped = {'predictions': all_preds_data}
+                    if gradcam_img:
+                        wrapped['gradcam_image'] = gradcam_img
+                    if breed_check_data:
+                        wrapped['breed_check'] = breed_check_data
+                    all_preds_data = wrapped
 
             cur.execute('''
                 INSERT INTO detection_results

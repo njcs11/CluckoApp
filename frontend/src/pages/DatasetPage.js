@@ -20,7 +20,8 @@ import {
   Search,
   Sliders,
   Info,
-  Film
+  Film,
+  GripVertical
 } from 'lucide-react';
 import { DynamicModuleIcon, EyeModuleIcon, WingModuleIcon, FeetModuleIcon, CombModuleIcon } from '../components/icons';
 import ConfirmModal from '../components/ConfirmModal';
@@ -58,13 +59,64 @@ export default function DatasetPage() {
   const [frameInterval, setFrameInterval] = useState(0.5); // seconds per frame
   const [maxVideoFrames, setMaxVideoFrames] = useState(40);
 
-  // Dataset Explorer Gallery State
+  // Dataset Explorer Gallery State (Movable & Arrangeable)
   const [galleryImages, setGalleryImages] = useState([]);
   const [loadingGallery, setLoadingGallery] = useState(false);
   const [selectedImageKeys, setSelectedImageKeys] = useState(new Set());
   const [gallerySearch, setGallerySearch] = useState('');
   const [failedImages, setFailedImages] = useState(new Set());
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+
+  const handleDragStart = (e, idx) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+    setDraggedIndex(idx);
+  };
+
+  const handleDragOver = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== idx) {
+      setDragOverIndex(idx);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e, dropIdx) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === dropIdx) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const updated = [...galleryImages];
+    const [moved] = updated.splice(draggedIndex, 1);
+    updated.splice(dropIdx, 0, moved);
+
+    setGalleryImages(updated);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+
+    const orderKey = `dataset_order_${selectedModule}_${selectedDisease}`;
+    const orderedFilenames = updated.map(img => img.filename);
+    try {
+      localStorage.setItem(orderKey, JSON.stringify(orderedFilenames));
+    } catch (_) {}
+
+    axios.post('/api/dataset/reorder', {
+      module: selectedModule,
+      disease_id: selectedDisease,
+      filenames: orderedFilenames
+    }).catch(() => {});
+
+    toast.success('Gallery order updated', { duration: 1400, icon: '↕️' });
+  };
 
 
 
@@ -134,7 +186,25 @@ export default function DatasetPage() {
       const { data } = await axios.get('/api/dataset/images', {
         params: { module, disease_id: diseaseId }
       });
-      setGalleryImages(data.images || []);
+      const rawImages = data.images || [];
+      const orderKey = `dataset_order_${module}_${diseaseId}`;
+      let customOrder = [];
+      try {
+        const stored = localStorage.getItem(orderKey);
+        if (stored) customOrder = JSON.parse(stored);
+      } catch (_) {}
+
+      if (customOrder.length > 0) {
+        const orderMap = new Map();
+        customOrder.forEach((fn, i) => orderMap.set(fn, i));
+        rawImages.sort((a, b) => {
+          const posA = orderMap.has(a.filename) ? orderMap.get(a.filename) : 999999;
+          const posB = orderMap.has(b.filename) ? orderMap.get(b.filename) : 999999;
+          return posA - posB;
+        });
+      }
+
+      setGalleryImages(rawImages);
       setSelectedImageKeys(new Set());
     } catch (err) {
       console.error('Error loading gallery images:', err);
@@ -689,9 +759,18 @@ export default function DatasetPage() {
               return (
                 <div
                   key={img.filename}
-                  className={`gallery-item ${isSelected ? 'gallery-item-selected' : ''}`}
+                  draggable={!loadingGallery}
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={() => { setDraggedIndex(null); setDragOverIndex(null); }}
+                  className={`gallery-item ${isSelected ? 'gallery-item-selected' : ''} ${draggedIndex === idx ? 'gallery-item-dragging' : ''} ${dragOverIndex === idx ? 'gallery-item-drag-over' : ''}`}
                   onClick={() => setLightboxIndex(idx)}
                 >
+                  <div className="drag-handle-badge" title="Drag to rearrange order">
+                    <GripVertical size={14} color="#f4f4f5" />
+                  </div>
                   <div className="img-wrap">
                     <img
                       src={resolveImageUrl(img.url)}

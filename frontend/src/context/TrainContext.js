@@ -56,9 +56,9 @@ export function TrainProvider({ children }) {
   // User controls activeModule freely; startTraining automatically sets activeModule when started
 
 
-  // Robust Polling: 1000ms when actively training, 3000ms background heartbeat
+  // Robust Polling: 1000ms when actively training, 8000ms background heartbeat
   useEffect(() => {
-    const intervalTime = isAnyTrainingRunning ? 1000 : 3000;
+    const intervalTime = isAnyTrainingRunning ? 1000 : 8000;
     
     if (pollingRef.current) {
       clearInterval(pollingRef.current);

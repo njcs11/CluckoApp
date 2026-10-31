@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { DAVAO_BOUNDS, DAVAO_CITY_CENTER, useLeafletCss } from './FarmMap.web';
+import { fallbackDavaoAddress, PinnedLocation, reverseGeocodeDavao } from './LocationPickerModal.native';
 
 interface Coords {
   latitude: number;
   longitude: number;
+  address?: string;
 }
 
 interface LocationPickerModalProps {
   visible: boolean;
   onClose: () => void;
   initialCoords?: Coords;
-  onConfirm: (coords: Coords) => void;
+  onConfirm: (coords: PinnedLocation) => void;
 }
 
 export default function LocationPickerModal({
@@ -23,10 +25,18 @@ export default function LocationPickerModal({
   useLeafletCss();
   const [mods, setMods] = useState<any>(null);
   const [picked, setPicked] = useState<Coords | undefined>(initialCoords);
+  const [resolvedAddress, setResolvedAddress] = useState<string>(
+    initialCoords?.address ||
+      (initialCoords ? fallbackDavaoAddress(initialCoords.latitude, initialCoords.longitude) : '')
+  );
 
   useEffect(() => {
     if (!visible) return;
     setPicked(initialCoords);
+    setResolvedAddress(
+      initialCoords?.address ||
+        (initialCoords ? fallbackDavaoAddress(initialCoords.latitude, initialCoords.longitude) : '')
+    );
   }, [visible, initialCoords]);
 
   useEffect(() => {
@@ -46,8 +56,13 @@ export default function LocationPickerModal({
 
   function ClickHandler() {
     useMapEvents({
-      click(e: any) {
-        setPicked({ latitude: e.latlng.lat, longitude: e.latlng.lng });
+      async click(e: any) {
+        const lat = Number(e.latlng.lat);
+        const lng = Number(e.latlng.lng);
+        setPicked({ latitude: lat, longitude: lng });
+        setResolvedAddress(fallbackDavaoAddress(lat, lng));
+        const addr = await reverseGeocodeDavao(lat, lng);
+        setResolvedAddress(addr);
       },
     });
     return null;
@@ -55,7 +70,13 @@ export default function LocationPickerModal({
 
   const handleConfirm = () => {
     if (picked) {
-      onConfirm(picked);
+      const finalAddress =
+        resolvedAddress.trim() || fallbackDavaoAddress(picked.latitude, picked.longitude);
+      onConfirm({
+        latitude: picked.latitude,
+        longitude: picked.longitude,
+        address: finalAddress,
+      });
       onClose();
     }
   };
@@ -97,7 +118,9 @@ export default function LocationPickerModal({
           </View>
 
           <Text style={styles.hint}>
-            {picked ? 'Tap the map to move the pin.' : 'Tap the map to drop a pin.'}
+            {picked
+              ? `Pinned: ${resolvedAddress || fallbackDavaoAddress(picked.latitude, picked.longitude)}`
+              : 'Tap the map to drop a pin.'}
           </Text>
 
           <TouchableOpacity
@@ -145,7 +168,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { fontSize: 12, color: '#777' },
-  hint: { fontSize: 12, color: '#777', marginTop: 10, marginBottom: 14, textAlign: 'center' },
+  hint: { fontSize: 12, color: '#2D5541', fontWeight: '600', marginTop: 10, marginBottom: 14, textAlign: 'center' },
   confirmButton: {
     backgroundColor: '#2D5541',
     borderRadius: 30,

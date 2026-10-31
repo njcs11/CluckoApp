@@ -47,7 +47,7 @@ function WheelColumn<T extends string | number>({
   itemWidth = 76,
   isDarkMode,
 }: WheelColumnProps<T>) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
   const isUserScrolling = useRef(false);
 
   const selectedIndex = Math.max(0, items.indexOf(selectedValue));

@@ -1598,7 +1598,7 @@ export default function SubscriptionScreen() {
         visible={showRefundModal}
         transparent
         animationType="fade"
-        onRequestClose={() => !submittingRefund && setShowRefundModal(false)}
+        onRequestClose={() => { if (!submittingRefund) setShowRefundModal(false); }}
       >
         <View style={styles.modalBackdrop}>
           <View style={[styles.refundModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>

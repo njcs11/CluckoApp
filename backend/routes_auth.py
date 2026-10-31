@@ -1339,15 +1339,17 @@ def submit_account_appeal():
 
 @app.route('/api/auth/check-status', methods=['GET'])
 @token_required
-def check_user_status(current_user):
+def check_user_status():
     """
     Lightweight heartbeat endpoint called by client every few seconds.
     token_required decorator verifies check_user_suspension() and automatically returns
     403 with {suspended: True, reason: ...} if moderator suspended the account.
     """
+    user_id = getattr(request, 'user_id', None)
+    user_role = getattr(request, 'user_role', 'owner')
     return jsonify({
         'success': True,
-        'user_id': current_user['id'],
-        'is_active': current_user.get('is_active', True),
-        'role': current_user.get('role', 'owner')
+        'user_id': user_id,
+        'is_active': True,
+        'role': user_role
     })

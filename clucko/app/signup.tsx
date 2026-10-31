@@ -142,11 +142,11 @@ export default function SignupScreen() {
     }, 4000);
   };
 
-  const firstNameRef = useRef<TextInput>(null);
-  const lastNameRef = useRef<TextInput>(null);
-  const emailRef = useRef<TextInput>(null);
-  const passwordRef = useRef<TextInput>(null);
-  const confirmRef = useRef<TextInput>(null);
+  const firstNameRef = useRef<any>(null);
+  const lastNameRef = useRef<any>(null);
+  const emailRef = useRef<any>(null);
+  const passwordRef = useRef<any>(null);
+  const confirmRef = useRef<any>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
   const triggerShake = () => {

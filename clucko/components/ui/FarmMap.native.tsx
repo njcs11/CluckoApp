@@ -128,7 +128,8 @@ export default function FarmMap({
     () => buildHtml(farms, primaryColor, initialCenter, initialZoom),
     [farms, primaryColor, initialCenter, initialZoom]
   );
-  const webviewRef = useRef<WebView>(null);
+  const webviewRef = useRef<any>(null);
+  const WebViewComponent = WebView as any;
 
   const handleMessage = (event: any) => {
     try {
@@ -147,7 +148,7 @@ export default function FarmMap({
 
   return (
     <View style={[styles.container, { height }]}>
-      <WebView
+      <WebViewComponent
         ref={webviewRef}
         originWhitelist={['*']}
         source={{ html }}

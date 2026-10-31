@@ -14,8 +14,8 @@ export const DETECTABLE_DISEASES: Record<string, DiseaseInfo> = {
     affectedRegion: 'Eye & Peri-Orbital Face',
     symptoms: [
       'Facial swelling around the eyes',
-      'Closed or swollen eyes preventing bird from seeing feed and water',
-      'Watery and inflamed ocular discharge'
+      'Swollen eyes',
+      'Watery / teary ocular discharge'
     ],
     severity: 'moderate',
     icon: 'alert-circle',
@@ -35,9 +35,8 @@ export const DETECTABLE_DISEASES: Record<string, DiseaseInfo> = {
     name: 'Fowl Pox',
     affectedRegion: 'Eye & Peri-Orbital Facial Skin',
     symptoms: [
-      'Wart-like nodules and yellow bumps on eyelids',
-      'Dark brown scabs on peri-orbital facial skin',
-      'Ocular irritation and vision impairment'
+      'Wart-like nodules on eyelids / face',
+      'Dark brown scabs on peri-orbital facial skin'
     ],
     severity: 'high',
     icon: 'alert-triangle',
@@ -61,9 +60,8 @@ export const DETECTABLE_DISEASES: Record<string, DiseaseInfo> = {
     name: 'Newcastle Disease',
     affectedRegion: 'Wing Region & Neurological Posture',
     symptoms: [
-      'Wing Drooping or Sagging (One or both wings hang loosely away from body)',
-      'Severe muscular weakness & loss of muscle tone',
-      'Inability to tuck wings against the flank'
+      'Drooping wings (one or both wings hang loosely away from body)',
+      'Body / stance imbalance'
     ],
     severity: 'critical',
     icon: 'warning',

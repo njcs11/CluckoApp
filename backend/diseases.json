@@ -7,8 +7,7 @@
       "symptoms": [
         "facial_swelling",
         "swollen_eyes",
-        "watery_eyes",
-        "closed_swollen_eyes"
+        "watery_eyes"
       ],
       "affected_parts": [
         "eye",
@@ -33,10 +32,8 @@
       "name": "Fowl Pox",
       "description": "Viral disease caused by Avipoxvirus causing dry cutaneous lesions on unfeathered facial skin and eyelids",
       "symptoms": [
-        "eye_lesions",
         "wart_like_nodules",
-        "scabs",
-        "yellow_bumps"
+        "scabs"
       ],
       "affected_parts": [
         "eye",
@@ -108,8 +105,7 @@
       "description": "Highly contagious viral disease caused by Avian Paramyxovirus Serotype 1 attacking the nervous system and causing wing drooping",
       "symptoms": [
         "drooping_wings",
-        "severe_droop",
-        "wing_weakness"
+        "imbalance"
       ],
       "affected_parts": [
         "wing"

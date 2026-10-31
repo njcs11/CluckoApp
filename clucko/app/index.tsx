@@ -33,7 +33,7 @@ export default function OnboardingScreen() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
 
   // ===================== CHICKEN ANIMATIONS (Screen 1) =====================
   const roosterBobY = useRef(new Animated.Value(0)).current;

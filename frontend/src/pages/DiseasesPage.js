@@ -12,9 +12,9 @@ const PARTS_OPTIONS = ['eye', 'wing', 'posture', 'skin', 'comb', 'feet', 'all'];
 const COLORS = ['#4ade80', '#fbbf24', '#fb923c', '#f87171', '#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#8b5cf6'];
 
 const DEFAULT_SYMPTOMS = {
-  eye: ['watery_eyes', 'swollen_eyes', 'nasal_discharge', 'facial_swelling', 'eye_lesions', 'cloudy_eye', 'gray_iris', 'irregular_pupil'],
-  wing: ['drooping_wings', 'severe_droop', 'wing_weakness'],
-  skin: ['skin_lesions', 'scabs'],
+  eye: ['facial_swelling', 'swollen_eyes', 'watery_eyes', 'wart_like_nodules', 'scabs'],
+  wing: ['drooping_wings', 'imbalance'],
+  skin: ['wart_like_nodules', 'scabs'],
   comb: ['comb_discoloration', 'pale_comb', 'black_scabs', 'cyanosis'],
   posture: ['twisted_neck', 'lethargic_stance', 'imbalance'],
   feet: ['bumblefoot', 'swollen_footpad', 'scaly_leg_mites', 'raised_scales', 'spur_lesions', 'leg_paralysis'],

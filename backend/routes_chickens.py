@@ -390,8 +390,10 @@ def get_chicken_history(cid):
                         ap = {}
                 if isinstance(ap, dict):
                     r['gradcam_image'] = ap.get('gradcam_image')
+                    r['breed_check'] = ap.get('breed_check')
                 else:
                     r['gradcam_image'] = None
+                    r['breed_check'] = None
             return jsonify(rows)
     finally:
         db.close()

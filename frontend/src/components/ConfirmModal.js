@@ -56,9 +56,14 @@ export default function ConfirmModal({
               {message}
               {itemName && <span className="confirm-item-highlight"> “{itemName}”</span>}
             </p>
-            {detail && <p className="confirm-modal-detail">{detail}</p>}
           </div>
         </div>
+
+        {detail && (
+          <div className={`confirm-modal-detail ${confirmVariant}`}>
+            {detail}
+          </div>
+        )}
 
         <div className="confirm-modal-actions">
           <button

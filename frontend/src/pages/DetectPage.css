@@ -1,575 +1,1019 @@
-.detect-page { 
-  max-width: 1200px; 
-  width: 100%;
+/* ─── Clucko Vision Suite: Davao City Farm Map & Landing Page ────────────── */
+/* Strictly aligned to the Admin AI Workspace Palette (frontend/src/index.css) */
+.vs-landing {
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  --ease-smooth-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
+  min-height: 100vh;
+  background: var(--bg-deep, #121417);
+  color: var(--text-primary, #f3f4f6);
+  font-family: var(--font-body, 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  padding: 28px 32px 64px;
+  max-width: 1480px;
   margin: 0 auto;
-  box-sizing: border-box;
-}
-
-.detect-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 24px;
-  align-items: start;
-  width: 100%;
-  min-width: 0;
-}
-
-@media (max-width: 960px) {
-  .detect-grid {
-    grid-template-columns: 1fr !important;
-    gap: 20px;
-  }
-}
-
-
-.camera-view {
-  position: relative;
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-  aspect-ratio: 4/3;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.webcam-feed, .captured-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cam-error {
   display: flex;
   flex-direction: column;
+  gap: 44px;
+  overflow-x: hidden;
+}
+
+/* ─── Top Navigation / Context Bar ────────────────────────────────────────── */
+.vs-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 14px 20px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-sidebar, #17191e);
+  border: 1px solid var(--border, #2d313a);
+  box-shadow: var(--shadow, 0 4px 20px rgba(0, 0, 0, 0.45));
+}
+
+.vs-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vs-topbar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-green, #22c55e);
+  box-shadow: 0 0 0 4px var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  flex-shrink: 0;
+}
+
+.vs-topbar-title {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 0.96rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-white, #ffffff);
+}
+
+.vs-topbar-divider {
+  color: var(--border-light, #3a3f4b);
+}
+
+.vs-topbar-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-body, #c0c5ce);
+}
+
+.vs-topbar-links {
+  display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-secondary);
-  font-size: 14px;
+  flex-wrap: wrap;
 }
-.cam-error-sub { font-size: 12px; color: var(--text-muted); }
 
-/* Scan corners overlay */
-.camera-overlay {
-  position: absolute;
-  inset: 0;
+.vs-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-body, #c0c5ce);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-nav-pill:hover {
+  background: var(--bg-elevated, #262a32);
+  color: var(--text-white, #ffffff);
+  border-color: var(--accent-green-border, rgba(34, 197, 94, 0.35));
+}
+
+.vs-nav-pill:active {
+  transform: scale(0.98);
+}
+
+.vs-nav-pill-primary {
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  color: var(--accent-green-bright, #4ade80);
+  border-color: var(--accent-green-border, rgba(34, 197, 94, 0.35));
+}
+
+.vs-nav-pill-primary:hover {
+  background: rgba(34, 197, 94, 0.22);
+  color: var(--text-white, #ffffff);
+}
+
+/* ─── Hero + Interactive Davao City Map Showcase ─────────────────────────── */
+.vs-hero-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.vs-hero-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: 28px;
+  align-items: stretch;
+}
+
+.vs-hero-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 32px 34px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel, #1a1d23);
+  border: 1px solid var(--border, #2d313a);
+  box-shadow: var(--shadow, 0 4px 20px rgba(0, 0, 0, 0.45));
+}
+
+.vs-hero-heading {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: clamp(1.9rem, 2.75vw, 2.65rem);
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.03em;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+  text-wrap: balance;
+}
+
+.vs-hero-heading-accent {
+  color: var(--accent-green-bright, #4ade80);
+}
+
+.vs-hero-lead {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--text-body, #c0c5ce);
+  margin: 0;
+  max-width: 66ch;
+}
+
+.vs-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.vs-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 20px;
+  border-radius: var(--radius, 12px);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #07120b;
+  background: var(--accent-green, #22c55e);
+  border: 1px solid var(--accent-green-bright, #4ade80);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-smooth-out),
+    background-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.vs-btn-primary:hover {
+  background: var(--accent-green-bright, #4ade80);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow, 0 0 25px rgba(34, 197, 94, 0.25));
+}
+
+.vs-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.vs-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-radius: var(--radius, 12px);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #f3f4f6);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border-light, #3a3f4b);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-btn-secondary:hover {
+  background: var(--bg-elevated, #262a32);
+  border-color: var(--accent-green-border, rgba(34, 197, 94, 0.35));
+}
+
+.vs-btn-secondary:active {
+  transform: scale(0.98);
+}
+
+.t-learn-icon {
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-btn-primary:hover .t-learn-icon,
+.vs-btn-secondary:hover .t-learn-icon {
+  transform: translateX(4px);
+}
+
+/* Right Hero Digest Card */
+.vs-hero-digest {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel, #1a1d23);
+  border: 1px solid var(--border, #2d313a);
+  box-shadow: var(--shadow, 0 4px 20px rgba(0, 0, 0, 0.45));
+}
+
+.vs-digest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vs-digest-title {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+}
+
+.vs-digest-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-green-bright, #4ade80);
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  border: 1px solid var(--accent-green-border, rgba(34, 197, 94, 0.35));
+}
+
+.vs-digest-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vs-digest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius, 12px);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
+}
+
+.vs-digest-label {
+  font-size: 0.84rem;
+  color: var(--text-secondary, #8f949a);
+  font-weight: 500;
+}
+
+.vs-digest-val {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-white, #ffffff);
+  font-variant-numeric: tabular-nums;
+}
+
+.vs-digest-note {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #8f949a);
+  margin: 0;
+}
+
+/* ─── Interactive Davao City Cartographic Map Section ────────────────────── */
+.vs-map-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel, #1a1d23);
+  border: 1px solid var(--border, #2d313a);
+  box-shadow: var(--shadow, 0 4px 20px rgba(0, 0, 0, 0.45));
+}
+
+.vs-map-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.vs-map-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 680px;
+}
+
+.vs-section-heading {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.vs-section-sub {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-secondary, #8f949a);
+  margin: 0;
+}
+
+/* District Filter Pills */
+.vs-district-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vs-district-btn {
+  padding: 8px 13px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-body, #c0c5ce);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-district-btn:hover {
+  background: var(--bg-elevated, #262a32);
+  color: var(--text-white, #ffffff);
+}
+
+.vs-district-btn.is-active {
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  color: var(--accent-green-bright, #4ade80);
+  border-color: var(--accent-green-border, rgba(34, 197, 94, 0.35));
+}
+
+/* Map Stage + Farm Directory Split */
+.vs-map-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
+  gap: 22px;
+  align-items: stretch;
+}
+
+.vs-map-stage {
+  position: relative;
+  min-height: 510px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-deep, #121417);
+  border: 1px solid var(--border, #2d313a);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.vs-map-HUD-top {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0;
   pointer-events: none;
 }
 
-.scan-corners {
-  position: absolute;
-  inset: 12px;
-}
-
-.corner {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  border-color: var(--accent-green);
-  border-style: solid;
-  opacity: 0.7;
-}
-
-.corner.tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
-.corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
-.corner.bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
-.corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
-
-.camera-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* Results */
-.results-panel { display: flex; flex-direction: column; gap: 16px; }
-
-.result-placeholder {
-  display: flex;
-  flex-direction: column;
+.vs-map-compass-badge {
+  pointer-events: auto;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-height: 220px;
-  gap: 14px;
-  text-align: center;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 30px;
-}
-
-.placeholder-icon { font-size: 44px; opacity: 0.5; }
-.placeholder-text { font-size: 13.5px; color: var(--text-secondary); max-width: 260px; line-height: 1.5; }
-
-/* ── Reference Photo Inspired Hero Stage ── */
-.detect-hero-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 32px 22px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.detect-hero-badge-wrap {
-  margin-bottom: 16px;
-}
-
-.detect-hero-title {
-  font-family: var(--font-display);
-  font-size: 21px;
-  font-weight: 700;
-  color: var(--text-white);
-  letter-spacing: -0.02em;
-  margin-bottom: 8px;
-}
-
-.detect-hero-sub {
-  font-size: 13px;
-  color: var(--text-secondary);
-  max-width: 420px;
-  line-height: 1.5;
-  margin-bottom: 24px;
-}
-
-.detect-feature-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-}
-
-.detect-feature-card {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  gap: 8px;
+  padding: 7px 12px;
   border-radius: 10px;
-  padding: 12px 14px;
-  transition: all 0.18s ease;
-}
-
-.detect-feature-card:hover {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: var(--bg-elevated-hover);
-}
-
-.feature-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.feature-card-title {
-  font-family: var(--font-display);
-  font-size: 13px;
+  background: rgba(23, 25, 30, 0.92);
+  border: 1px solid var(--border, #2d313a);
+  font-size: 0.78rem;
   font-weight: 600;
-  color: var(--text-white);
+  color: var(--text-primary, #f3f4f6);
+  font-variant-numeric: tabular-nums;
 }
 
-.feature-card-desc {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  line-height: 1.45;
-  margin-left: 24px;
-}
-
-/* Disease flag card */
-.disease-flag {
-  border-width: 1px;
-  border-left-width: 4px;
-}
-
-.flag-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.flag-label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.1em;
-}
-
-.flag-disease-name {
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 800;
-  line-height: 1.2;
-  margin-bottom: 12px;
-}
-
-.flag-confidence {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.conf-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.conf-bar-wrap {
-  flex: 1;
-  height: 6px;
-  background: var(--bg-elevated);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.conf-bar {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-
-.conf-value {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.flag-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-/* Symptoms */
-.symptoms-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.symptom-chip {
-  display: flex;
+.vs-map-zoom-controls {
+  pointer-events: auto;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-bright);
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  color: var(--text-primary);
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(23, 25, 30, 0.92);
+  border: 1px solid var(--border, #2d313a);
 }
 
-.symptom-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-green);
-  flex-shrink: 0;
+.vs-zoom-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-body, #c0c5ce);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
-/* Predictions */
-.pred-row {
+.vs-zoom-btn:hover {
+  background: var(--bg-elevated, #262a32);
+  color: var(--text-white, #ffffff);
+}
+
+.vs-map-svg-wrap {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 440px;
   display: flex;
   align-items: center;
+  justify-content: center;
+}
+
+.vs-davao-svg {
+  width: 100%;
+  height: 100%;
+  max-height: 500px;
+  display: block;
+  transition: transform var(--duration-slow) var(--ease-smooth-out);
+}
+
+/* SVG Farm Pin Markers (Green Only) */
+.vs-farm-pin-group {
+  cursor: pointer;
+  outline: none;
+}
+
+.vs-pin-pulse {
+  transform-origin: center;
+  transform-box: fill-box;
+  opacity: 0.24;
+  transition:
+    transform var(--duration-normal) var(--ease-smooth-out),
+    opacity var(--duration-normal) ease;
+}
+
+.vs-farm-pin-group:hover .vs-pin-pulse,
+.vs-farm-pin-group:focus-visible .vs-pin-pulse,
+.vs-farm-pin-group.is-selected .vs-pin-pulse {
+  transform: scale(1.65);
+  opacity: 0.38;
+}
+
+.vs-pin-core {
+  transform-origin: center;
+  transform-box: fill-box;
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-farm-pin-group:hover .vs-pin-core,
+.vs-farm-pin-group:focus-visible .vs-pin-core,
+.vs-farm-pin-group.is-selected .vs-pin-core {
+  transform: scale(1.22);
+}
+
+/* Floating Farm Telemetry Hover Card (Shown ONLY on Hover) */
+.vs-map-hover-card {
+  position: absolute;
+  z-index: 6;
+  width: clamp(255px, 31vw, 315px);
+  padding: 16px 18px;
+  border-radius: var(--radius, 12px);
+  background: rgba(23, 25, 30, 0.97);
+  border: 1px solid var(--accent-green-border, rgba(34, 197, 94, 0.45));
+  box-shadow: var(--shadow-lg, 0 10px 36px rgba(0, 0, 0, 0.6));
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+  transition:
+    opacity var(--duration-fast) var(--ease-out-quart),
+    transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.vs-map-hover-card.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity var(--duration-normal) var(--ease-smooth-out),
+    transform var(--duration-normal) var(--ease-smooth-out);
+}
+
+.vs-hover-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
+  margin-bottom: 12px;
+}
+
+.vs-hover-farm-name {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+  line-height: 1.28;
+  overflow-wrap: break-word;
+}
+
+.vs-hover-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
   margin-bottom: 10px;
 }
 
-.pred-name {
-  width: 160px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.pred-bar-wrap {
-  flex: 1;
-  height: 8px;
-  background: var(--bg-elevated);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.pred-bar {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.6s ease;
-  opacity: 0.8;
-}
-
-.pred-pct {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-  width: 44px;
-  text-align: right;
-}
-
-/* Spin animation */
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* Rejection card */
-.rejection-card {
+.vs-hover-meta-item {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 32px 24px;
-  border-color: rgba(248, 113, 113, 0.3);
-  border-left: 4px solid #f87171;
+  gap: 2px;
+  min-width: 0;
 }
 
-.rejection-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+.vs-hover-meta-label {
+  font-size: 0.71rem;
+  font-weight: 600;
+  color: var(--text-secondary, #8f949a);
 }
 
-.rejection-title {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 800;
-  color: #f87171;
-  margin-bottom: 10px;
+.vs-hover-meta-value {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-white, #ffffff);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
 }
 
-.rejection-message {
-  font-size: 14px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  max-width: 320px;
-  margin-bottom: 10px;
+.vs-hover-meta-value.is-emerald {
+  color: var(--accent-green-bright, #4ade80);
 }
 
-.rejection-reason {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  padding: 6px 12px;
-  border-radius: 6px;
-}
-
-/* ── Module Pill Group in Camera Header ── */
-.camera-title-row {
+.vs-hover-location-row {
   display: flex;
-  justify-content: space-between;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 0.78rem;
+  color: var(--text-body, #c0c5ce);
+  line-height: 1.4;
+}
+
+.vs-hover-coords {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  color: var(--text-secondary, #8f949a);
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-top: 2px;
+}
+
+/* ─── Right Directory Rail: Registered Davao Farms ───────────────────────── */
+.vs-farm-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-sidebar, #17191e);
+  border: 1px solid var(--border, #2d313a);
+  max-height: 540px;
+}
+
+.vs-rail-header {
+  display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vs-rail-title {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+}
+
+.vs-rail-count {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent-green-bright, #4ade80);
+  font-variant-numeric: tabular-nums;
+}
+
+.vs-rail-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.vs-rail-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-secondary, #8f949a);
+  pointer-events: none;
+}
+
+.vs-rail-search-input {
+  width: 100%;
+  padding: 10px 34px 10px 36px;
+  border-radius: 10px;
+  background: var(--bg-input, #1a1d24);
+  border: 1px solid var(--border, #2d313a);
+  color: var(--text-white, #ffffff);
+  font-size: 0.83rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--duration-fast) ease;
+}
+
+.vs-rail-search-input::placeholder {
+  color: var(--text-muted, #646872);
+}
+
+.vs-rail-search-input:focus {
+  border-color: var(--accent-green, #22c55e);
+}
+
+.vs-rail-clear-btn {
+  position: absolute;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: var(--bg-elevated, #262a32);
+  color: var(--text-body, #c0c5ce);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.vs-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.vs-farm-item {
+  text-align: left;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: var(--radius, 12px);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
+  color: var(--text-primary, #f3f4f6);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.vs-farm-item:hover {
+  background: var(--bg-elevated, #262a32);
+  border-color: var(--border-light, #3a3f4b);
+}
+
+.vs-farm-item.is-active {
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  border-color: var(--accent-green-border, rgba(34, 197, 94, 0.42));
+}
+
+.vs-farm-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.module-pill-group {
-  display: flex;
-  gap: 4px;
-  background: var(--bg-elevated);
-  padding: 3px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
+.vs-farm-item-name {
+  font-size: 0.89rem;
+  font-weight: 700;
+  color: var(--text-white, #ffffff);
+  line-height: 1.3;
+  overflow-wrap: break-word;
 }
 
-.mod-pill {
+.vs-farm-item-flock {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--accent-green-bright, #4ade80);
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  font-variant-numeric: tabular-nums;
+}
+
+.vs-farm-item-owner {
+  font-size: 0.8rem;
+  color: var(--text-body, #c0c5ce);
+  font-weight: 500;
+}
+
+.vs-farm-item-loc {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #8f949a);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ─── Section 2: Clucko Dual-Module Neural Architecture ───────────────────── */
+.vs-architecture-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel, #1a1d23);
+  border: 1px solid var(--border, #2d313a);
+  box-shadow: var(--shadow, 0 4px 20px rgba(0, 0, 0, 0.45));
+}
+
+.vs-arch-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.vs-arch-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--radius, 12px);
+  background: var(--bg-sidebar, #17191e);
+  border: 1px solid var(--border, #2d313a);
+  flex-wrap: wrap;
+}
+
+.vs-arch-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: 9px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-secondary, #8f949a);
   background: transparent;
   border: none;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  padding: 4px 10px;
-  border-radius: 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background-color var(--duration-normal) var(--ease-smooth-out),
+    color var(--duration-fast) ease;
 }
 
-.mod-pill:hover {
-  color: var(--text-primary);
+.vs-arch-tab:hover {
+  color: var(--text-white, #ffffff);
 }
 
-.mod-pill.active {
-  background: var(--accent-green);
-  color: #ffffff;
-  font-weight: 700;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+.vs-arch-tab.is-active {
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.14));
+  color: var(--accent-green-bright, #4ade80);
+  box-shadow: inset 0 0 0 1px var(--accent-green-border, rgba(34, 197, 94, 0.35));
 }
 
-/* ── Grad-CAM Action Box & Button (Task 6) ── */
-.gradcam-action-box {
-  margin-top: 4px;
-  margin-bottom: 4px;
+.vs-arch-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 24px;
+  align-items: stretch;
 }
 
-.btn-gradcam {
-  width: 100%;
+.vs-arch-copy {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.15), rgba(96, 165, 250, 0.15));
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: var(--accent-green);
-  font-weight: 600;
-  font-size: 14px;
-  padding: 12px 18px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-}
-
-.btn-gradcam:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.25), rgba(96, 165, 250, 0.25));
-  border-color: var(--accent-green);
-  box-shadow: 0 0 16px rgba(74, 222, 128, 0.3);
-  transform: translateY(-1px);
-}
-
-.btn-gradcam:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* ── Grad-CAM Heatmap Display Card ── */
-.gradcam-card {
-  border: 1px solid rgba(74, 222, 128, 0.3);
-  background: var(--bg-card);
-  overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-}
-
-.gradcam-header {
-  display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+  gap: 18px;
+  padding: 26px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
 }
 
-.gradcam-title-wrap {
+.vs-arch-title {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-white, #ffffff);
+  margin: 0;
+}
+
+.vs-arch-desc {
+  font-size: 0.94rem;
+  line-height: 1.65;
+  color: var(--text-body, #c0c5ce);
+  margin: 8px 0 0;
+}
+
+.vs-arch-points {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 11px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vs-arch-point {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-primary, #f3f4f6);
+}
+
+.vs-arch-point-icon {
+  color: var(--accent-green, #22c55e);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.vs-arch-spec-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-sidebar, #17191e);
+  border: 1px solid var(--border, #2d313a);
+}
+
+.vs-spec-panel-head {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-green-bright, #4ade80);
+  letter-spacing: 0.02em;
+}
+
+.vs-symptom-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vs-symptom-group {
+  padding: 13px 15px;
+  border-radius: var(--radius, 12px);
+  background: var(--bg-card, #1f2229);
+  border: 1px solid var(--border, #2d313a);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.gradcam-title {
-  font-family: var(--font-display);
-  font-size: 14px;
+.vs-symptom-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vs-symptom-disease {
+  font-size: 0.86rem;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text-white, #ffffff);
 }
 
-.btn-icon {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 6px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-icon:hover {
-  color: var(--accent-red);
-  border-color: var(--accent-red);
-}
-
-.gradcam-image-container {
-  position: relative;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border: 1px solid var(--border);
-}
-
-.gradcam-overlay-img {
-  width: 100%;
-  max-height: 380px;
-  object-fit: contain;
-  display: block;
-}
-
-.gradcam-badge {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  background: rgba(8, 15, 8, 0.85);
-  border: 1px solid var(--accent-green);
-  color: var(--accent-green);
-  font-family: var(--font-mono);
-  font-size: 11px;
+.vs-symptom-region {
+  font-size: 0.74rem;
   font-weight: 600;
+  color: var(--text-secondary, #8f949a);
+}
+
+.vs-symptom-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vs-symptom-tag {
   padding: 4px 10px;
-  border-radius: 20px;
-  backdrop-filter: blur(4px);
+  border-radius: 7px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-primary, #f3f4f6);
+  background: var(--accent-green-subtle, rgba(34, 197, 94, 0.12));
+  border: 1px solid var(--accent-green-border, rgba(34, 197, 94, 0.30));
 }
 
-.gradcam-caption {
-  font-size: 13px;
-  color: var(--text-primary);
-  margin-top: 12px;
-  line-height: 1.5;
-  text-align: center;
-  background: rgba(74, 222, 128, 0.06);
-  border: 1px solid rgba(74, 222, 128, 0.15);
-  padding: 10px 14px;
-  border-radius: 6px;
+/* ─── Responsive Breakpoints ─────────────────────────────────────────────── */
+@media (max-width: 1120px) {
+  .vs-hero-intro,
+  .vs-map-workspace,
+  .vs-arch-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .vs-farm-rail {
+    max-height: 380px;
+  }
 }
 
-/* ── Mobile Polish & Touch Ergonomics (Impeccable & Tactile UI) ── */
-@media (max-width: 640px) {
-  .detect-page {
-    padding: 0 2px;
-  }
-  
-  .detect-hero-stage {
-    padding: 20px 14px;
-  }
-  
-  .detect-hero-title {
-    font-size: 19px;
-  }
-  
-  .detect-hero-sub {
-    font-size: 12.5px;
-    margin-bottom: 16px;
+@media (max-width: 720px) {
+  .vs-landing {
+    padding: 16px 14px 48px;
+    gap: 28px;
   }
 
-  .detect-feature-card {
-    padding: 10px 12px;
+  .vs-hero-copy,
+  .vs-hero-digest,
+  .vs-map-section,
+  .vs-architecture-section {
+    padding: 20px 18px;
   }
 
-  .camera-view {
-    margin-bottom: 12px;
-  }
-
-  .camera-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+  .vs-map-hover-card {
+    position: static;
     width: 100%;
+    margin-top: 12px;
+    pointer-events: auto;
   }
 
-  .camera-actions .btn {
-    min-height: 44px;
-    padding: 10px 12px;
-    font-size: 13px;
-    justify-content: center;
-    border-radius: 8px;
+  .vs-map-svg-wrap {
+    flex-direction: column;
+    padding: 8px 12px 14px;
   }
+}
 
-  .gradcam-overlay-img {
-    max-height: 260px;
+/* ─── Reduced Motion Guard ───────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .vs-landing *,
+  .vs-landing *::before,
+  .vs-landing *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

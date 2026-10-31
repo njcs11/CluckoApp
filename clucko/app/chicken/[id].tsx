@@ -1326,14 +1326,17 @@ export default function ChickenDetailScreen() {
             {chicken && (
               <ScrollView showsVerticalScrollIndicator={false} style={styles.qrModalBody} contentContainerStyle={{ paddingBottom: 16 }}>
                 <View style={[styles.qrCardContainer, { borderColor: colors.divider, backgroundColor: colors.background }]}>
-                  <View style={[styles.qrCodeWrapper, { borderColor: colors.border, backgroundColor: '#fff' }]}>
+                  <View style={[styles.qrCodeWrapper, { borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }]}>
                     <QRCode
                       value={JSON.stringify({
                         chickenId: chicken.chickenId || `CK-00${chicken.id}`,
                         name: chicken.name,
                         farmId: chicken.farmId,
                       })}
-                      size={140}
+                      size={160}
+                      color="#000000"
+                      backgroundColor="#FFFFFF"
+                      quietZone={14}
                       getRef={(c: any) => (qrRef.current = c)}
                     />
                   </View>

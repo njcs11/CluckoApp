@@ -47,3 +47,6 @@ Thumbs.db
 # Scratch files
 scratch/
 .agents/
+backend/.cache/
+backend/server.log
+backend/server_err.log

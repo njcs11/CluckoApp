@@ -6,11 +6,13 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { pickOrCaptureChickenPhoto, photoUriToBase64, resizeAndCompress, captureFromCamera, pickFromLibrary } from '@/utils/photoStorage';
 import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
 import { File as ExpoFile, Paths } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library/legacy';
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import Constants from 'expo-constants';
 import * as Sharing from 'expo-sharing';
@@ -35,6 +37,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
+import Svg, { Defs, Mask, Rect } from 'react-native-svg';
 import AddChickenModal, { ChickenFormData } from '../../components/ui/AddChickenModal';
 import ChickenIcon from '../../components/ui/ChickenIcon';
 import ImageQualityGuide from '../../components/ui/ImageQualityGuide';
@@ -122,12 +125,20 @@ const MAX_PHONE_WIDTH = 460;
 // lines while the (simulated) health check runs, alternating blue/yellow
 // so it visibly reads as active work rather than an instant fake result.
 // ---------------------------------------------------------------------------
-const ANALYZING_MESSAGES = [
-  'Pre-processing photo & normalizing resolution…',
-  'Scanning eye & head regions for Coryza / Fowl Pox…',
-  'Analyzing wing & plumage for Newcastle Disease…',
-  'Evaluating symptom patterns & cross-referencing health markers…',
-  'Finalizing diagnostic report & confidence metrics…',
+const ANALYZING_MESSAGES_EYE = [
+  'Isolating ocular orbit & cornea…',
+  'Evaluating pupil roundness & aperture…',
+  'Scanning for swelling vs warty lesions…',
+  'Verifying gamefowl phenotypic traits…',
+  'Finalizing eye health assessment…',
+];
+
+const ANALYZING_MESSAGES_WING = [
+  'Segmenting chicken posture & silhouette…',
+  'Evaluating wing carriage & symmetry…',
+  'Scanning for neuromuscular droop signs…',
+  'Verifying gamefowl phenotypic traits…',
+  'Finalizing posture health assessment…',
 ];
 const ANALYZING_COLORS = ['#4DA3FF', '#FFD54F', '#8FE0B0'];
 
@@ -145,19 +156,75 @@ const mapSeverity = (
   return 'critical';
 };
 
+/**
+ * Automatically crops an image to the exact active viewfinder reticle region.
+ * For 'eye': crops upper-centered square focused on head and eye (72% square).
+ * For 'wing': crops whole chicken body and posture carriage (90% width x 0.82 posture ratio).
+ */
+const cropToReticleRegion = async (
+  uri: string,
+  photoWidth: number,
+  photoHeight: number,
+  reticleX: number,
+  reticleY: number,
+  reticleWidth: number,
+  reticleHeight: number,
+  viewWidth: number,
+  viewHeight: number
+): Promise<{ uri: string; base64?: string }> => {
+  // CameraView displays with resizeMode="cover"
+  // Compute how the camera sensor coordinates map to the viewfinder view
+  const scale = Math.max(viewWidth / photoWidth, viewHeight / photoHeight);
+  const scaledWidth = viewWidth / scale;
+  const scaledHeight = viewHeight / scale;
+  const offsetX = (photoWidth - scaledWidth) / 2;
+  const offsetY = (photoHeight - scaledHeight) / 2;
+
+  // Map reticle frame on screen to the exact pixel boundaries in the captured photo
+  const rawOriginX = Math.round(offsetX + (reticleX / viewWidth) * scaledWidth);
+  const rawOriginY = Math.round(offsetY + (reticleY / viewHeight) * scaledHeight);
+  const rawCropWidth = Math.round((reticleWidth / viewWidth) * scaledWidth);
+  const rawCropHeight = Math.round((reticleHeight / viewHeight) * scaledHeight);
+
+  // Clamp safely within photo dimensions
+  const originX = Math.max(0, Math.min(photoWidth - 10, rawOriginX));
+  const originY = Math.max(0, Math.min(photoHeight - 10, rawOriginY));
+  const cropW = Math.max(10, Math.min(photoWidth - originX, rawCropWidth));
+  const cropH = Math.max(10, Math.min(photoHeight - originY, rawCropHeight));
+
+  const targetWidth = Math.min(cropW, 800);
+
+  const croppedResult = await ImageManipulator.manipulateAsync(
+    uri,
+    [
+      { crop: { originX, originY, width: cropW, height: cropH } },
+      { resize: { width: targetWidth } }
+    ],
+    { compress: 0.86, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+  );
+
+  return {
+    uri: croppedResult.uri,
+    base64: croppedResult.base64,
+  };
+};
+
 export default function CaptureScreen() {
   const insets = useSafeAreaInsets();
   const { isDarkMode, colors } = useDarkMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const frameWidth = Math.min(screenWidth, MAX_PHONE_WIDTH);
   const isWideScreen = screenWidth > MAX_PHONE_WIDTH;
+  const reticleSquareSize = Math.min(280, Math.round(frameWidth * 0.72));
+  const reticleWingHeight = Math.min(360, Math.round(frameWidth * 0.86));
+  const reticleWingWidth = Math.min(310, Math.round(frameWidth * 0.76));
 
   // Global notification popup — notify() persists the notification AND
   // pops the banner immediately, no matter which tab is currently open.
   const { notify } = useNotifications();
 
   const [isGuestMode, setIsGuestMode] = useState(false);
-  const [checkingGuest, setCheckingGuest] = useState(true);
+  const [checkingGuest, setCheckingGuest] = useState(false);
   const { chickenId: chickenIdParam, mode: modeParam } = useLocalSearchParams<{ chickenId?: string; mode?: string }>();
 
   // --- Real device camera state -------------------------------------------------
@@ -221,15 +288,34 @@ export default function CaptureScreen() {
     highConfidenceAlert?: boolean;
     base64Image?: string | null;
     gradcamImage?: string | null;
+    moduleMismatch?: boolean;
+    moduleNotice?: string | null;
+    moduleAdapted?: boolean;
+    adaptationMessage?: string | null;
+    suggestedModule?: string | null;
+    breedCheck?: {
+      is_gamefowl: boolean | null;
+      confidence: number;
+      breed_name: string;
+      breed_code: string;
+      phenotype: string;
+      is_warning: boolean;
+      warning_message: string | null;
+    } | null;
   } | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
   const [lastPhotoUri, setLastPhotoUri] = useState<string | null>(null);
   const [lastPhotoBase64, setLastPhotoBase64] = useState<string | null>(null);
 
-  // Red "wrong subject" error modal — used for an invalid QR code.
+  // Red "wrong subject" error modal — used for an invalid QR code or non-chicken capture.
   const [showDetectionAlert, setShowDetectionAlert] = useState(false);
+  const [detectionAlertTitle, setDetectionAlertTitle] = useState('Chicken Not Detected');
   const [detectionAlertMessage, setDetectionAlertMessage] = useState('');
   const barcodeLockRef = useRef(false);
+
+  // Non-gamefowl advisory modal
+  const [showBreedAdvisoryModal, setShowBreedAdvisoryModal] = useState(false);
+  const [pendingAdvisoryData, setPendingAdvisoryData] = useState<{ result: any; base64Image?: string } | null>(null);
 
   // Scanned QR chicken tag modal state
   const [scannedTagInfo, setScannedTagInfo] = useState<{
@@ -271,6 +357,173 @@ export default function CaptureScreen() {
   ];
   const [partModules, setPartModules] = useState<Array<{ id: string; label: string; iconFamily: 'Ionicons' | 'MaterialCommunityIcons'; iconName: string }>>(DEFAULT_PART_MODULES);
   const [selectedPart, setSelectedPart] = useState<string>('eye');
+  const [cameraZoom, setCameraZoom] = useState<number>(0);
+  const isMacro = cameraZoom > 0.05;
+
+  const cutoutWidth = selectedPart === 'eye' ? reticleSquareSize : reticleWingWidth;
+  const cutoutHeight = selectedPart === 'eye' ? reticleSquareSize : reticleWingHeight;
+  const cutoutX = Math.round((frameWidth - cutoutWidth) / 2);
+  const cutoutY = Math.round(screenHeight * 0.38 - cutoutHeight / 2);
+
+  const [frameAlignment, setFrameAlignment] = useState<'aligning' | 'aligned'>('aligning');
+  const [autoFocusMode, setAutoFocusMode] = useState<'on' | 'off'>('on');
+  const guidanceFadeAnim = useRef(new Animated.Value(1)).current;
+  const probeRunningRef = useRef(false);
+  const lastProbeTimeRef = useRef(0);
+  const lastAlignedTimeRef = useRef(0);
+  const probeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const focusPulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerSuperAutoFocus = useCallback(() => {
+    if (focusPulseTimeoutRef.current) {
+      clearTimeout(focusPulseTimeoutRef.current);
+      focusPulseTimeoutRef.current = null;
+    }
+    setAutoFocusMode('off');
+    focusPulseTimeoutRef.current = setTimeout(() => {
+      setAutoFocusMode('on');
+      focusPulseTimeoutRef.current = null;
+    }, 45);
+  }, []);
+
+  const triggerGuidanceCrossfade = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(guidanceFadeAnim, { toValue: 0.25, duration: 90, useNativeDriver: true }),
+      Animated.timing(guidanceFadeAnim, { toValue: 1.0, duration: 160, useNativeDriver: true }),
+    ]).start();
+  }, [guidanceFadeAnim]);
+
+  const checkLiveFrameProbe = useCallback(async () => {
+    if (probeRunningRef.current || !cameraRef.current || !cameraReady || checkingCapture || scanning || isCapturing || !!lastPhotoUri) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastProbeTimeRef.current < 1100) return;
+    lastProbeTimeRef.current = now;
+    probeRunningRef.current = true;
+
+    try {
+      const probeSnap = await cameraRef.current.takePictureAsync({
+        quality: 0.05,
+        skipProcessing: true,
+        shutterSound: false,
+        base64: true,
+      });
+
+      if (!probeSnap || !probeSnap.base64) return;
+
+      const API_URL = await getApiUrl();
+      const resp = await fetch(`${API_URL}/api/probe_frame`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: probeSnap.base64,
+          module: selectedPart,
+          zoom: cameraZoom,
+          is_macro: isMacro,
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        const nextState = data.in_frame ? 'aligned' : 'aligning';
+        setFrameAlignment((prev) => {
+          if (prev !== nextState) {
+            triggerGuidanceCrossfade();
+            if (nextState === 'aligned') {
+              try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
+            }
+          }
+          return nextState;
+        });
+      }
+    } catch (_) {
+      // Best effort, ignore errors
+    } finally {
+      probeRunningRef.current = false;
+    }
+  }, [cameraReady, checkingCapture, scanning, isCapturing, lastPhotoUri, selectedPart, cameraZoom, isMacro, triggerGuidanceCrossfade]);
+
+  const checkLiveFrameProbeRef = useRef(checkLiveFrameProbe);
+  checkLiveFrameProbeRef.current = checkLiveFrameProbe;
+
+  // Zero-flicker automatic framing alignment (steady hold activates ready state without taking background snapshots)
+  useEffect(() => {
+    if (selectedMode !== 'photo' || !cameraReady || checkingCapture || scanning || isCapturing || !!lastPhotoUri) {
+      if (probeIntervalRef.current) {
+        clearTimeout(probeIntervalRef.current);
+        probeIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Trigger immediate hardware Super Auto-Focus lock when facing subject
+    triggerSuperAutoFocus();
+
+    // After 0.8s of steady framing, lock focus again and align the reticle
+    probeIntervalRef.current = setTimeout(() => {
+      triggerSuperAutoFocus();
+      setFrameAlignment('aligned');
+      triggerGuidanceCrossfade();
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
+    }, 800);
+
+    // Continuous Super Auto-Focus refresh while aiming at chicken
+    const focusRefreshInterval = setInterval(() => {
+      triggerSuperAutoFocus();
+    }, 2600);
+
+    return () => {
+      if (probeIntervalRef.current) {
+        clearTimeout(probeIntervalRef.current);
+        probeIntervalRef.current = null;
+      }
+      clearInterval(focusRefreshInterval);
+    };
+  }, [selectedMode, cameraReady, checkingCapture, scanning, isCapturing, !!lastPhotoUri, selectedPart, cameraZoom, triggerSuperAutoFocus]);
+
+  // Reset frame alignment and trigger immediate Super Auto-Focus when changing module or zoom
+  useEffect(() => {
+    setFrameAlignment('aligning');
+    lastProbeTimeRef.current = 0;
+    if (cameraReady) {
+      triggerSuperAutoFocus();
+    }
+  }, [selectedPart, cameraZoom, cameraReady, triggerSuperAutoFocus]);
+
+  const handleViewfinderTap = () => {
+    if (selectedMode !== 'photo' || checkingCapture || scanning || isCapturing || lastPhotoUri) return;
+
+    triggerSuperAutoFocus();
+
+    Animated.sequence([
+      Animated.timing(qrFocusAnim, { toValue: 0.95, duration: 90, useNativeDriver: true }),
+      Animated.spring(qrFocusAnim, { toValue: 1.0, friction: 5, tension: 100, useNativeDriver: true }),
+    ]).start();
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (_) {}
+
+    setFrameAlignment('aligned');
+    triggerGuidanceCrossfade();
+  };
+
+  const getDynamicGuidanceText = () => {
+    if (selectedMode === 'scan') {
+      return 'Align chicken QR code in frame';
+    }
+    if (frameAlignment === 'aligned') {
+      if (isMacro) {
+        return selectedPart === 'wing' ? 'Macro plumage framed • Ready to capture' : 'Macro eye framed • Ready to capture';
+      }
+      return selectedPart === 'wing' ? 'Posture framed • Ready to capture' : 'Eye framed • Ready to capture';
+    }
+    if (isMacro) {
+      return selectedPart === 'wing' ? 'Center wing / plumage inside macro frame' : 'Center eye inside macro frame';
+    }
+    return selectedPart === 'wing' ? 'Center chicken body in frame' : 'Center eye in frame';
+  };
 
   const handleTopBack = async () => {
     setTorchOn(false);
@@ -405,6 +658,7 @@ export default function CaptureScreen() {
           all_predictions: {
             symptoms: pending.scanResult.symptoms,
             gradcam_image: pending.scanResult.gradcamImage,
+            breed_check: pending.scanResult.breedCheck || null,
           },
         });
       }
@@ -522,8 +776,8 @@ export default function CaptureScreen() {
       setAnalyzingStep(0);
       progressAnim.setValue(0);
       Animated.timing(progressAnim, {
-        toValue: 0.88,
-        duration: 4200,
+        toValue: 0.95,
+        duration: 850,
         useNativeDriver: false,
       }).start();
 
@@ -531,7 +785,7 @@ export default function CaptureScreen() {
       analyzingIntervalRef.current = setInterval(() => {
         step = Math.min(step + 1, 3);
         setAnalyzingStep(step);
-      }, 950);
+      }, 200);
     } else {
       if (analyzingIntervalRef.current) {
         clearInterval(analyzingIntervalRef.current);
@@ -572,19 +826,27 @@ export default function CaptureScreen() {
     }).start();
   };
 
-  const showWrongSubjectAlert = (message: string) => {
+  const showWrongSubjectAlert = (message: string, title: string = 'Chicken Not Detected') => {
+    setDetectionAlertTitle(title);
     setDetectionAlertMessage(message);
     setShowDetectionAlert(true);
   };
 
   // Sends the captured photo's base64 data to the real backend for disease
   // detection using the selected anatomical module ('auto', 'eye', or 'wing').
-  const analyzeWithBackend = async (base64Image: string) => {
+  // Transmits both the frame-aligned crop (image) and broad bird context (full_image).
+  const analyzeWithBackend = async (base64Image: string, fullImageBase64?: string) => {
     const API_URL = await getApiUrl();
     const response = await fetch(`${API_URL}/api/detect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64Image, module: selectedPart }),
+      body: JSON.stringify({
+        image: base64Image,
+        full_image: fullImageBase64 || base64Image,
+        module: selectedPart,
+        is_macro: isMacro,
+        zoom: cameraZoom,
+      }),
     });
     if (!response.ok) {
       throw new Error(`Server responded with ${response.status}`);
@@ -616,9 +878,12 @@ export default function CaptureScreen() {
       highConfidenceAlert: Boolean(result.high_confidence_alert),
       base64Image: base64Image || lastPhotoBase64,
       gradcamImage: result.gradcam_image || null,
-      moduleMismatch: Boolean(result.module_mismatch),
-      moduleNotice: result.module_notice || null,
+      moduleMismatch: Boolean(result.module_mismatch || result.module_adapted),
+      moduleNotice: result.module_notice || result.adaptation_message || null,
+      moduleAdapted: Boolean(result.module_adapted),
+      adaptationMessage: result.adaptation_message || null,
       suggestedModule: result.suggested_module || null,
+      breedCheck: result.breed_check || null,
     };
 
     setTorchOn(false);
@@ -628,16 +893,19 @@ export default function CaptureScreen() {
     if (lastPhotoUri) {
       AsyncStorage.setItem('pending_capture_uri', lastPhotoUri).catch(() => {});
     }
-    if (base64Image || lastPhotoBase64) {
-      AsyncStorage.setItem('pending_capture_b64', base64Image || lastPhotoBase64 || '').catch(() => {});
-    }
-    AsyncStorage.setItem('pending_scan_result', JSON.stringify(scan)).catch(() => {});
+    // Omit heavy raw base64 data from SQLite to prevent Android 2MB CursorWindow limit crashes
+    const safeScanResult = {
+      ...scan,
+      base64Image: null,
+      gradcamImage: null,
+    };
+    AsyncStorage.setItem('pending_scan_result', JSON.stringify(safeScanResult)).catch(() => {});
   };
 
   // Runs a captured photo through the real backend model and routes the
   // response to either the "wrong subject / unclear" alert or the result
   // modal. Shared by both Scan mode and Photo-mode capture.
-  const runScanResult = async (base64Image: string | undefined) => {
+  const runScanResult = async (base64Image: string | undefined, fullImageBase64?: string) => {
     if (!base64Image) {
       await notify({
         title: 'Image Error',
@@ -647,7 +915,7 @@ export default function CaptureScreen() {
       return;
     }
     try {
-      const result = await analyzeWithBackend(base64Image);
+      const result = await analyzeWithBackend(base64Image, fullImageBase64);
 
       if (analyzingIntervalRef.current) {
         clearInterval(analyzingIntervalRef.current);
@@ -656,15 +924,26 @@ export default function CaptureScreen() {
       setAnalyzingStep(4);
       Animated.timing(progressAnim, {
         toValue: 1,
-        duration: 380,
+        duration: 240,
         useNativeDriver: false,
       }).start();
 
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await new Promise((resolve) => setTimeout(resolve, 250));
 
       if (result.rejected) {
-        showWrongSubjectAlert(result.message || "Couldn't analyze that photo. Please try again.");
+        if (result.rejection_reason === 'Not a Gamefowl Detected' || (result.breed_check && result.breed_check.is_gamefowl === false)) {
+          setPendingAdvisoryData({ result, base64Image });
+          setShowBreedAdvisoryModal(true);
+        } else {
+          showWrongSubjectAlert(
+            result.message || "No chicken detected. Please capture a clear photo of a live chicken or gamefowl.",
+            result.rejection_reason === 'No Chicken Detected' ? 'Chicken Not Detected' : (result.rejection_reason || 'Chicken Not Detected')
+          );
+        }
         await clearPendingCapture();
+      } else if (result.breed_check?.is_warning) {
+        setPendingAdvisoryData({ result, base64Image });
+        setShowBreedAdvisoryModal(true);
       } else {
         applyDetectionResult(result, base64Image);
       }
@@ -726,7 +1005,7 @@ export default function CaptureScreen() {
 
     if (!tagId) {
       if (selectedMode === 'scan') {
-        showWrongSubjectAlert("That QR code isn't a recognized chicken tag — please scan a valid chicken QR code.");
+        showWrongSubjectAlert("That QR code isn't a recognized chicken tag — please scan a valid chicken QR code.", "Invalid QR Tag");
       }
       setTimeout(() => {
         barcodeLockRef.current = false;
@@ -800,9 +1079,15 @@ export default function CaptureScreen() {
           return;
         }
 
+        setCheckingCapture(true);
         let photo;
         try {
-          photo = await cameraRef.current.takePictureAsync({ quality: 0.85, base64: true });
+          photo = await cameraRef.current.takePictureAsync({
+            quality: 0.85,
+            skipProcessing: true,
+            shutterSound: false,
+            base64: false,
+          });
         } catch (error) {
           console.error('Error capturing photo:', error);
           await notify({
@@ -811,30 +1096,43 @@ export default function CaptureScreen() {
             type: 'alert',
           });
           setIsCapturing(false);
+          setCheckingCapture(false);
           return;
         }
 
         triggerFlash();
-        setLastPhotoUri(photo.uri);
-        setLastPhotoBase64(photo.base64 || null);
 
-        // Save-to-gallery is best-effort and isolated from the analysis flow —
-        // Expo Go on Android rejects requestPermissionsAsync entirely (a known
-        // Expo Go limitation, not fixable via config), so this must never block
-        // or fail the actual capture/analysis pipeline.
-        try {
-          const { status } = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
-          if (status === 'granted') {
-            MediaLibrary.saveToLibraryAsync(photo.uri).catch((err) =>
-              console.error('Error saving captured photo:', err)
+        let targetCropUri = photo.uri;
+        let targetCropBase64 = null;
+
+        if (photo.width && photo.height) {
+          try {
+            const cropped = await cropToReticleRegion(
+              photo.uri,
+              photo.width,
+              photo.height,
+              cutoutX,
+              cutoutY,
+              cutoutWidth,
+              cutoutHeight,
+              frameWidth,
+              screenHeight
             );
+            if (cropped.uri) targetCropUri = cropped.uri;
+            if (cropped.base64) targetCropBase64 = cropped.base64 || null;
+          } catch (cropErr) {
+            console.warn('Framed reticle crop fallback to full photo:', cropErr);
           }
-        } catch (error) {
-          console.log('Media library permission unavailable (expected in Expo Go):', String(error));
         }
 
-        setCheckingCapture(true);
-        await runScanResult(photo.base64);
+        setLastPhotoUri(targetCropUri);
+        setLastPhotoBase64(targetCropBase64);
+
+        try {
+          MediaLibrary.saveToLibraryAsync(targetCropUri).catch(() => {});
+        } catch (_) {}
+
+        await runScanResult(targetCropBase64 || undefined, targetCropBase64 || undefined);
       } finally {
         setCheckingCapture(false);
         setIsCapturing(false);
@@ -851,8 +1149,17 @@ export default function CaptureScreen() {
   // Scan mode does nothing here — it's QR-only now, driven entirely by
   // the live onBarcodeScanned callback.
   const handleShutterPress = () => {
-    if (checkingCapture || scanning) return;
+    if (checkingCapture || scanning || isCapturing) return;
     if (selectedMode === 'scan') return;
+
+    Animated.sequence([
+      Animated.timing(shutterAnim, { toValue: 0.92, duration: 70, useNativeDriver: true }),
+      Animated.spring(shutterAnim, { toValue: 1.0, friction: 5, tension: 90, useNativeDriver: true }),
+    ]).start();
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (_) {}
 
     handleCapture();
   };
@@ -883,24 +1190,29 @@ export default function CaptureScreen() {
 
       const asset = result.assets[0];
       setSelectedMode('photo');
-      setLastPhotoUri(asset.uri);
 
-      let b64 = asset.base64;
-      if (!b64) {
+      let fullB64 = asset.base64;
+      if (!fullB64) {
         try {
           const compressed = await resizeAndCompress(asset.uri);
-          b64 = await photoUriToBase64(compressed);
-          if (b64.startsWith('data:')) {
-            b64 = b64.split(',')[1];
+          fullB64 = await photoUriToBase64(compressed);
+          if (fullB64.startsWith('data:')) {
+            fullB64 = fullB64.split(',')[1];
           }
         } catch (e) {
           console.warn('Could not compress uploaded photo:', e);
         }
       }
-      setLastPhotoBase64(b64 || null);
+
+      // Keep uploaded gallery photos full-frame (do NOT crop to reticle)
+      const targetCropUri = asset.uri;
+      const targetCropBase64 = fullB64;
+
+      setLastPhotoUri(targetCropUri);
+      setLastPhotoBase64(targetCropBase64 || null);
 
       setCheckingCapture(true);
-      await runScanResult(b64 || undefined);
+      await runScanResult(targetCropBase64 || undefined, fullB64 || undefined);
     } catch (error: any) {
       console.error('Error uploading photo:', error);
       await notify({
@@ -1050,6 +1362,7 @@ export default function CaptureScreen() {
         symptoms: scanResult.symptoms,
         image_url: imageUrl,
         gradcam_image: scanResult.gradcamImage || null,
+        breed_check: scanResult.breedCheck || null,
       });
 
       setShowResultModal(false);
@@ -1322,22 +1635,11 @@ export default function CaptureScreen() {
     }
   };
 
-  const startPulseAnimation = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(scaleAnim, { toValue: 1.06, duration: 1200, useNativeDriver: true }),
-        Animated.timing(scaleAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
-      ])
-    ).start();
-  };
-
-  React.useEffect(() => {
-    startPulseAnimation();
-  }, []);
+  // Removed continuous scale pulse animation for a stable, rock-solid native viewfinder reticle
 
   const isAnalyzing = scanning || checkingCapture;
   const isBusyCapturing = isCapturing || checkingCapture || scanning || isAnalyzing;
-  const analyzingColor = ANALYZING_COLORS[analyzingStep % ANALYZING_COLORS.length];
+  const analyzingColor = '#38BDF8';
 
   if (checkingGuest) {
     return <SafeAreaView style={styles.container} />;
@@ -1432,10 +1734,14 @@ export default function CaptureScreen() {
               style={StyleSheet.absoluteFill}
               facing={facing}
               enableTorch={torchOn}
-              autofocus="on"
-              onCameraReady={() => setCameraReady(true)}
-              barcodeScannerSettings={BARCODE_SCANNER_SETTINGS}
-              onBarcodeScanned={handleBarcodeScanned}
+              zoom={cameraZoom}
+              autofocus={autoFocusMode}
+              onCameraReady={() => {
+                setCameraReady(true);
+                triggerSuperAutoFocus();
+              }}
+              barcodeScannerSettings={selectedMode === 'scan' ? BARCODE_SCANNER_SETTINGS : undefined}
+              onBarcodeScanned={selectedMode === 'scan' ? handleBarcodeScanned : undefined}
             />
 
             {/* All overlay UI lives here, as a sibling of CameraView —
@@ -1443,21 +1749,7 @@ export default function CaptureScreen() {
                 touches pass through to CameraView except where a real
                 button/touchable underneath explicitly wants them. */}
             <View style={styles.cameraOverlay} pointerEvents="box-none">
-              {/* Captured photo preview — Photo mode only. Covers the live
-                  camera feed with the shot and stays visible after capture
-                  so the user can review their photo, view results, and save
-                  or retake without losing the shot. */}
-              {selectedMode === 'photo' && !!lastPhotoUri && (
-                <>
-                  <Image
-                    source={{ uri: lastPhotoUri }}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
-                  />
-                  {checkingCapture && <View style={styles.frozenPhotoScrim} pointerEvents="none" />}
-                </>
-              )}
-
+              {/* Captured photo is rendered strictly within the reticle window below to prevent zoom-in */}
               <LinearGradient
                 colors={['rgba(0,0,0,0.55)', 'transparent', 'transparent', 'rgba(0,0,0,0.6)']}
                 locations={[0, 0.22, 0.72, 1]}
@@ -1545,90 +1837,180 @@ export default function CaptureScreen() {
                 </View>
               )}
 
-              <View style={styles.focusArea} pointerEvents={lastPhotoUri && !isAnalyzing ? 'box-none' : 'none'}>
-                {lastPhotoUri && !isAnalyzing ? (
-                  <View style={styles.capturedPreviewNotice}>
-                    <TouchableOpacity
-                      style={styles.capturedBadgePill}
-                      onPress={() => setShowResultModal(true)}
-                      activeOpacity={0.85}
-                    >
-                      <View
-                        style={[
-                          styles.capturedStatusDot,
-                          {
-                            backgroundColor:
-                              scanResult?.severity === 'critical'
-                                ? '#f44336'
-                                : scanResult?.severity === 'moderate' || scanResult?.severity === 'high'
-                                ? '#FF9800'
-                                : '#8FE0B0',
-                          },
-                        ]}
+              {/* Viewfinder Cutout Window & Pixel-Perfect Anti-Aliased Rounded Mask */}
+              {(() => {
+                return (
+                  <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                    {/* SVG Mask: 100% covers outside with dimmed mask, punches out exact 24px rounded corners */}
+                    <Svg height="100%" width="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
+                      <Defs>
+                        <Mask id="viewfinderMask" x="0" y="0" width="100%" height="100%">
+                          <Rect x="0" y="0" width="100%" height="100%" fill="white" />
+                          <Rect
+                            x={cutoutX}
+                            y={cutoutY}
+                            width={cutoutWidth}
+                            height={cutoutHeight}
+                            rx="24"
+                            ry="24"
+                            fill="black"
+                          />
+                        </Mask>
+                      </Defs>
+                      <Rect
+                        x="0"
+                        y="0"
+                        width="100%"
+                        height="100%"
+                        fill="rgba(0, 0, 0, 0.50)"
+                        mask="url(#viewfinderMask)"
                       />
-                      <Text style={styles.capturedBadgeText} numberOfLines={1}>
-                        {scanResult
-                          ? `${scanResult.disease || 'Healthy'} (${scanResult.confidence}%)`
-                          : 'Photo Captured'}
-                      </Text>
-                      <View style={styles.capturedBadgeAction}>
-                        <Text style={styles.capturedBadgeActionText}>View Details</Text>
-                        <Ionicons name="chevron-forward" size={12} color="#fff" />
+                    </Svg>
+
+                    {/* Captured photo preview: strictly matches the exact cropped frame dimensions so photo NEVER zooms in */}
+                    {selectedMode === 'photo' && !!lastPhotoUri && (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          left: cutoutX,
+                          top: cutoutY,
+                          width: cutoutWidth,
+                          height: cutoutHeight,
+                          borderRadius: 24,
+                          overflow: 'hidden',
+                          zIndex: 6,
+                        }}
+                        pointerEvents="none"
+                      >
+                        <Image
+                          source={{ uri: lastPhotoUri }}
+                          style={{ width: '100%', height: '100%' }}
+                          resizeMode="cover"
+                        />
+                        {checkingCapture && <View style={styles.frozenPhotoScrim} pointerEvents="none" />}
                       </View>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <Animated.View
-                    style={[
-                      styles.focusFrame,
-                      {
-                        transform: [
-                          { scale: isAnalyzing ? 1 : scaleAnim },
-                          { scale: qrFocusAnim },
-                        ],
-                      },
-                    ]}
-                  >
-                    {!isAnalyzing && (
-                      <>
-                        <View style={[styles.corner, styles.cornerTL, qrDetected && styles.cornerDetected]} />
-                        <View style={[styles.corner, styles.cornerTR, qrDetected && styles.cornerDetected]} />
-                        <View style={[styles.corner, styles.cornerBL, qrDetected && styles.cornerDetected]} />
-                        <View style={[styles.corner, styles.cornerBR, qrDetected && styles.cornerDetected]} />
-                      </>
                     )}
 
-                    {selectedMode === 'scan' && !isAnalyzing && (
-                      <View style={styles.scanLineTrack}>
+                    {/* Static Viewfinder Frame (Clean Golden #F59E0B Border — Tap to Super Auto-Focus) */}
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={handleViewfinderTap}
+                      style={{
+                        position: 'absolute',
+                        left: cutoutX,
+                        top: cutoutY,
+                        width: cutoutWidth,
+                        height: cutoutHeight,
+                        borderWidth: 3.5,
+                        borderColor: '#F59E0B',
+                        borderRadius: 24,
+                        backgroundColor: 'transparent',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 7,
+                      }}
+                    >
+                      {/* 2X Macro Badge */}
+                      {selectedMode === 'photo' && isMacro && !isAnalyzing && !lastPhotoUri && (
+                        <View style={[styles.macroReticleBadge, { borderColor: 'rgba(245, 158, 11, 0.5)' }]}>
+                          <Ionicons name="scan-outline" size={10} color="#F59E0B" />
+                          <Text style={[styles.macroReticleText, { color: "#F59E0B" }]}>2X MACRO FOCUS</Text>
+                        </View>
+                      )}
+
+                      {/* Scan mode laser tracker */}
+                      {selectedMode === 'scan' && !isAnalyzing && (
                         <Animated.View
                           style={[
                             styles.scanLine,
                             {
+                              width: '90%',
+                              backgroundColor: '#3B82F6',
                               transform: [
                                 {
                                   translateY: scanLineAnim.interpolate({
                                     inputRange: [0, 1],
-                                    outputRange: [-110, 110],
+                                    outputRange: [-100, 100],
                                   }),
                                 },
                               ],
                             },
                           ]}
                         />
+                      )}
+                    </TouchableOpacity>
+
+                    {/* Static Guidance Text Positioned Directly Below Frame */}
+                    {!isAnalyzing && !lastPhotoUri && (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: cutoutY + cutoutHeight + 14,
+                          left: 0,
+                          right: 0,
+                          alignItems: 'center',
+                          zIndex: 8,
+                        }}
+                        pointerEvents="none"
+                      >
+                        <View style={styles.guidanceHud}>
+                          <View style={styles.guidanceDot} />
+                          <Text style={styles.guidanceText} numberOfLines={1}>
+                            {selectedPart === 'wing' ? 'Center chicken body in the frame' : 'Align eye & swollen cheek in frame'}
+                          </Text>
+                        </View>
                       </View>
                     )}
-
+                    {/* Original Clinical Analysis Progress Display (as shown in Pic 2) */}
                     {isAnalyzing && (
-                      <View style={styles.analyzingWrap} pointerEvents="none">
-                        <Text style={[styles.scanningText, { color: analyzingColor }]}>
-                          {ANALYZING_MESSAGES[analyzingStep]}
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: cutoutY + cutoutHeight + 14,
+                          left: 24,
+                          right: 24,
+                          alignItems: 'center',
+                          zIndex: 50,
+                        }}
+                        pointerEvents="none"
+                      >
+                        <Text
+                          style={[
+                            styles.scanningText,
+                            {
+                              color: '#38BDF8',
+                              fontSize: 14,
+                              fontWeight: '700',
+                              textAlign: 'center',
+                              textShadowColor: 'rgba(0, 0, 0, 0.85)',
+                              textShadowOffset: { width: 0, height: 1 },
+                              textShadowRadius: 6,
+                              marginBottom: 10,
+                              maxWidth: 300,
+                            },
+                          ]}
+                        >
+                          {(selectedPart === 'wing' ? ANALYZING_MESSAGES_WING : ANALYZING_MESSAGES_EYE)[analyzingStep] ||
+                            (selectedPart === 'wing' ? ANALYZING_MESSAGES_WING[0] : ANALYZING_MESSAGES_EYE[0])}
                         </Text>
-                        <View style={styles.analyzingProgressTrack}>
+                        <View
+                          style={[
+                            styles.analyzingProgressTrack,
+                            {
+                              width: 220,
+                              height: 4,
+                              backgroundColor: 'rgba(255, 255, 255, 0.30)',
+                              borderRadius: 2,
+                            },
+                          ]}
+                        >
                           <Animated.View
                             style={[
                               styles.analyzingProgressFill,
                               {
-                                backgroundColor: analyzingColor,
+                                backgroundColor: '#38BDF8',
+                                height: '100%',
+                                borderRadius: 2,
                                 width: progressAnim.interpolate({
                                   inputRange: [0, 1],
                                   outputRange: ['0%', '100%'],
@@ -1639,24 +2021,63 @@ export default function CaptureScreen() {
                         </View>
                       </View>
                     )}
-                  </Animated.View>
+                  </View>
+                );
+              })()}
+
+                {/* Captured Photo Preview Badge Positioned Directly Below Frame (Same Slot as Guidance Pill) */}
+                {lastPhotoUri && !isAnalyzing && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: cutoutY + cutoutHeight + 14,
+                      left: 0,
+                      right: 0,
+                      alignItems: 'center',
+                      zIndex: 25,
+                    }}
+                    pointerEvents="box-none"
+                  >
+                    <View style={styles.capturedPreviewNotice}>
+                      <TouchableOpacity
+                        style={styles.capturedBadgePill}
+                        onPress={() => setShowResultModal(true)}
+                        activeOpacity={0.85}
+                      >
+                        <View
+                          style={[
+                            styles.capturedStatusDot,
+                            {
+                              backgroundColor:
+                                scanResult?.severity === 'critical'
+                                  ? '#f44336'
+                                  : scanResult?.severity === 'moderate' || scanResult?.severity === 'high'
+                                  ? '#FF9800'
+                                  : '#8FE0B0',
+                            },
+                          ]}
+                        />
+                        <Text style={styles.capturedBadgeText} numberOfLines={1}>
+                          {scanResult
+                            ? `${scanResult.disease || 'Healthy'} (${scanResult.confidence}%)`
+                            : 'Photo Captured'}
+                        </Text>
+                        <View style={styles.capturedBadgeAction}>
+                          <Text style={styles.capturedBadgeActionText}>View Details</Text>
+                          <Ionicons name="chevron-forward" size={12} color="#fff" />
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 )}
 
-                {!isAnalyzing && !lastPhotoUri && (
-                  <Text style={styles.focusHintText}>
-                    {selectedMode === 'scan'
-                      ? 'Align chicken QR code within the frame'
-                      : 'Point the camera at your chicken and fill the frame'}
-                  </Text>
-                )}
-              </View>
-
-              <View style={styles.controlDeck}>
+              <View style={styles.controlDeck} pointerEvents="box-none">
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.8)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
-                {/* Part selector: placed cleanly above PHOTO | SCAN strip, disappears only during active shutter / analyzing */}
+                {/* Part & Macro Zoom Selector: placed cleanly above PHOTO | SCAN strip */}
                 {selectedMode === 'photo' && !isBusyCapturing && !lastPhotoUri && (
-                  <View style={styles.partSelectorContainer}>
+                  <View style={styles.selectorCluster}>
+                    {/* Anatomical Region Pill */}
                     <View style={styles.partSelectorPill}>
                       {partModules.map((part) => {
                         const active = selectedPart === part.id;
@@ -1686,6 +2107,38 @@ export default function CaptureScreen() {
                           </TouchableOpacity>
                         );
                       })}
+                    </View>
+
+                    {/* Macro / Standard Distance Pill */}
+                    <View style={styles.zoomSelectorPill}>
+                      <TouchableOpacity
+                        style={[styles.zoomOption, !isMacro && styles.zoomOptionActive]}
+                        onPress={() => {
+                          setCameraZoom(0);
+                          
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[styles.zoomOptionText, !isMacro && styles.zoomOptionTextActive]}>1x</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.zoomOption, isMacro && styles.zoomOptionActive]}
+                        onPress={() => {
+                          setCameraZoom(0.14); // 2x Macro Close-Up
+                          
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <Ionicons
+                          name="scan-outline"
+                          size={12}
+                          color={isMacro ? '#10B981' : 'rgba(255,255,255,0.65)'}
+                        />
+                        <Text style={[styles.zoomOptionText, isMacro && styles.zoomOptionTextMacroActive]}>
+                          Macro
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 )}
@@ -1772,15 +2225,24 @@ export default function CaptureScreen() {
                         {/* Camera Shutter */}
                         <TouchableOpacity
                           onPress={handleShutterPress}
-                          activeOpacity={0.9}
-                          disabled={checkingCapture || scanning}
+                          activeOpacity={0.85}
+                          disabled={isBusyCapturing}
                         >
-                          <Animated.View style={[styles.shutterOuterRing, { transform: [{ scale: shutterAnim }] }]}>
-                            <View style={[styles.shutterInner, { backgroundColor: '#fff' }]}>
+                          <Animated.View
+                            style={[
+                              styles.shutterOuterRing,
+                              { transform: [{ scale: shutterAnim }] },
+                            ]}
+                          >
+                            <View style={styles.shutterInner}>
                               {isAnalyzing ? (
-                                <ActivityIndicator color="#1a1a1a" size="small" />
+                                <ActivityIndicator color="#0E1210" size="small" />
                               ) : (
-                                <Ionicons name="camera" size={30} color="#1a1a1a" />
+                                <Ionicons
+                                  name="camera"
+                                  size={28}
+                                  color="#1A1A1A"
+                                />
                               )}
                             </View>
                           </Animated.View>
@@ -1833,11 +2295,67 @@ export default function CaptureScreen() {
             <View style={styles.detectionAlertIconCircle}>
               <Ionicons name="alert-circle" size={38} color="#fff" />
             </View>
-            <Text style={styles.detectionAlertTitle}>Chicken Not Detected</Text>
+            <Text style={styles.detectionAlertTitle}>{detectionAlertTitle || 'Chicken Not Detected'}</Text>
             <Text style={styles.detectionAlertMessage}>{detectionAlertMessage}</Text>
             <TouchableOpacity style={styles.detectionAlertButton} onPress={() => setShowDetectionAlert(false)} activeOpacity={0.85}>
               <Text style={styles.detectionAlertButtonText}>Try Again</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Non-Gamefowl Advisory Modal */}
+      <Modal animationType="fade" transparent visible={showBreedAdvisoryModal} onRequestClose={() => setShowBreedAdvisoryModal(false)}>
+        <View style={styles.advisoryOverlay}>
+          <View style={[styles.advisoryCard, { maxWidth: MAX_PHONE_WIDTH - 40 }]}>
+            
+            {/* Top Tag Badge */}
+            <View style={styles.advisoryTopBadge}>
+              <Ionicons name="shield-outline" size={12} color="#B45309" />
+              <Text style={styles.advisoryTopBadgeText}>GAMEFOWL GATEKEEPER</Text>
+            </View>
+
+            {/* Glowing Icon */}
+            <View style={styles.advisoryIconContainer}>
+              <View style={[styles.advisoryIconInner, { backgroundColor: '#DC2626' }]}>
+                <Ionicons name="close-circle" size={24} color="#fff" />
+              </View>
+            </View>
+
+            {/* Title & Subtitle */}
+            <Text style={styles.advisoryTitle}>Not a Gamefowl Detected</Text>
+            <View style={styles.advisoryBreedRow}>
+              <View style={styles.advisoryConfidencePill}>
+                <Text style={styles.advisoryConfidenceText}>
+                  {pendingAdvisoryData?.result?.breed_check?.confidence || 95}% Match
+                </Text>
+              </View>
+            </View>
+
+            {/* Notice Callout */}
+            <View style={styles.advisoryNoteBox}>
+              <Ionicons name="information-circle" size={16} color="#B45309" style={{ marginTop: 1 }} />
+              <Text style={styles.advisoryNoteText}>
+                Clucko AI is strictly calibrated for Gamefowl breeds. Diagnostics cannot proceed on non-gamefowl poultry. Please capture a clear photo of a gamefowl to continue.
+              </Text>
+            </View>
+            
+            {/* Action Buttons: Strict Retake only */}
+            <View style={{ width: '100%', gap: 9 }}>
+              <TouchableOpacity
+                style={[styles.advisoryPrimaryButton, { backgroundColor: '#DC2626' }]}
+                onPress={async () => {
+                  setShowBreedAdvisoryModal(false);
+                  setPendingAdvisoryData(null);
+                  await clearPendingCapture();
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="camera-reverse-outline" size={17} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.advisoryPrimaryButtonText}>Retake with Gamefowl</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
         </View>
       </Modal>
@@ -2265,7 +2783,7 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
 
   const badge = getSeverityBadge(scanResult.severity || 'none');
   const targetModule = scanResult.module === 'wing' ? 'wing' : 'eye';
-  const moduleLabel = targetModule === 'wing' ? '🪶 Wing Region' : '👁️ Eye Region';
+  const moduleLabel = targetModule === 'wing' ? 'Wing Region' : 'Eye Region';
 
   const handleTabChange = async (tab: 'photo' | 'gradcam') => {
     setActiveTab(tab);
@@ -2314,8 +2832,34 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
         <Text style={styles.autoFocusText}>AI Analyzed: {moduleLabel}</Text>
       </View>
 
-      {/* Module Mismatch Notice Banner */}
-      {scanResult.moduleMismatch && scanResult.moduleNotice && (
+      {/* Auto-Adapted Module Notice Banner */}
+      {scanResult.moduleAdapted && scanResult.adaptationMessage && (
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: '#E0F2FE',
+          borderColor: '#38BDF8',
+          borderWidth: 1.2,
+          borderRadius: 12,
+          padding: 12,
+          marginTop: 6,
+          marginBottom: 10,
+        }}>
+          <Ionicons name="swap-horizontal" size={22} color="#0284C7" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#0369A1', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Smart Auto-Adaptation
+            </Text>
+            <Text style={{ fontSize: 12.5, color: '#0C4A6E', fontWeight: '600', lineHeight: 17, marginTop: 2 }}>
+              {scanResult.adaptationMessage}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Module Mismatch Notice Banner (fallback if not auto-adapted) */}
+      {!scanResult.moduleAdapted && scanResult.moduleMismatch && scanResult.moduleNotice && (
         <View style={{
           flexDirection: 'row',
           alignItems: 'center',
@@ -2332,6 +2876,49 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
           <Text style={{ flex: 1, fontSize: 12.5, color: '#E65100', fontWeight: '600', lineHeight: 17 }}>
             {scanResult.moduleNotice}
           </Text>
+        </View>
+      )}
+
+      {/* Sleek Breed Advisory Mode Banner */}
+      {scanResult.breedCheck?.is_warning && (
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: '#FFFBEB',
+          borderColor: '#FDE68A',
+          borderWidth: 1,
+          borderLeftWidth: 4,
+          borderLeftColor: '#F59E0B',
+          borderRadius: 12,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          marginTop: 6,
+          marginBottom: 10,
+          gap: 10,
+        }}>
+          <View style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: '#FEF3C7',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+            <Ionicons name="alert" size={17} color="#D97706" />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4, marginBottom: 2 }}>
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#92400E' }} numberOfLines={1}>
+                {scanResult.breedCheck.is_warning ? `Not a Gamefowl (${scanResult.breedCheck.confidence}%)` : 'Gamefowl Confirmed'}
+              </Text>
+              <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: '#B45309' }}>ADVISORY MODE</Text>
+              </View>
+            </View>
+            <Text style={{ fontSize: 11, color: '#78350F', lineHeight: 14 }}>
+              Calibrated for Gamefowl. Diagnostics running as advisory estimate.
+            </Text>
+          </View>
         </View>
       )}
 
@@ -2505,6 +3092,46 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
           <Text style={[styles.recordValue, { fontWeight: '700' }]}>{moduleLabel}</Text>
         </View>
         <View style={styles.recordRow}>
+          <Text style={[styles.recordLabel, { flexShrink: 0 }]}>Breed Assessment</Text>
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginLeft: 8 }}>
+            {scanResult.breedCheck ? (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                backgroundColor: scanResult.breedCheck.is_warning ? '#FEF3C7' : '#E8F5E9',
+                borderColor: scanResult.breedCheck.is_warning ? '#FDE68A' : '#C8E6C9',
+                borderWidth: 1,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 7,
+                maxWidth: '100%',
+              }}>
+                <Ionicons
+                  name={scanResult.breedCheck.is_warning ? "alert-circle" : "shield-checkmark"}
+                  size={12.5}
+                  color={scanResult.breedCheck.is_warning ? "#D97706" : "#2E7D32"}
+                />
+                <Text
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: '700',
+                    color: scanResult.breedCheck.is_warning ? "#92400E" : "#2E7D32",
+                  }}
+                  numberOfLines={1}
+                >
+                  {scanResult.breedCheck.is_warning
+                    ? `Not a Gamefowl • ${scanResult.breedCheck.confidence}%`
+                    : `Gamefowl • ${scanResult.breedCheck.confidence}%`}
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.recordValue, { fontWeight: '600', color: '#666' }]}>Gamefowl Profile</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.recordRow}>
           <Text style={styles.recordLabel}>Confidence</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[styles.recordValue, { fontWeight: '700' }]}>{scanResult.confidence}%</Text>
@@ -2537,7 +3164,7 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
 
       <Text style={styles.verifySectionLabel}>RECOMMENDED ACTIONS</Text>
       <View style={styles.recordList}>
-        {recommendations.map((line, i) => (
+        {recommendations.map((line: string, i: number) => (
           <View
             key={line}
             style={[styles.recordRow, i === recommendations.length - 1 && { borderBottomWidth: 0 }]}
@@ -2582,8 +3209,15 @@ function ScrollViewVerifyBody({ pendingChicken, colors, qrRef, onShare, onDownlo
   return (
     <ScrollView showsVerticalScrollIndicator={false} style={styles.verifyBody} contentContainerStyle={{ paddingBottom: 8 }}>
       <View style={[styles.idCard, { borderColor: colors.divider, backgroundColor: colors.background }]}>
-        <View style={[styles.qrSquare, { borderColor: colors.border }]}>
-          <QRCode value={qrValue} size={64} getRef={(c: any) => (qrRef.current = c)} />
+        <View style={[styles.qrSquare, { borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }]}>
+          <QRCode
+            value={qrValue}
+            size={64}
+            color="#000000"
+            backgroundColor="#FFFFFF"
+            quietZone={6}
+            getRef={(c: any) => (qrRef.current = c)}
+          />
         </View>
         <View style={styles.idCardInfo}>
           <Text style={[styles.idCardTag, { color: colors.textLight }]}>CHICKEN ID</Text>
@@ -2780,33 +3414,88 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 18,
   },
+  focusFrameBase: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
   focusFrame: {
-    width: '76%',
-    aspectRatio: 1,
-    maxWidth: 300,
-    maxHeight: 300,
+    width: 270,
+    height: 270,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  focusFrameWing: {
+    width: 290,
+    height: 350,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
   },
   corner: {
     position: 'absolute',
-    width: 34,
-    height: 34,
-    borderColor: '#FFD54F',
+    width: 24,
+    height: 24,
+    borderColor: 'rgba(255, 255, 255, 0.65)',
   },
   cornerDetected: {
-    borderColor: '#8FE0B0',
-    shadowColor: '#8FE0B0',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 10,
-    elevation: 8,
+    borderColor: '#10B981',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.45,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  cornerTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 6 },
-  cornerTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 6 },
-  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 6 },
-  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 6 },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderTopLeftRadius: 4 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 4 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderBottomLeftRadius: 4 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderBottomRightRadius: 4 },
+  centerReticleDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  guidanceHud: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 15,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginTop: 4,
+  },
+  guidanceHudAligned: {
+    backgroundColor: 'rgba(6, 44, 28, 0.72)',
+    borderColor: 'rgba(16, 185, 129, 0.38)',
+  },
+  guidanceDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#F59E0B',
+  },
+  guidanceDotAligning: {
+    backgroundColor: '#F59E0B',
+  },
+  guidanceDotReady: {
+    backgroundColor: '#10B981',
+  },
+  guidanceText: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 12.5,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  guidanceTextReady: {
+    color: '#E6F4EA',
+    fontWeight: '700',
+  },
   scanLineTrack: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
   scanLine: {
     width: '82%',
@@ -2853,9 +3542,21 @@ const styles = StyleSheet.create({
   },
 
   controlDeck: {
-    paddingTop: 10,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 104 : 88,
-    zIndex: 5,
+    zIndex: 10,
+  },
+  selectorCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 14,
+    paddingHorizontal: 16,
   },
   partSelectorContainer: {
     alignItems: 'center',
@@ -2869,6 +3570,58 @@ const styles = StyleSheet.create({
     padding: 3,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
+  },
+  zoomSelectorPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.52)',
+    borderRadius: 24,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  zoomOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  zoomOptionActive: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  zoomOptionText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  zoomOptionTextActive: {
+    color: '#fff',
+  },
+  zoomOptionTextMacroActive: {
+    color: '#10B981',
+    fontWeight: '800',
+  },
+  macroReticleBadge: {
+    position: 'absolute',
+    top: -14,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(6, 44, 28, 0.88)',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 2.5,
+    borderRadius: 12,
+  },
+  macroReticleText: {
+    color: '#E6F4EA',
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   partOption: {
     flexDirection: 'row',
@@ -3031,6 +3784,7 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     borderRadius: 33,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -3038,6 +3792,54 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+  },
+  shutterOuterRingDisabled: {
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    opacity: 0.55,
+  },
+  shutterOuterRingReady: {
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 6,
+    opacity: 1,
+  },
+    focusSquareReadyBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 2,
+    borderColor: '#10B981',
+    borderRadius: 14,
+    backgroundColor: 'rgba(16, 185, 129, 0.05)',
+  },
+  cornerSquareReady: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    borderColor: '#10B981',
+    borderWidth: 3.5,
+  },
+  focusFrameSquare: {
+    width: 270,
+    height: 270,
+  },
+  shutterInnerDisabled: {
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    shadowOpacity: 0.1,
+    elevation: 1,
+  },
+  shutterInnerReady: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 6,
   },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -3088,6 +3890,175 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   detectionAlertButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+  // --- Breed Advisory Modal Styles ---
+  advisoryOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  advisoryCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingTop: 22,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  advisoryTopBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 11,
+    paddingVertical: 4.5,
+    borderRadius: 20,
+    marginBottom: 14,
+  },
+  advisoryTopBadgeText: {
+    color: '#B45309',
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  advisoryIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 2,
+    borderColor: '#FDE68A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  advisoryIconInner: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F59E0B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  advisoryTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  advisoryBreedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 14,
+  },
+  advisoryBreedText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  advisoryConfidencePill: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  advisoryConfidenceText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  advisoryTraitsBox: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    marginBottom: 12,
+    gap: 8,
+  },
+  advisoryTraitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  advisoryTraitLabel: {
+    fontSize: 11.5,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  advisoryTraitValue: {
+    fontSize: 11.5,
+    color: '#1E293B',
+    fontWeight: '700',
+    maxWidth: '65%',
+    textAlign: 'right',
+  },
+  advisoryNoteBox: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    borderLeftWidth: 3.5,
+    borderLeftColor: '#F59E0B',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 16,
+  },
+  advisoryNoteText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#92400E',
+    lineHeight: 15.5,
+    fontWeight: '500',
+  },
+  advisoryPrimaryButton: {
+    width: '100%',
+    backgroundColor: '#2D5541',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12.5,
+    borderRadius: 14,
+    shadowColor: '#2D5541',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  advisoryPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  advisorySecondaryButton: {
+    width: '100%',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 14,
+  },
+  advisorySecondaryButtonText: {
+    color: '#4B5563',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 
   // --- "Is this a new chicken?" prompt ---
   newOrExistingCard: {

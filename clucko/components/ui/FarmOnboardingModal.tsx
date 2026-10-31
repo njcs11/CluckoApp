@@ -42,7 +42,7 @@ export default function FarmOnboardingModal({
   const [secondsRemaining, setSecondsRemaining] = useState(3);
   const [buttonReady, setButtonReady] = useState(false);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
 
   // Animations
   const buttonFadeAnim = useRef(new Animated.Value(0)).current;

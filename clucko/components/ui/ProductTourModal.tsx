@@ -32,7 +32,7 @@ export default function ProductTourModal({ visible, onClose }: ProductTourModalP
   const pageWidth = containerWidth > 0 ? containerWidth : modalWidth - 40;
 
   const [currentPage, setCurrentPage] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
 
   const tourSteps = [
     {

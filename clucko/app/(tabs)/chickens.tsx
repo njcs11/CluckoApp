@@ -265,28 +265,21 @@ const [loadingRecentScans, setLoadingRecentScans] = useState(false);
 const [loadingChickens, setLoadingChickens] = useState(false);
 
 const loadRecentScans = async () => {
+  // Purge any stale oversized sqlite cache row safely
   try {
-    const cachedRaw = await AsyncStorage.getItem('cached_recent_scans');
-    if (cachedRaw) {
-      try {
-        const cached = JSON.parse(cachedRaw);
-        if (Array.isArray(cached) && cached.length > 0) {
-          setRecentScans((prev) => (prev.length === 0 ? cached : prev));
-        }
-      } catch (e) {}
-    }
+    await AsyncStorage.removeItem('cached_recent_scans');
+  } catch (_) {}
 
+  try {
     setLoadingRecentScans(true);
     const farmParam = selectedFarmFilter !== 'all' ? selectedFarmFilter : undefined;
     const data = await apiGetQrScans(farmParam);
     if (Array.isArray(data)) {
       setRecentScans(data);
-      if (selectedFarmFilter === 'all') {
-        await AsyncStorage.setItem('cached_recent_scans', JSON.stringify(data)).catch(() => {});
-      }
     }
   } catch (error) {
-    console.error('Error loading recent scans:', error);
+    // Non-blocking catch: prevent cursor window crash
+    console.warn('Recent scans notice:', error);
   } finally {
     setLoadingRecentScans(false);
   }
@@ -1673,7 +1666,7 @@ useEffect(() => {
             {generatedQR && (
               <ScrollView showsVerticalScrollIndicator={false} style={styles.verifyBody} contentContainerStyle={{ paddingBottom: 8 }}>
                 <View style={[styles.idCard, { borderColor: colors.divider, backgroundColor: colors.background }]}>
-                  <View style={[styles.qrSquare, { borderColor: colors.border }]}>
+                  <View style={[styles.qrSquare, { borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }]}>
                     <QRCode
                       value={JSON.stringify({
                         chickenId: generatedQR.chickenId,
@@ -1681,6 +1674,9 @@ useEffect(() => {
                         farmId: generatedQR.farmId,
                       })}
                       size={64}
+                      color="#000000"
+                      backgroundColor="#FFFFFF"
+                      quietZone={6}
                       getRef={(c: any) => (qrRef.current = c)}
                     />
                   </View>

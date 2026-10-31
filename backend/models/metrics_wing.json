@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "module": "wing",
+  "classes_trained": [
+    "healthy_wing",
+    "newcastle_disease"
+  ],
+  "skipped": [],
+  "total_images": 858,
+  "train_accuracy": 99.88,
+  "val_accuracy": 100.0,
+  "precision": 100.0,
+  "recall": 100.0,
+  "f1_score": 100.0,
+  "confusion_matrix": [
+    [
+      101,
+      0
+    ],
+    [
+      0,
+      42
+    ]
+  ],
+  "classification_report": "                   precision    recall  f1-score   support\n\n     healthy_wing       1.00      1.00      1.00       101\nnewcastle_disease       1.00      1.00      1.00        42\n\n         accuracy                           1.00       143\n        macro avg       1.00      1.00      1.00       143\n     weighted avg       1.00      1.00      1.00       143\n",
+  "model_path": "C:\\Users\\ADMIN\\Downloads\\gamefowl-disease-detector\\gamefowl-disease-detector\\backend\\models\\gamefowl_model_wing.h5"
+}

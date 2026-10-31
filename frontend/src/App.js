@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, useNavigate, useLocation, Naviga
 import { Toaster, toast } from 'react-hot-toast';
 import axios from 'axios';
 import { 
-  Camera, Database, Cpu, FlaskConical, Menu, X,
+  Activity, Database, Cpu, FlaskConical, Menu, X,
   LayoutDashboard, Users, CreditCard, Sliders, ShieldCheck, LogOut
 } from 'lucide-react';
 import './App.css';
@@ -161,8 +161,8 @@ function AppLayout() {
             onClick={() => setMobileMenuOpen(false)}
             title="AI Vision Disease Detector — Real-Time Inference"
           >
-            <Camera size={17} className="nav-icon" />
-            <span>Detect</span>
+            <Activity size={17} className="nav-icon" />
+            <span>Vision Suite</span>
             {isDetecting && (
               <span className="nav-training-badge" title="Analyzing image in background...">
                 <PipelineActivityIcon size={12} active={true} color="#22c55e" />
@@ -362,7 +362,7 @@ function AppLayout() {
 
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Navigate to="/admin" replace />} />
+            <Route path="/" element={<Navigate to="/detect" replace />} />
             <Route path="/detect" element={<DetectPage />} />
             <Route path="/diseases" element={<DiseasesPage />} />
             <Route path="/dataset" element={<DatasetPage />} />

@@ -12,25 +12,20 @@ IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic', '.heif', '.avif
 
 # Eye Module Symptoms
 EYE_SYMPTOMS = [
+    'facial_swelling',
     'swollen_eyes',
     'watery_eyes',
-    'facial_swelling',
-    'closed_swollen_eyes',
-    'eye_lesions',
     'wart_like_nodules',
     'scabs',
-    'yellow_bumps',
-    'cloudy_eye',
     'normal_eye'
 ]
 
 # Wing Module Symptoms
 WING_SYMPTOMS = [
     'drooping_wings',
-    'severe_droop',
-    'wing_weakness',
-    'asymmetrical_wings',
-    'normal_posture'
+    'imbalance',
+    'normal_posture',
+    'symmetrical_wings'
 ]
 
 def generate_eye_template():
@@ -63,8 +58,8 @@ def generate_eye_template():
                 defaults['swollen_eyes'] = 1
                 # You can edit in Excel: set 1 for watery_eyes, facial_swelling, etc. if visible
             elif disease_id == 'fowl_pox':
-                # Initial common default: scabs/lesions
-                defaults['eye_lesions'] = 1
+                # Initial common default: scabs/wart_like_nodules
+                defaults['wart_like_nodules'] = 1
                 defaults['scabs'] = 1
 
             rel_path = f"{disease_id}/{fname}"

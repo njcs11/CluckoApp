@@ -181,7 +181,7 @@ export default function LoginScreen() {
     }
   }, [params.toast]);
 
-  const emailInputRef = useRef<TextInput>(null);
+  const emailInputRef = useRef<any>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
   // Load last remembered email and any deactivation notice on mount

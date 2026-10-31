@@ -99,7 +99,7 @@ export default function AdminLoginPage() {
         axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
 
         toast.success(`Welcome back, ${res.data.user.full_name || 'Administrator'}!`);
-        navigate('/admin');
+        navigate('/detect');
       } else {
         setErrorMessage(res.data.error || 'Authentication failed. Please verify credentials.');
       }
