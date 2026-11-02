@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 
 // Default fallback — change this to your most common IP
-const DEFAULT_API_URL = "http://127.0.0.1:5000";
+const DEFAULT_API_URL = "https://gamefowl-disease-detector.onrender.com";
 
 let cachedApiUrl: string | null = null;
 
