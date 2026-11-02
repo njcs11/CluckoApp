@@ -252,6 +252,80 @@ export function TrainSkeleton() {
   );
 }
 
+export function VisionSuiteSkeleton() {
+  return (
+    <div className="vs-page-wrapper animate-in" style={{ padding: '24px 32px' }}>
+      {/* Top Header & Telemetry */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <SkeletonBox width="140px" height="14px" style={{ marginBottom: 8 }} />
+          <SkeletonBox width="280px" height="32px" style={{ marginBottom: 8 }} />
+          <SkeletonBox width="420px" height="14px" />
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <SkeletonBox width="130px" height="38px" borderRadius="8px" />
+          <SkeletonBox width="140px" height="38px" borderRadius="8px" />
+        </div>
+      </div>
+
+      {/* 3 Metric Digest Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton-kpi-card" style={{ padding: '18px 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <SkeletonBox width="50%" height="13px" />
+              <SkeletonBox width="28px" height="28px" borderRadius="6px" />
+            </div>
+            <SkeletonBox width="60%" height="28px" borderRadius="6px" style={{ marginBottom: 8 }} />
+            <SkeletonBox width="75%" height="12px" />
+          </div>
+        ))}
+      </div>
+
+      {/* Main Map Stage and Directory Rail */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, minHeight: '520px' }}>
+        {/* Map Stage Skeleton */}
+        <div className="skeleton-card" style={{ position: 'relative', overflow: 'hidden', padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+            <SkeletonBox width="220px" height="18px" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <SkeletonBox width="32px" height="32px" borderRadius="6px" />
+              <SkeletonBox width="32px" height="32px" borderRadius="6px" />
+              <SkeletonBox width="32px" height="32px" borderRadius="6px" />
+            </div>
+          </div>
+          <div style={{ height: '420px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <SkeletonBox width="85%" height="340px" borderRadius="12px" />
+          </div>
+        </div>
+
+        {/* Right Farm Directory Rail Skeleton */}
+        <div className="skeleton-card" style={{ padding: '18px 20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+            <SkeletonBox width="140px" height="18px" />
+            <SkeletonBox width="60px" height="18px" borderRadius="12px" />
+          </div>
+          <SkeletonBox width="100%" height="36px" borderRadius="8px" style={{ marginBottom: 14 }} />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflow: 'hidden' }}>
+            <SkeletonBox width="70px" height="26px" borderRadius="14px" />
+            <SkeletonBox width="90px" height="26px" borderRadius="14px" />
+            <SkeletonBox width="80px" height="26px" borderRadius="14px" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
+                <SkeletonBox width="70%" height="15px" style={{ marginBottom: 8 }} />
+                <SkeletonBox width="50%" height="12px" style={{ marginBottom: 6 }} />
+                <SkeletonBox width="40%" height="11px" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SkeletonLoader({ type = 'table', count = 5, cols = 5 }) {
   if (type === 'cards') {
     return (

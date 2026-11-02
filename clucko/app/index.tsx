@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDarkMode } from '../context/DarkModeContext';
+import AnimatedChickenWalk from '../components/AnimatedChickenWalk';
 
 const MAX_PHONE_WIDTH = 460;
 
@@ -35,12 +36,7 @@ export default function OnboardingScreen() {
 
   const scrollRef = useRef<any>(null);
 
-  // ===================== CHICKEN ANIMATIONS (Screen 1) =====================
-  const roosterBobY = useRef(new Animated.Value(0)).current;
-  const roosterTilt = useRef(new Animated.Value(0)).current;
-  const roosterScale = useRef(new Animated.Value(0.95)).current;
-  const wingFlap = useRef(new Animated.Value(0)).current;
-  const roosterOpacity = useRef(new Animated.Value(1)).current;
+  // ===================== LOGO REVEAL ANIMATIONS (Screen 1) =====================
 
   const glowScale = useRef(new Animated.Value(0.2)).current;
   const glowOpacity = useRef(new Animated.Value(0)).current;
@@ -86,80 +82,31 @@ export default function OnboardingScreen() {
     }
   };
 
-  const runChickenAnimation = () => {
-    // Reset values centered
-    roosterBobY.setValue(0);
-    roosterTilt.setValue(0);
-    wingFlap.setValue(0);
-    roosterOpacity.setValue(1);
-    roosterScale.setValue(0.95);
-    glowScale.setValue(0.2);
-    glowOpacity.setValue(0);
-    logoScale.setValue(0.4);
-    logoOpacity.setValue(0);
-    contentFade.setValue(0);
-    contentSlideY.setValue(24);
-
-    // 1. Proud rooster perk & strut centered on screen
-    Animated.sequence([
-      Animated.parallel([
-        Animated.spring(roosterScale, {
-          toValue: 1.05,
-          friction: 6,
-          useNativeDriver: true,
-        }),
-        Animated.sequence([
-          Animated.timing(roosterBobY, { toValue: -12, duration: 160, useNativeDriver: true }),
-          Animated.timing(roosterBobY, { toValue: 0, duration: 160, useNativeDriver: true }),
-          Animated.timing(roosterBobY, { toValue: -8, duration: 140, useNativeDriver: true }),
-          Animated.timing(roosterBobY, { toValue: 0, duration: 140, useNativeDriver: true }),
-        ]),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(wingFlap, { toValue: 1, duration: 90, useNativeDriver: true }),
-            Animated.timing(wingFlap, { toValue: -1, duration: 90, useNativeDriver: true }),
-          ]),
-          { iterations: 4 }
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(roosterTilt, { toValue: 1, duration: 180, useNativeDriver: true }),
-            Animated.timing(roosterTilt, { toValue: -1, duration: 180, useNativeDriver: true }),
-          ]),
-          { iterations: 2 }
-        ),
+  const revealCluckoLogo = () => {
+    // 2. Morph into official Clucko Logo with radiant glow
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(glowOpacity, { toValue: 0.9, duration: 180, useNativeDriver: true }),
+        Animated.timing(glowOpacity, { toValue: 0, duration: 420, useNativeDriver: true }),
       ]),
-
-      // 2. Morph into official Clucko Logo with radiant glow
-      Animated.parallel([
-        Animated.timing(roosterOpacity, {
-          toValue: 0,
-          duration: 260,
-          useNativeDriver: true,
-        }),
-        Animated.sequence([
-          Animated.timing(glowOpacity, { toValue: 0.85, duration: 200, useNativeDriver: true }),
-          Animated.timing(glowOpacity, { toValue: 0, duration: 380, useNativeDriver: true }),
-        ]),
-        Animated.timing(glowScale, {
-          toValue: 2.2,
-          duration: 550,
-          useNativeDriver: true,
-        }),
-        Animated.spring(logoScale, {
-          toValue: 1,
-          friction: 6,
-          tension: 70,
-          useNativeDriver: true,
-        }),
-        Animated.timing(logoOpacity, {
-          toValue: 1,
-          duration: 320,
-          useNativeDriver: true,
-        }),
-      ]),
-
-      // 3. Reveal brand text and CTA buttons
+      Animated.timing(glowScale, {
+        toValue: 2.4,
+        duration: 550,
+        useNativeDriver: true,
+      }),
+      Animated.spring(logoScale, {
+        toValue: 1,
+        friction: 5.5,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 280,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // 3. Staggered reveal of text and CTA buttons
       Animated.parallel([
         Animated.timing(contentFade, {
           toValue: 1,
@@ -172,8 +119,18 @@ export default function OnboardingScreen() {
           tension: 70,
           useNativeDriver: true,
         }),
-      ]),
-    ]).start();
+      ]).start();
+    });
+  };
+
+  const runChickenAnimation = () => {
+    // Reset values centered
+    glowScale.setValue(0.2);
+    glowOpacity.setValue(0);
+    logoScale.setValue(0.4);
+    logoOpacity.setValue(0);
+    contentFade.setValue(0);
+    contentSlideY.setValue(24);
   };
 
   const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -207,16 +164,7 @@ export default function OnboardingScreen() {
     );
   }
 
-  // Tilt and wing-flap interpolations
-  const roosterTiltInterpolate = roosterTilt.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: ['-6deg', '0deg', '6deg'],
-  });
 
-  const wingFlapInterpolate = wingFlap.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: ['-16deg', '0deg', '16deg'],
-  });
 
   // Top bar fixed progress line interpolations
   const topBarOpacity = scrollX.interpolate({
@@ -313,26 +261,14 @@ export default function OnboardingScreen() {
                   ]}
                 />
 
-                {/* Animated Gamefowl Chicken - Centered & Enlarged */}
-                <Animated.View
-                  style={[
-                    styles.roosterBox,
-                    {
-                      opacity: roosterOpacity,
-                      transform: [
-                        { translateY: roosterBobY },
-                        { scale: roosterScale },
-                        { rotate: wingFlapInterpolate },
-                      ],
-                    },
-                  ]}
-                >
-                  <Image
-                    source={require('../assets/images/chicken-icon.png')}
-                    style={[styles.roosterImage, { tintColor: colors.primary }]}
-                    resizeMode="contain"
+                {/* Pixel2Motion Vector Walk & Flight Animation */}
+                <View style={styles.roosterBox}>
+                  <AnimatedChickenWalk
+                    color={colors.primary}
+                    size={145}
+                    onTakeoffComplete={revealCluckoLogo}
                   />
-                </Animated.View>
+                </View>
 
                 {/* Clucko Logo Revealed at Center - Enlarged */}
                 <Animated.View

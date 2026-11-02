@@ -85,7 +85,8 @@ const SEARCH_STATUS_OPTIONS = [
 const DETECTED_DISEASES = [
   {
     name: 'Infectious Coryza',
-    symptoms: 'Watery eyes • Facial swelling • Nasal discharge',
+    module: 'Eye Region',
+    symptoms: 'Watery eyes • Facial & sinus swelling • Nasal discharge • Eyelid crusting',
     icon: 'water' as const,
     iconColor: '#FB8C00',
     iconBg: '#FFE0B2',
@@ -93,7 +94,8 @@ const DETECTED_DISEASES = [
   },
   {
     name: 'Fowl Pox',
-    symptoms: 'Lesions on comb • Scabs on skin • Difficulty eating',
+    module: 'Eye & Head Region',
+    symptoms: 'Wart-like nodules • Scabs on eyelids & comb • Facial skin crusts',
     icon: 'help-circle' as const,
     iconColor: '#AD1457',
     iconBg: '#F3D4DA',
@@ -101,7 +103,8 @@ const DETECTED_DISEASES = [
   },
   {
     name: 'Newcastle Disease',
-    symptoms: 'Wing droop • Twisted neck • Respiratory distress',
+    module: 'Wing Region',
+    symptoms: 'Wing droop • Asymmetric wing posture • Motor weakness • Plumage ruffling',
     icon: 'warning' as const,
     iconColor: '#7B1FA2',
     iconBg: '#E1D4F7',
@@ -1405,7 +1408,12 @@ export default function HomeScreen() {
                     <Ionicons name={d.icon} size={18} color={d.iconColor} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.diseaseName, { color: colors.text }]}>{d.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text style={[styles.diseaseName, { color: colors.text }]}>{d.name}</Text>
+                      <View style={{ backgroundColor: isDarkMode ? '#1E2D24' : '#E8F5E9', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: isDarkMode ? '#2D5541' : '#C8E6C9' }}>
+                        <Text style={{ fontSize: 9.5, fontWeight: '700', color: isDarkMode ? '#8FE0B0' : '#2D5541' }}>{(d as any).module}</Text>
+                      </View>
+                    </View>
                     <Text style={[styles.diseaseSymptoms, { color: colors.textSecondary }]}>{d.symptoms}</Text>
                   </View>
                 </View>
@@ -1431,6 +1439,19 @@ export default function HomeScreen() {
                   This is an early warning tool only. Always consult a veterinarian for diagnosis.
                 </Text>
               </View>
+
+              <TouchableOpacity
+                style={styles.openQualityGuideBtn}
+                onPress={() => {
+                  setShowDiseaseGuide(false);
+                  setTimeout(() => setShowQualityGuide(true), 200);
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="camera-outline" size={16} color="#2D5541" />
+                <Text style={styles.openQualityGuideBtnText}>View Image Quality Guidelines</Text>
+                <Ionicons name="arrow-forward" size={14} color="#2D5541" />
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -1440,6 +1461,9 @@ export default function HomeScreen() {
         visible={showQualityGuide}
         onClose={() => setShowQualityGuide(false)}
         onProceed={handleProceedToCamera}
+        onOpenDiseaseGuide={() => {
+          setTimeout(() => setShowDiseaseGuide(true), 200);
+        }}
         scanType={scanType}
       />
 
@@ -1992,6 +2016,24 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   diseaseFooterText: { flex: 1, fontSize: 11, lineHeight: 15, color: '#8D6E00' },
+  openQualityGuideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#EAF2EC',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  openQualityGuideBtnText: {
+    color: '#2D5541',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
 
   // Header bell button
   headerBellBtn: {

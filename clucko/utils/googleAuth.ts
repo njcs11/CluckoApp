@@ -1,3 +1,5 @@
+import * as AuthSession from 'expo-auth-session';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
@@ -46,8 +48,25 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
     `&scope=${encodeURIComponent('openid email profile')}` +
     `&prompt=select_account`;
 
-  // 3. For Expo Go / Android, route through auth.expo.io/start so the proxy sets the returnUrl cookie
-  const returnUrl = Linking.createURL('');
+  // 3. Determine redirect URL for Expo Go vs Standalone / Web.
+  // In Expo Go, custom schemes (clucko://) are not declared in the Android OS manifest;
+  // AuthSession.getDefaultReturnUrl() generates exp://<host>:<port>/--/expo-auth-session,
+  // which Android OS automatically recognizes and routes directly into Expo Go.
+  // In standalone builds, AuthSession.makeRedirectUri({ scheme: 'clucko', path: 'oauth' }) uses clucko://oauth.
+  const isExpoGo =
+    Boolean(Constants.expoGoConfig) ||
+    Linking.createURL('').startsWith('exp://') ||
+    Linking.createURL('').startsWith('exps://');
+
+  const returnUrl = isWeb
+    ? window.location.origin
+    : isExpoGo
+    ? AuthSession.getDefaultReturnUrl()
+    : AuthSession.makeRedirectUri({
+        scheme: 'clucko',
+        path: 'oauth',
+      });
+
   const startUrl = isWeb
     ? googleAuthUrl
     : `https://auth.expo.io/@anonymous/Clucko/start?authUrl=${encodeURIComponent(googleAuthUrl)}&returnUrl=${encodeURIComponent(returnUrl)}`;
@@ -55,18 +74,58 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
   const expectedRedirect = isWeb ? window.location.origin : returnUrl;
 
   try {
-    // 4. Open browser auth session
-    const result = await WebBrowser.openAuthSessionAsync(startUrl, expectedRedirect);
+    // 4. Open browser auth session with deep link event fallback
+    let capturedUrl: string | null = null;
+    let linkSub: any = null;
 
-    if (result.type !== 'success') {
-      if (result.type === 'cancel' || result.type === 'dismiss') {
-        return { success: false, error: 'Sign in was cancelled.' };
+    if (!isWeb) {
+      linkSub = Linking.addEventListener('url', (event) => {
+        if (
+          event.url &&
+          (event.url.includes('access_token') ||
+            event.url.includes('error') ||
+            event.url.includes('expo-auth-session') ||
+            event.url.includes('oauth') ||
+            event.url.includes('id_token'))
+        ) {
+          capturedUrl = event.url;
+          try {
+            WebBrowser.dismissAuthSession();
+          } catch {}
+        }
+      });
+    }
+
+    try {
+      const result = await WebBrowser.openAuthSessionAsync(startUrl, expectedRedirect);
+      if (result.type === 'success' && result.url) {
+        capturedUrl = result.url;
       }
-      return { success: false, error: `Authentication failed (${result.type}).` };
+    } finally {
+      if (linkSub && typeof linkSub.remove === 'function') {
+        linkSub.remove();
+      }
+    }
+
+    // Check if initial URL or resume link captured the redirect token
+    if (!capturedUrl) {
+      const initialUrl = await Linking.getInitialURL();
+      if (
+        initialUrl &&
+        (initialUrl.includes('access_token') ||
+          initialUrl.includes('expo-auth-session') ||
+          initialUrl.includes('oauth'))
+      ) {
+        capturedUrl = initialUrl;
+      }
+    }
+
+    if (!capturedUrl) {
+      return { success: false, error: 'Sign in was cancelled.' };
     }
 
     // 5. Extract access_token from the redirect URL fragment or query
-    const url = result.url;
+    const url = capturedUrl;
     if (url.includes('errorCode=cookies-disabled')) {
       return {
         success: false,

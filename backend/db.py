@@ -20,7 +20,7 @@ if os.path.exists(_env_path):
 SUPABASE_CONFIG = {
     'host': os.environ.get('SUPABASE_DB_HOST', 'aws-0-ap-southeast-1.pooler.supabase.com'),
     'port': int(os.environ.get('SUPABASE_DB_PORT', 5432)),
-    'user': os.environ.get('SUPABASE_DB_USER', 'postgres.kznfilwdruljcqnfqtfx'),
+    'user': os.environ.get('SUPABASE_DB_USER', 'postgres.ywboztctskkpfobctlkt'),
     'password': os.environ.get('SUPABASE_DB_PASSWORD', ''),
     'dbname': os.environ.get('SUPABASE_DB_NAME', 'postgres'),
     'sslmode': os.environ.get('SUPABASE_DB_SSLMODE', 'require'),

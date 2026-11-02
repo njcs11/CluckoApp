@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { VisionSuiteSkeleton } from '../components/SkeletonLoader';
 import {
   MapPin, Compass, Search, X, ArrowRight, Eye, Feather,
   ShieldCheck, CheckCircle2, Cpu, Database, FlaskConical,
@@ -90,24 +91,26 @@ const DAVAO_DISTRICTS = [
   'Talomo District',
   'Buhangin District',
   'Baguio District',
-  'Bunawan District'
+  'Bunawan District',
+  'Marilog District',
+  'Paquibato District'
 ];
 
-/* Project Davao City Geographic Lat/Lng (6.96..7.34 N, 125.32..125.68 E) onto SVG (820x510) */
+/* Project Davao City Geographic Lat/Lng (6.95..7.60 N, 125.20..125.70 E) onto SVG (820x510) */
 function projectDavaoCoords(lat, lng) {
-  const minLat = 6.96;
-  const maxLat = 7.34;
-  const minLng = 125.32;
-  const maxLng = 125.68;
+  const minLat = 6.95;
+  const maxLat = 7.60;
+  const minLng = 125.20;
+  const maxLng = 125.70;
 
-  const clampedLat = Math.max(minLat, Math.min(maxLat, Number(lat) || 7.10));
-  const clampedLng = Math.max(minLng, Math.min(maxLng, Number(lng) || 125.52));
+  const clampedLat = Math.max(minLat, Math.min(maxLat, Number(lat) || 7.15));
+  const clampedLng = Math.max(minLng, Math.min(maxLng, Number(lng) || 125.50));
 
   const nx = (clampedLng - minLng) / (maxLng - minLng);
   const ny = 1 - (clampedLat - minLat) / (maxLat - minLat);
 
-  const svgX = Math.round(115 + nx * 560);
-  const svgY = Math.round(65 + ny * 380);
+  const svgX = Math.round(75 + nx * 640);
+  const svgY = Math.round(35 + ny * 440);
   return { x: svgX, y: svgY };
 }
 
@@ -191,6 +194,7 @@ export default function DetectPage() {
   const archSectionRef = useRef(null);
 
   const [farms, setFarms] = useState(SEEDED_DAVAO_FARMS);
+  const [loadingMap, setLoadingMap] = useState(true);
   const [selectedDistrict, setSelectedDistrict] = useState('All Districts');
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredFarmId, setHoveredFarmId] = useState(null);
@@ -208,6 +212,13 @@ export default function DetectPage() {
       })
       .catch(() => {
         /* Keep instant seeded Davao City farms on offline fallback */
+      })
+      .finally(() => {
+        if (mounted) {
+          setTimeout(() => {
+            if (mounted) setLoadingMap(false);
+          }, 350);
+        }
       });
     return () => {
       mounted = false;
@@ -262,6 +273,10 @@ export default function DetectPage() {
       ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+
+  if (loadingMap) {
+    return <VisionSuiteSkeleton />;
+  }
 
   return (
     <div className="vs-landing">
@@ -497,9 +512,9 @@ export default function DetectPage() {
                   <rect width="820" height="510" fill="url(#davaoGulfGrad)" />
                   <rect width="820" height="510" fill="url(#davaoGrid)" />
 
-                  {/* Davao City Mainland Cartographic Polygon */}
+                  {/* Davao City Mainland Cartographic Polygon (Full Administrative Territory: Marilog, Paquibato, Bunawan, Talomo, Toril) */}
                   <path
-                    d="M 55,25 L 485,20 L 665,65 L 690,145 L 645,215 L 605,260 L 560,315 L 515,375 L 465,445 L 420,490 L 65,490 L 35,340 L 40,165 Z"
+                    d="M 65,30 L 280,25 L 450,18 L 520,35 L 620,70 L 650,130 L 630,190 L 605,240 L 575,290 L 530,350 L 485,415 L 435,475 L 420,490 L 240,490 L 160,465 L 120,415 L 85,330 L 60,210 L 50,120 Z"
                     fill="url(#davaoLandGrad)"
                     stroke="rgba(34, 197, 94, 0.30)"
                     strokeWidth="1.5"
@@ -544,16 +559,16 @@ export default function DetectPage() {
 
                   {/* Internal Davao City District Boundaries */}
                   <g stroke="rgba(255, 255, 255, 0.06)" strokeWidth="1" strokeDasharray="4 4" fill="none">
-                    <path d="M 50,175 L 330,165 L 495,120" />
-                    <path d="M 245,168 L 285,285 L 595,265" />
-                    <path d="M 285,285 L 345,455" />
-                    <path d="M 415,275 L 495,385" />
-                    <path d="M 495,120 L 668,145" />
+                    <path d="M 50,120 L 260,110 L 450,115" />
+                    <path d="M 260,110 L 285,255 L 595,245" />
+                    <path d="M 285,255 L 345,455" />
+                    <path d="M 415,255 L 485,385" />
+                    <path d="M 450,115 L 630,135" />
                   </g>
 
                   {/* Davao River & Talomo River Waterways */}
                   <path
-                    d="M 195,95 Q 320,175 415,220 T 598,268"
+                    d="M 195,95 Q 320,175 415,220 T 575,285"
                     fill="none"
                     stroke="rgba(34, 197, 94, 0.16)"
                     strokeWidth="2"
@@ -566,16 +581,17 @@ export default function DetectPage() {
                   />
 
                   {/* Davao City District Labels */}
-                  <g fill="rgba(192, 197, 206, 0.44)" fontSize="10.5" fontWeight="700" letterSpacing="0.06em">
-                    <text x="165" y="105">MARILOG</text>
-                    <text x="175" y="218">BAGUIO (MALAGOS)</text>
-                    <text x="315" y="195">CALINAN</text>
-                    <text x="325" y="305">TUGBOK (MINTAL)</text>
-                    <text x="325" y="425">TORIL (EDEN)</text>
-                    <text x="455" y="345">TALOMO</text>
-                    <text x="535" y="235">BUHANGIN</text>
-                    <text x="565" y="125">BUNAWAN</text>
-                    <text x="558" y="292" fill="rgba(34, 197, 94, 0.55)" fontSize="10">POBLACION</text>
+                  <g fill="rgba(192, 197, 206, 0.44)" fontSize="10" fontWeight="700" letterSpacing="0.06em">
+                    <text x="135" y="75">MARILOG</text>
+                    <text x="420" y="65">PAQUIBATO</text>
+                    <text x="165" y="215">BAGUIO (MALAGOS)</text>
+                    <text x="295" y="180">CALINAN</text>
+                    <text x="315" y="295">TUGBOK (MINTAL)</text>
+                    <text x="325" y="435">TORIL (EDEN)</text>
+                    <text x="455" y="340">TALOMO</text>
+                    <text x="535" y="225">BUHANGIN</text>
+                    <text x="585" y="115">BUNAWAN</text>
+                    <text x="548" y="280" fill="rgba(34, 197, 94, 0.55)" fontSize="9.5">POBLACION</text>
                   </g>
 
                   {/* Interactive Green Farm Markers inside Davao City */}

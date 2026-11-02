@@ -1138,11 +1138,12 @@ def create_admin_user():
 
             password_hash = generate_password_hash(temp_password)
 
+            farm_location = (d.get('farm_location') or d.get('address') or '').strip() or None
             cur.execute('''
-                INSERT INTO users (first_name, last_name, email, password_hash, phone_number, role, terms_version, terms_accepted_at, is_active, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, '2026.1', NOW(), TRUE, NOW())
-                RETURNING id, first_name, last_name, email, role, phone_number, created_at
-            ''', (first_name, last_name, email, password_hash, phone_number, role))
+                INSERT INTO users (first_name, last_name, email, password_hash, phone_number, farm_location, role, terms_version, terms_accepted_at, is_active, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, '2026.1', NOW(), TRUE, NOW())
+                RETURNING id, first_name, last_name, email, role, phone_number, farm_location, created_at
+            ''', (first_name, last_name, email, password_hash, phone_number, farm_location, role))
             new_user = cur.fetchone()
 
             # If user is owner, initialize free tier subscription & provision their initial farm
@@ -1166,10 +1167,10 @@ def create_admin_user():
                 import string
                 farm_code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
                 cur.execute('''
-                    INSERT INTO farms (farm_name, owner_id, farm_code, created_at)
-                    VALUES (%s, %s, %s, NOW())
+                    INSERT INTO farms (farm_name, owner_id, farm_location, farm_code, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
                     RETURNING id
-                ''', (farm_name, new_user['id'], farm_code))
+                ''', (farm_name, new_user['id'], farm_location, farm_code))
 
             # If user is caretaker, ensure active membership in a farm so mobile app login succeeds
             elif role == 'caretaker':

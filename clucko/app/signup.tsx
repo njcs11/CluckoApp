@@ -45,6 +45,7 @@ export default function SignupScreen() {
     last_name: '',
     email: '',
     phone_number: '',
+    address: '',
     farm_name: '',
     password: '',
     confirmPassword: '',
@@ -279,6 +280,8 @@ export default function SignupScreen() {
         email: cleanEmail,
         password: form.password,
         phone_number: form.phone_number.trim(),
+        address: form.address.trim(),
+        farm_location: form.address.trim(),
         confirm_age_18: true,
         terms_accepted: true,
       });
@@ -574,6 +577,33 @@ export default function SignupScreen() {
                   onChangeText={handlePhoneChange}
                   keyboardType="phone-pad"
                   maxLength={11}
+                />
+              </View>
+            </View>
+
+            {/* Address */}
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.inputLabel, { color: isDarkMode ? '#E0E0E0' : '#374151' }]}>
+                Address <Text style={styles.optionalText}>(Optional)</Text>
+              </Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+                    borderColor: isDarkMode ? '#333' : '#E0E0E0',
+                    borderWidth: 1,
+                  },
+                ]}
+              >
+                <Ionicons name="location-outline" size={19} color="#9CA3AF" style={styles.inputLeadingIcon} />
+                <TextInput
+                  style={[styles.input, { color: colors.text }]}
+                  placeholder="e.g. Brgy. Catalunan Grande, Davao City"
+                  placeholderTextColor="#9CA3AF"
+                  value={form.address}
+                  onChangeText={(v) => setField('address', v)}
+                  autoCapitalize="words"
                 />
               </View>
             </View>

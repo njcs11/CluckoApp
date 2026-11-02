@@ -318,6 +318,7 @@ def signup():
 
     phone_clean = str(d.get('phone_number', '')).strip()[:30]
     farm_name_clean = str(d.get('farm_name', '')).strip()[:100]
+    address_clean = str(d.get('address') or d.get('farm_location') or d.get('owner_location') or '').strip()[:255] or None
     pw_hash = hash_password(password)
     farm_code_input = str(d.get('farm_code', '')).strip().upper()
 
@@ -339,10 +340,10 @@ def signup():
 
                 cur.execute('''
                     INSERT INTO users
-                    (first_name, last_name, email, password_hash, phone_number, farm_name, role, terms_version, terms_accepted_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,'caretaker','2026.1',NOW())
+                    (first_name, last_name, email, password_hash, phone_number, farm_name, farm_location, role, terms_version, terms_accepted_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'caretaker','2026.1',NOW())
                 ''', (first_name, last_name, email_clean, pw_hash,
-                      phone_clean, farm_name_clean))
+                      phone_clean, farm_name_clean, address_clean))
                 db.commit()
                 user_id = cur.lastrowid
 
@@ -360,9 +361,9 @@ def signup():
                     INSERT INTO users
                     (first_name, last_name, email, password_hash,
                      phone_number, farm_name, farm_location, role, terms_version, terms_accepted_at)
-                    VALUES (%s,%s,%s,%s,%s,NULL,NULL,'owner','2026.1',NOW())
+                    VALUES (%s,%s,%s,%s,%s,NULL,%s,'owner','2026.1',NOW())
                 ''', (d['first_name'].strip(), d['last_name'].strip(), email_clean, pw_hash,
-                      d.get('phone_number', '').strip()))
+                      d.get('phone_number', '').strip(), address_clean))
                 db.commit()
                 user_id = cur.lastrowid
 
@@ -1352,4 +1353,4 @@ def check_user_status():
         'user_id': user_id,
         'is_active': True,
         'role': user_role
-    })
+    })

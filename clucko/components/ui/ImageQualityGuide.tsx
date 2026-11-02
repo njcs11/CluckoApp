@@ -17,6 +17,7 @@ interface ImageQualityGuideProps {
   visible: boolean;
   onClose: () => void;
   onProceed?: () => void;
+  onOpenDiseaseGuide?: () => void;
   scanType?: 'head' | 'wing' | 'full';
 }
 
@@ -26,24 +27,28 @@ export default function ImageQualityGuide({
   visible,
   onClose,
   onProceed,
+  onOpenDiseaseGuide,
   scanType = 'full',
 }: ImageQualityGuideProps) {
   const generalTips = [
-    { icon: 'sunny', iconSet: 'ionic', text: 'Bright, even lighting' },
-    { icon: 'camera', iconSet: 'ionic', text: 'Hold steady, avoid blur' },
-    { icon: 'water', iconSet: 'material', text: 'Feathers clean & dry' },
+    { icon: 'sunny', iconSet: 'ionic', text: 'Natural, bright diffused daylight' },
+    { icon: 'camera', iconSet: 'ionic', text: 'Hold phone steady, avoid motion blur' },
+    { icon: 'water', iconSet: 'material', text: 'Feathers clean, dry & unsoiled' },
+    { icon: 'phone-portrait-outline', iconSet: 'ionic', text: 'Hold camera 15-25cm from subject' },
   ];
 
   const headTips = [
-    { icon: 'eye', iconSet: 'ionic', text: 'Both eyes visible' },
-    { icon: 'body', iconSet: 'ionic', text: 'Nostrils unobstructed' },
-    { icon: 'scan', iconSet: 'material', text: 'Head fills 70% of frame' },
+    { icon: 'eye', iconSet: 'ionic', text: 'Target eye centered in reticle' },
+    { icon: 'scan', iconSet: 'material', text: 'Eye/face fills 70% of frame' },
+    { icon: 'flash-off-outline', iconSet: 'ionic', text: 'Avoid harsh flashlight glare on pupil' },
+    { icon: 'body', iconSet: 'ionic', text: 'Eyelids & comb fully visible' },
   ];
 
   const wingTips = [
-    { icon: 'bird', iconSet: 'material', text: 'Full wing span visible' },
-    { icon: 'git-compare', iconSet: 'ionic', text: 'Both wings in frame' },
-    { icon: 'arrow-down', iconSet: 'ionic', text: 'Shoot top-down' },
+    { icon: 'bird', iconSet: 'material', text: 'Full wing span in side profile' },
+    { icon: 'git-compare', iconSet: 'ionic', text: 'Clear view of wing elevation/droop' },
+    { icon: 'scan', iconSet: 'material', text: 'Wing fills central camera zone' },
+    { icon: 'arrow-down', iconSet: 'ionic', text: 'Shoot perpendicular to wing surface' },
   ];
 
   const getSpecificTips = () => {
@@ -123,6 +128,22 @@ export default function ImageQualityGuide({
                 {/* Scan-specific tips */}
                 <Text style={styles.sectionLabel}>{specific.label.toUpperCase()}</Text>
                 {renderTipGrid(specific.tips)}
+
+                {/* Switch to Disease Detection Guide */}
+                {onOpenDiseaseGuide && (
+                  <TouchableOpacity
+                    style={styles.switchGuideLink}
+                    onPress={() => {
+                      onClose();
+                      onOpenDiseaseGuide();
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="sparkles" size={15} color="#2D5541" />
+                    <Text style={styles.switchGuideLinkText}>View Disease Detection Guide</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#2D5541" />
+                  </TouchableOpacity>
+                )}
               </ScrollView>
 
               <View style={styles.buttonContainer}>
@@ -264,4 +285,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   proceedButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  switchGuideLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#EAF2EC',
+    borderRadius: 10,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  switchGuideLinkText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2D5541',
+  },
 });

@@ -47,6 +47,7 @@ export default function AdminUsersPage() {
     last_name: '',
     email: '',
     phone_number: '',
+    farm_location: '',
     role: 'admin',
     password: '',
     farm_name: '',
@@ -1299,6 +1300,19 @@ export default function AdminUsersPage() {
                     />
                   </div>
                 </div>
+
+                {/* Address: Only for Farm Owner accounts */}
+                {createForm.role === 'owner' && (
+                  <div className="form-field" style={{ marginTop: 12 }}>
+                    <label>Address (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Brgy. Catalunan Grande, Davao City"
+                      value={createForm.farm_location || ''}
+                      onChange={(e) => setCreateForm({ ...createForm, farm_location: e.target.value })}
+                    />
+                  </div>
+                )}
 
                 {/* Defensible Architectural Subtext Note for Role Selection */}
                 {createForm.role === 'admin' && (
