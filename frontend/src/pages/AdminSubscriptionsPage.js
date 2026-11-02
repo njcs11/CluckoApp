@@ -115,34 +115,43 @@ export default function AdminSubscriptionsPage() {
     if (!dateStr) return 30;
     const target = new Date(dateStr);
     const today = new Date();
+    target.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
     const diffTime = target.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     return Math.max(1, diffDays);
   };
 
   const handlePlanTierSelect = (newPlan) => {
     setAdjustPlan(newPlan);
+    let planDays = 30;
     if (newPlan === 'premium') {
+      planDays = 365;
       setAdjustMaxFarms(999999);
       setAdjustMaxChickens(999999);
       setAdjustMaxCaptures(999999);
       setAdjustScansUnlimited(true);
     } else if (newPlan === 'pro') {
+      planDays = 90;
       setAdjustMaxFarms(2);
       setAdjustMaxChickens(60);
       setAdjustMaxCaptures(999999);
       setAdjustScansUnlimited(true);
     } else if (newPlan === 'free_trial') {
+      planDays = 30;
       setAdjustMaxFarms(1);
       setAdjustMaxChickens(20);
       setAdjustMaxCaptures(30);
       setAdjustScansUnlimited(false);
     } else if (newPlan === 'free') {
+      planDays = 0;
       setAdjustMaxFarms(1);
       setAdjustMaxChickens(20);
       setAdjustMaxCaptures(0);
       setAdjustScansUnlimited(false);
     }
+    setAdjustDays(planDays);
+    setAdjustEndDate(calculateEndDateFromDays(planDays));
   };
 
   // Helper: Format DateTime to Philippine Standard Time (PHT, UTC+8)
@@ -369,8 +378,24 @@ export default function AdminSubscriptionsPage() {
         const u = res.data.user || {};
         const curPlan = u.current_plan || 'pro';
         setAdjustPlan(curPlan);
-        setAdjustDays(30);
-        setAdjustEndDate(calculateEndDateFromDays(30));
+
+        // Calculate default days and expiry date: if active with future end_date, load remaining days
+        let initialDays = curPlan === 'premium' ? 365 : curPlan === 'pro' ? 90 : 30;
+        let initialEndDate = calculateEndDateFromDays(initialDays);
+        const userEndDate = u.end_date_str || u.end_date_iso || u.end_date;
+        if (userEndDate) {
+          const remDays = calculateDaysFromEndDate(userEndDate);
+          if (remDays > 0) {
+            initialDays = remDays;
+            try {
+              initialEndDate = new Date(userEndDate).toISOString().split('T')[0];
+            } catch (_) {
+              initialEndDate = calculateEndDateFromDays(remDays);
+            }
+          }
+        }
+        setAdjustDays(initialDays);
+        setAdjustEndDate(initialEndDate);
         setAdjustMaxFarms(u.max_farms != null ? u.max_farms : (curPlan === 'premium' ? 999999 : curPlan === 'pro' ? 2 : 1));
         setAdjustMaxChickens(u.max_chickens_per_farm != null ? u.max_chickens_per_farm : (curPlan === 'premium' ? 999999 : curPlan === 'pro' ? 60 : 20));
         const initCaps = u.max_captures != null ? u.max_captures : (curPlan === 'premium' || curPlan === 'pro' ? 999999 : curPlan === 'free_trial' ? 30 : 0);

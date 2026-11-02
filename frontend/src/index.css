@@ -465,6 +465,42 @@ select:focus {
   overflow-y: auto;
   margin: auto !important;
   box-sizing: border-box;
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Universal Modal Scrollbar Suppression: Keeps all modals scrollable without visible scrollbars */
+[class*="modal"]::-webkit-scrollbar,
+[class*="modal"] *::-webkit-scrollbar,
+.admin-modal-card::-webkit-scrollbar,
+.admin-modal-card *::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.modal-content::-webkit-scrollbar,
+.purchases-manager-modal::-webkit-scrollbar,
+.purchases-manager-modal *::-webkit-scrollbar,
+.purchases-modal-body::-webkit-scrollbar,
+.purchases-modal-body *::-webkit-scrollbar,
+.itemized-ledger-table-wrap::-webkit-scrollbar,
+.itemized-ledger-table-wrap *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+[class*="modal"],
+[class*="modal"] *,
+.admin-modal-card,
+.admin-modal-card *,
+.modal-body,
+.modal-content,
+.purchases-manager-modal,
+.purchases-manager-modal *,
+.purchases-modal-body,
+.purchases-modal-body *,
+.itemized-ledger-table-wrap,
+.itemized-ledger-table-wrap * {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 
 @media (max-height: 750px) {

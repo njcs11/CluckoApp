@@ -544,10 +544,18 @@
 
 .purchases-modal-body {
   overflow-y: auto;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
   padding: 20px 24px 28px;
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.purchases-modal-body::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .modal-loading-box {
