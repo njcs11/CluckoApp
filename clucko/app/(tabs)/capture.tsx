@@ -886,6 +886,10 @@ export default function CaptureScreen() {
       breedCheck: result.breed_check || null,
     };
 
+    if (result.module && (result.module === 'eye' || result.module === 'wing') && result.module !== selectedPart) {
+      setSelectedPart(result.module);
+    }
+
     setTorchOn(false);
     setScanResult(scan);
     setShowResultModal(true);
@@ -3155,7 +3159,7 @@ function ScrollViewResultContent({ scanResult, onSave, onClose, isSaving, canVie
           </View>
         </View>
         <View style={[styles.recordRow, { borderBottomWidth: 0 }]}>
-          <Text style={styles.recordLabel}>Observed Indicators</Text>
+          <Text style={styles.recordLabel}>Observed Symptoms</Text>
           <Text style={[styles.recordValue, { flex: 1, textAlign: 'right', marginLeft: 10 }]}>
             {scanResult.symptoms.join(', ')}
           </Text>

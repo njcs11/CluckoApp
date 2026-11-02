@@ -1707,8 +1707,47 @@ def adjust_user_subscription(user_id):
                 return jsonify({'error': 'User not found'}), 404
 
             now = dt.utcnow()
-            new_end = now + timedelta(days=duration_days)
-            new_grace = new_end + timedelta(days=3)
+            # Handle end_date (exact expiry date) or duration_days
+            if d.get('end_date'):
+                try:
+                    clean_date_str = str(d['end_date']).split('T')[0].strip()
+                    new_end = dt.strptime(clean_date_str, '%Y-%m-%d') + timedelta(hours=23, minutes=59, seconds=59)
+                    new_grace = new_end + timedelta(days=3)
+                    duration_days = max(1, math.ceil((new_end - now).total_seconds() / 86400.0))
+                except Exception:
+                    new_end = now + timedelta(days=duration_days)
+                    new_grace = new_end + timedelta(days=3)
+            else:
+                new_end = now + timedelta(days=duration_days)
+                new_grace = new_end + timedelta(days=3)
+
+            # Resolve per-user manual override quotas (Farms, Chickens, Scans)
+            if d.get('max_farms') is not None and str(d.get('max_farms')).strip() != '':
+                override_max_farms = int(d['max_farms'])
+            else:
+                override_max_farms = p_config['max_farms']
+
+            if d.get('max_chickens_per_farm') is not None and str(d.get('max_chickens_per_farm')).strip() != '':
+                override_max_chickens = int(d['max_chickens_per_farm'])
+            else:
+                override_max_chickens = p_config['max_chickens_per_farm']
+
+            # Capture limit / Scans available
+            if d.get('max_captures') is not None and str(d.get('max_captures')).strip() != '':
+                override_max_captures = int(d['max_captures'])
+            elif d.get('scans_available') is not None and str(d.get('scans_available')).strip() != '':
+                scans_avail = int(d['scans_available'])
+                if scans_avail >= 999999:
+                    override_max_captures = 999999
+                else:
+                    cur.execute('SELECT captures_used FROM subscriptions WHERE user_id = %s', (user_id,))
+                    c_row = cur.fetchone()
+                    used_count = int(c_row['captures_used']) if c_row and c_row.get('captures_used') is not None else 0
+                    override_max_captures = used_count + scans_avail
+            else:
+                override_max_captures = p_config['max_captures']
+
+            reset_scans = bool(d.get('reset_scans') or d.get('reset_captures_used'))
 
             cur.execute('''
                 INSERT INTO subscriptions
@@ -1725,6 +1764,7 @@ def adjust_user_subscription(user_id):
                     max_farms = EXCLUDED.max_farms,
                     max_chickens_per_farm = EXCLUDED.max_chickens_per_farm,
                     max_captures = EXCLUDED.max_captures,
+                    captures_used = CASE WHEN %s THEN 0 ELSE subscriptions.captures_used END,
                     start_date = EXCLUDED.start_date,
                     end_date = EXCLUDED.end_date,
                     grace_period_end = EXCLUDED.grace_period_end,
@@ -1732,8 +1772,9 @@ def adjust_user_subscription(user_id):
                 RETURNING *
             ''', (
                 user_id, new_plan, p_config['price'],
-                p_config['max_farms'], p_config['max_chickens_per_farm'],
-                p_config['max_captures'], now, new_end, new_grace
+                override_max_farms, override_max_chickens,
+                override_max_captures, now, new_end, new_grace,
+                reset_scans
             ))
             sub = cur.fetchone()
 
@@ -1745,7 +1786,15 @@ def adjust_user_subscription(user_id):
                 'subscription',
                 user_id,
                 f"Subscription adjusted to {p_config['name']} for {user['email']} ({duration_days} days). Reason: {reason}",
-                {'plan': new_plan, 'duration_days': duration_days, 'reason': reason}
+                {
+                    'plan': new_plan,
+                    'duration_days': duration_days,
+                    'end_date': new_end.strftime('%Y-%m-%d'),
+                    'max_farms': override_max_farms,
+                    'max_chickens_per_farm': override_max_chickens,
+                    'max_captures': override_max_captures,
+                    'reason': reason
+                }
             )
 
             # Notify user
@@ -2394,7 +2443,7 @@ def get_user_purchases(user_id):
             cur.execute('''
                 SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.phone_number,
                        s.plan as current_plan, s.status as sub_status, s.end_date, s.grace_period_end,
-                       s.max_farms, s.max_chickens_per_farm, s.max_captures
+                       s.max_farms, s.max_chickens_per_farm, s.max_captures, s.captures_used
                 FROM users u
                 LEFT JOIN subscriptions s ON s.user_id = u.id
                 WHERE u.id = %s
@@ -2402,6 +2451,14 @@ def get_user_purchases(user_id):
             user_info = cur.fetchone()
             if not user_info:
                 return jsonify({'error': 'User not found'}), 404
+
+            # Safe formatting for JSON response
+            if user_info.get('end_date') and hasattr(user_info['end_date'], 'isoformat'):
+                user_info['end_date_iso'] = user_info['end_date'].isoformat()
+                user_info['end_date_str'] = user_info['end_date'].strftime('%Y-%m-%d')
+            else:
+                user_info['end_date_iso'] = str(user_info.get('end_date') or '')
+                user_info['end_date_str'] = str(user_info.get('end_date') or '').split('T')[0]
 
             cur.execute('''
                 SELECT st.*, 

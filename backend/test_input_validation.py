@@ -260,7 +260,7 @@ def test_gradcam_tf_lazy_loaded_without_name_error(client):
     """Verify /api/gradcam properly loads tf without raising NameError."""
     from PIL import Image
     from unittest.mock import MagicMock, patch
-    import io, base64
+    import io, base64, numpy as np
 
     img = Image.new('RGB', (224, 224), color='white')
     buf = io.BytesIO()
@@ -276,7 +276,7 @@ def test_gradcam_tf_lazy_loaded_without_name_error(client):
          patch('builtins.open', MagicMock()), \
          patch('json.load', return_value={'0': 'coryza'}), \
          patch('model_trainer._load_tf', return_value=(mock_tf, None, None, None, None)), \
-         patch('model_trainer.preprocess_image', return_value=MagicMock()), \
+         patch('model_trainer.preprocess_image', return_value=np.zeros((1, 224, 224, 3), dtype=np.float32)), \
          patch('model_trainer.generate_gradcam', return_value='base64_heatmap_image'):
         resp = client.post('/api/gradcam', json={'image': b64, 'module': 'eye'})
         assert resp.status_code == 200

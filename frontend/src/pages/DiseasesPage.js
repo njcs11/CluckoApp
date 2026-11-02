@@ -439,13 +439,22 @@ export default function DiseasesPage() {
             </div>
             <div className="form-group">
               <label className="form-label">Severity Level</label>
-              <select
-                value={form.severity}
-                onChange={e => setForm(f => ({ ...f, severity: e.target.value }))}
-                className="input-field"
-              >
-                {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}
-              </select>
+              <div style={{
+                background: 'rgba(34, 197, 94, 0.08)',
+                border: '1px solid rgba(34, 197, 94, 0.25)',
+                borderRadius: 8,
+                padding: '9px 12px',
+                fontSize: '0.85rem',
+                color: '#4ade80',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                <span style={{ fontWeight: 700 }}>DYNAMIC (SCAN-BASED)</span>
+                <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                  • Evaluated per scan from Observed Symptoms
+                </span>
+              </div>
             </div>
           </div>
 
@@ -555,8 +564,8 @@ export default function DiseasesPage() {
                         <DynamicModuleIcon module={d.module} size={12} style={{ marginRight: 4 }} color={modObj.color || '#60a5fa'} />
                         {modObj.name || d.module} Module
                       </span>
-                      <span className="tag" style={{ background: `${d.color}18`, color: d.color, border: `1px solid ${d.color}30` }}>
-                        {d.severity?.toUpperCase()}
+                      <span className="tag" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.28)' }}>
+                        DYNAMIC SEVERITY
                       </span>
                     </div>
                     <div className="disease-folder-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>

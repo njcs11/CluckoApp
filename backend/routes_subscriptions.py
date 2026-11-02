@@ -222,9 +222,18 @@ def get_effective_subscription(user_id, cur, db):
     if is_in_grace_period:
         plan_config = PLANS_CONFIG.get(stored_plan, PLANS_CONFIG['pro'])
 
-    max_farms = plan_config['max_farms']
-    max_chickens_per_farm = plan_config['max_chickens_per_farm']
-    max_captures = plan_config['max_captures']
+    # Grandfathered & Manual Override Support:
+    # If active or in grace period, preserve the specific user quotas stored on the subscription row,
+    # falling back to plan_config defaults only when NULL.
+    # When fully expired past grace period (switched to Standard Free Tier), enforce Free Tier limits.
+    if effective_status in ('active', 'grace_period'):
+        max_farms = int(sub['max_farms']) if sub.get('max_farms') is not None else plan_config['max_farms']
+        max_chickens_per_farm = int(sub['max_chickens_per_farm']) if sub.get('max_chickens_per_farm') is not None else plan_config['max_chickens_per_farm']
+        max_captures = int(sub['max_captures']) if sub.get('max_captures') is not None else plan_config['max_captures']
+    else:
+        max_farms = plan_config['max_farms']
+        max_chickens_per_farm = plan_config['max_chickens_per_farm']
+        max_captures = plan_config['max_captures']
 
     # 5. Calculate real-time usage for this account
     cur.execute('SELECT COUNT(*) as cnt FROM farms WHERE owner_id=%s', (target_user_id,))

@@ -96,8 +96,54 @@ export default function AdminSubscriptionsPage() {
   const [adjustSubModal, setAdjustSubModal] = useState(null);
   const [adjustPlan, setAdjustPlan] = useState('pro');
   const [adjustDays, setAdjustDays] = useState(30);
+  const [adjustEndDate, setAdjustEndDate] = useState('');
+  const [adjustMaxFarms, setAdjustMaxFarms] = useState(2);
+  const [adjustMaxChickens, setAdjustMaxChickens] = useState(60);
+  const [adjustMaxCaptures, setAdjustMaxCaptures] = useState(999999);
+  const [adjustScansUnlimited, setAdjustScansUnlimited] = useState(true);
+  const [adjustResetScans, setAdjustResetScans] = useState(false);
   const [adjustReason, setAdjustReason] = useState('');
   const [processingAdjust, setProcessingAdjust] = useState(false);
+
+  const calculateEndDateFromDays = (days) => {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days || 0));
+    return d.toISOString().split('T')[0];
+  };
+
+  const calculateDaysFromEndDate = (dateStr) => {
+    if (!dateStr) return 30;
+    const target = new Date(dateStr);
+    const today = new Date();
+    const diffTime = target.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(1, diffDays);
+  };
+
+  const handlePlanTierSelect = (newPlan) => {
+    setAdjustPlan(newPlan);
+    if (newPlan === 'premium') {
+      setAdjustMaxFarms(999999);
+      setAdjustMaxChickens(999999);
+      setAdjustMaxCaptures(999999);
+      setAdjustScansUnlimited(true);
+    } else if (newPlan === 'pro') {
+      setAdjustMaxFarms(2);
+      setAdjustMaxChickens(60);
+      setAdjustMaxCaptures(999999);
+      setAdjustScansUnlimited(true);
+    } else if (newPlan === 'free_trial') {
+      setAdjustMaxFarms(1);
+      setAdjustMaxChickens(20);
+      setAdjustMaxCaptures(30);
+      setAdjustScansUnlimited(false);
+    } else if (newPlan === 'free') {
+      setAdjustMaxFarms(1);
+      setAdjustMaxChickens(20);
+      setAdjustMaxCaptures(0);
+      setAdjustScansUnlimited(false);
+    }
+  };
 
   // Helper: Format DateTime to Philippine Standard Time (PHT, UTC+8)
   const formatPhtDateTime = (dateStr) => {
@@ -320,8 +366,17 @@ export default function AdminSubscriptionsPage() {
           loading: false,
           data: res.data
         });
-        setAdjustPlan(res.data.user.current_plan || 'pro');
+        const u = res.data.user || {};
+        const curPlan = u.current_plan || 'pro';
+        setAdjustPlan(curPlan);
         setAdjustDays(30);
+        setAdjustEndDate(calculateEndDateFromDays(30));
+        setAdjustMaxFarms(u.max_farms != null ? u.max_farms : (curPlan === 'premium' ? 999999 : curPlan === 'pro' ? 2 : 1));
+        setAdjustMaxChickens(u.max_chickens_per_farm != null ? u.max_chickens_per_farm : (curPlan === 'premium' ? 999999 : curPlan === 'pro' ? 60 : 20));
+        const initCaps = u.max_captures != null ? u.max_captures : (curPlan === 'premium' || curPlan === 'pro' ? 999999 : curPlan === 'free_trial' ? 30 : 0);
+        setAdjustMaxCaptures(initCaps);
+        setAdjustScansUnlimited(initCaps >= 999999);
+        setAdjustResetScans(false);
         setAdjustReason('');
       }
     } catch (err) {
@@ -1646,7 +1701,7 @@ export default function AdminSubscriptionsPage() {
                         <label>Override Plan Tier:</label>
                         <select 
                           value={adjustPlan} 
-                          onChange={(e) => setAdjustPlan(e.target.value)}
+                          onChange={(e) => handlePlanTierSelect(e.target.value)}
                           className="filter-select"
                         >
                           <option value="premium">Premium Account (Unlimited Farms & Chickens)</option>
@@ -1656,14 +1711,85 @@ export default function AdminSubscriptionsPage() {
                         </select>
                       </div>
 
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="full-col">
+                        <div className="form-field">
+                          <label>Validity Duration (Days):</label>
+                          <input 
+                            type="number"
+                            min={1}
+                            max={3650}
+                            value={adjustDays}
+                            onChange={(e) => {
+                              const d = Number(e.target.value);
+                              setAdjustDays(d);
+                              setAdjustEndDate(calculateEndDateFromDays(d));
+                            }}
+                          />
+                        </div>
+
+                        <div className="form-field">
+                          <label>Exact Expiry Date (YYYY-MM-DD):</label>
+                          <input 
+                            type="date"
+                            value={adjustEndDate}
+                            onChange={(e) => {
+                              const dateVal = e.target.value;
+                              setAdjustEndDate(dateVal);
+                              setAdjustDays(calculateDaysFromEndDate(dateVal));
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="full-col">
+                        <div className="form-field">
+                          <label>Farms Available (Max Farms):</label>
+                          <input 
+                            type="number"
+                            min={1}
+                            max={999999}
+                            value={adjustMaxFarms >= 999999 ? 999999 : adjustMaxFarms}
+                            onChange={(e) => setAdjustMaxFarms(Number(e.target.value))}
+                          />
+                        </div>
+
+                        <div className="form-field">
+                          <label>Chickens per Farm (Max Chickens):</label>
+                          <input 
+                            type="number"
+                            min={1}
+                            max={999999}
+                            value={adjustMaxChickens >= 999999 ? 999999 : adjustMaxChickens}
+                            onChange={(e) => setAdjustMaxChickens(Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+
                       <div className="form-field full-col">
-                        <label>Validity Duration (Days from Today):</label>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <label style={{ margin: 0 }}>Scans Available (Max Captures):</label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: '#10B981', fontWeight: 600 }}>
+                            <input 
+                              type="checkbox" 
+                              checked={adjustScansUnlimited}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setAdjustScansUnlimited(checked);
+                                if (checked) setAdjustMaxCaptures(999999);
+                                else setAdjustMaxCaptures(30);
+                              }}
+                            />
+                            Unlimited Scans
+                          </label>
+                        </div>
                         <input 
                           type="number"
-                          min={1}
-                          max={730}
-                          value={adjustDays}
-                          onChange={(e) => setAdjustDays(Number(e.target.value))}
+                          min={0}
+                          max={999999}
+                          disabled={adjustScansUnlimited}
+                          value={adjustScansUnlimited ? '999999' : adjustMaxCaptures}
+                          onChange={(e) => setAdjustMaxCaptures(Number(e.target.value))}
+                          placeholder={adjustScansUnlimited ? 'Unlimited Scans Active' : 'Enter number of scans'}
                         />
                       </div>
 
@@ -1689,6 +1815,11 @@ export default function AdminSubscriptionsPage() {
                             const res = await axios.post(`/api/admin/subscriptions/${managePurchasesModal.userId}/adjust`, {
                               plan: adjustPlan,
                               duration_days: adjustDays,
+                              end_date: adjustEndDate,
+                              max_farms: adjustMaxFarms,
+                              max_chickens_per_farm: adjustMaxChickens,
+                              max_captures: adjustScansUnlimited ? 999999 : Number(adjustMaxCaptures),
+                              reset_scans: adjustResetScans,
                               reason: adjustReason
                             });
                             if (res.data.success) {

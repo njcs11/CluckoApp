@@ -108,6 +108,16 @@ def create_farm():
             else:
                 lng = None
 
+            if lat is not None and lng is not None and (not new_loc or new_loc.lower() == 'davao city'):
+                auto_loc, _ = resolve_davao_location_from_coords(lat, lng)
+                if auto_loc and auto_loc != 'Davao City, Philippines':
+                    new_loc = auto_loc
+
+            if lat is not None and lng is not None and (not farm_location or farm_location.lower() == 'davao city'):
+                auto_loc, _ = resolve_davao_location_from_coords(lat, lng)
+                if auto_loc and auto_loc != 'Davao City, Philippines':
+                    farm_location = auto_loc
+
             # Check subscription farm quota
             from routes_subscriptions import get_effective_subscription
             sub = get_effective_subscription(request.user_id, cur, db)
@@ -202,6 +212,16 @@ def update_farm(farm_id):
                     return jsonify({'error': 'longitude must be a valid float'}), 400
             else:
                 lng = None
+
+            if lat is not None and lng is not None and (not new_loc or new_loc.lower() == 'davao city'):
+                auto_loc, _ = resolve_davao_location_from_coords(lat, lng)
+                if auto_loc and auto_loc != 'Davao City, Philippines':
+                    new_loc = auto_loc
+
+            if lat is not None and lng is not None and (not farm_location or farm_location.lower() == 'davao city'):
+                auto_loc, _ = resolve_davao_location_from_coords(lat, lng)
+                if auto_loc and auto_loc != 'Davao City, Philippines':
+                    farm_location = auto_loc
 
             cur.execute('''
                 UPDATE farms
@@ -513,4 +533,47 @@ def remove_member(farm_id, member_id):
             db.commit()
         return jsonify({'success': True, 'message': 'Caretaker deleted successfully'})
     finally:
-        db.close()
+        db.close()
+
+
+def resolve_davao_location_from_coords(lat, lng):
+    """
+    Resolves Davao City coordinates into standard district and barangay strings.
+    """
+    if lat is None or lng is None:
+        return 'Davao City', 'All Districts'
+    try:
+        flat = float(lat)
+        flng = float(lng)
+    except (ValueError, TypeError):
+        return 'Davao City', 'All Districts'
+
+    # Bounding checks for major Davao City districts
+    if 7.14 <= flat <= 7.30 and 125.62 <= flng <= 125.68:
+        return 'Panacan, Bunawan District', 'Bunawan District'
+    elif 7.20 <= flat <= 7.35 and 125.60 <= flng <= 125.68:
+        return 'Bunawan, Davao City', 'Bunawan District'
+    elif 7.15 <= flat <= 7.25 and 125.38 <= flng <= 125.44:
+        return 'Malagos, Baguio District', 'Baguio District'
+    elif 7.15 <= flat <= 7.25 and 125.32 <= flng <= 125.38:
+        return 'Baguio (Malagos), Davao City', 'Baguio District'
+    elif 7.16 <= flat <= 7.25 and 125.44 <= flng <= 125.49:
+        return 'Calinan Poblacion, Calinan District', 'Calinan District'
+    elif 7.07 <= flat <= 7.13 and 125.48 <= flng <= 125.54:
+        return 'Mintal, Tugbok District', 'Tugbok District'
+    elif 6.98 <= flat <= 7.06 and 125.44 <= flng <= 125.52:
+        return 'Eden, Toril District', 'Toril District'
+    elif 7.11 <= flat <= 7.16 and 125.56 <= flng <= 125.64:
+        return 'Tigatto / Buhangin, Davao City', 'Buhangin District'
+    elif 7.08 <= flat <= 7.12 and 125.60 <= flng <= 125.66:
+        return 'Lanang / Sasa, Davao City', 'Buhangin District'
+    elif 7.04 <= flat <= 7.09 and 125.52 <= flng <= 125.58:
+        return 'Talomo, Davao City', 'Talomo District'
+    elif 7.05 <= flat <= 7.10 and 125.58 <= flng <= 125.64:
+        return 'Poblacion, Davao City', 'Poblacion District'
+    
+    return 'Davao City, Philippines', 'All Districts'
+
+
+
+
