@@ -248,13 +248,6 @@ export default function CaptureScreen() {
     }
   }, [modeParam]);
 
-  useEffect(() => {
-    // Proactively warm up backend container on camera screen entry
-    getApiUrl().then((url) => {
-      fetch(`${url}/api/health`).catch(() => {});
-    }).catch(() => {});
-  }, []);
-
   // --- Farms / chickens (backend-backed) ------------------------------------
   const [farms, setFarms] = useState<Farm[]>([]);
   const [chickens, setChickens] = useState<Chicken[]>([]);
@@ -844,45 +837,19 @@ export default function CaptureScreen() {
   // Transmits both the frame-aligned crop (image) and broad bird context (full_image).
   const analyzeWithBackend = async (base64Image: string, fullImageBase64?: string) => {
     const API_URL = await getApiUrl();
-    const payload = JSON.stringify({
-      image: base64Image,
-      full_image: fullImageBase64 || base64Image,
-      module: selectedPart,
-      is_macro: isMacro,
-      zoom: cameraZoom,
+    const response = await fetch(`${API_URL}/api/detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: base64Image,
+        full_image: fullImageBase64 || base64Image,
+        module: selectedPart,
+        is_macro: isMacro,
+        zoom: cameraZoom,
+      }),
     });
-
-    const callApi = async () => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 75000);
-      try {
-        const res = await fetch(`${API_URL}/api/detect`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        return res;
-      } catch (e) {
-        clearTimeout(timeoutId);
-        throw e;
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await callApi();
-    } catch (err: any) {
-      console.warn('First detect attempt failed, retrying once...', err);
-      // Wait 1.5 seconds and retry in case Render was spinning up
-      await new Promise((r) => setTimeout(r, 1500));
-      response = await callApi();
-    }
-
     if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      throw new Error(`Server responded with ${response.status}: ${errText.slice(0, 100)}`);
+      throw new Error(`Server responded with ${response.status}`);
     }
     return response.json();
   };
@@ -972,9 +939,12 @@ export default function CaptureScreen() {
           setPendingAdvisoryData({ result, base64Image });
           setShowBreedAdvisoryModal(true);
         } else {
+          const cleanTitle = (result.rejection_reason && !result.rejection_reason.includes('('))
+            ? result.rejection_reason
+            : 'No Chicken Detected';
           showWrongSubjectAlert(
-            result.message || "No chicken detected. Please capture a clear photo of a live chicken or gamefowl.",
-            result.rejection_reason === 'No Chicken Detected' ? 'Chicken Not Detected' : (result.rejection_reason || 'Chicken Not Detected')
+            "No chicken detected. Please capture a clear photo of a live chicken or gamefowl.",
+            cleanTitle
           );
         }
         await clearPendingCapture();

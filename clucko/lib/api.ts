@@ -2,34 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 
 // Default fallback — change this to your most common IP
-const DEFAULT_API_URL = "https://clucko-backend.onrender.com";
+const DEFAULT_API_URL = "http://127.0.0.1:5000";
 
 let cachedApiUrl: string | null = null;
 
 export { DEFAULT_API_URL };
-
-export const safeJson = async (res: Response): Promise<any> => {
-  try {
-    const text = await res.text();
-    if (!text || text.trim() === "") return {};
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        error:
-          res.status === 404
-            ? "Server endpoint not found (404). Please ensure the backend is active."
-            : res.status >= 500
-            ? "Server error. Please try again later."
-            : text.length > 200
-            ? `Server error (${res.status})`
-            : text,
-      };
-    }
-  } catch (err: any) {
-    return { error: err.message || `Failed to read server response (${res.status})` };
-  }
-};
 
 /**
  * Automatically extracts the computer's WiFi IP address from the Expo packager host.
@@ -60,14 +37,6 @@ export const getApiUrl = async (): Promise<string> => {
 
   const mode = await AsyncStorage.getItem("api_url_mode"); // "auto" (default) or "manual"
   const saved = await AsyncStorage.getItem("api_url");
-
-  // Automatically migrate away from obsolete temporary Render URLs or localhost
-  if (saved && (saved.includes("gamefowl-disease-detector.onrender.com") || saved.includes("localhost") || saved.includes("127.0.0.1"))) {
-    await AsyncStorage.removeItem("api_url");
-    await AsyncStorage.setItem("api_url_mode", "auto");
-    cachedApiUrl = DEFAULT_API_URL;
-    return cachedApiUrl;
-  }
 
   // If user explicitly configured manual mode, respect the manual URL
   if (mode === "manual" && saved) {
@@ -194,7 +163,7 @@ export const apiSubmitAppeal = async (email: string, reason: string, appealMessa
       message: appealMessage,
     }),
   });
-  const json = await safeJson(res);
+  const json = await res.json();
   if (!res.ok) throw new Error(json.error || "Failed to submit appeal");
   return json;
 };
@@ -303,7 +272,7 @@ export const apiSignup = async (data: any) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  const json = await safeJson(res);
+  const json = await res.json();
   if (!res.ok) throw new Error(json.error || "Signup failed");
   await AsyncStorage.setItem("token", json.token);
   await AsyncStorage.setItem("user_id", String(json.user_id));
@@ -332,7 +301,7 @@ export const apiLogin = async (email: string, password: string) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const json = await safeJson(res);
+  const json = await res.json();
   if (res.status === 403 && json && (json.suspended || json.deactivated)) {
     await clearStaleSession();
     await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
@@ -372,7 +341,7 @@ export const apiGoogleAuth = async (googleProfile: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(googleProfile),
   });
-  const json = await safeJson(res);
+  const json = await res.json();
   if (res.status === 403 && json && (json.suspended || json.deactivated)) {
     await clearStaleSession();
     await AsyncStorage.setItem("clucko_deactivated_notice", JSON.stringify({
@@ -486,7 +455,7 @@ export const apiSendResetCode = async (email: string, code: string): Promise<boo
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.trim() }),
     });
-    const json = await safeJson(res);
+    const json = await res.json();
     return res.ok && json.success === true;
   } catch (err) {
     console.error("apiSendResetCode error:", err);
@@ -505,7 +474,7 @@ export const apiResetPassword = async (email: string, newPassword: string, code?
       code: code ? code.trim() : undefined,
     }),
   });
-  const json = await safeJson(res);
+  const json = await res.json();
   if (!res.ok) throw new Error(json.error || "Password reset failed");
   return json;
 };
