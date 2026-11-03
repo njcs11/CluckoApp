@@ -17,6 +17,7 @@ backend/.env
 !backend/.env.example
 
 # Node & Package Managers
+node_modules/
 frontend/node_modules/
 frontend/node_modules/.cache/
 clucko/node_modules/
