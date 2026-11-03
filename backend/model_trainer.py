@@ -80,7 +80,7 @@ def _query_gemini_vision_copilot(img: Image.Image) -> dict | None:
     import urllib.request
 
     api_key = _get_gemini_api_key()
-    if not api_key or not api_key.startswith('AIzaSy'):
+    if not api_key:
         return None
 
     try:

@@ -31,6 +31,6 @@ module.exports = function(app) {
     },
   });
 
-  app.use(['/api', '/uploads', '/static'], backendProxy);
+  app.use(['/api', '/uploads'], backendProxy);
 };
 
