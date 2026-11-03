@@ -80,7 +80,7 @@ def _query_gemini_vision_copilot(img: Image.Image) -> dict | None:
     import urllib.request
 
     api_key = _get_gemini_api_key()
-    if not api_key:
+    if not api_key or not api_key.startswith('AIzaSy'):
         return None
 
     try:
@@ -143,11 +143,11 @@ def _query_gemini_vision_copilot(img: Image.Image) -> dict | None:
             }
         }).encode('utf-8')
 
-        for model_name in ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.8-flash"):
+        for model_name in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=7.5) as resp:
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
                     resp_data = json.loads(resp.read().decode('utf-8'))
                     text_out = resp_data["candidates"][0]["content"]["parts"][0]["text"]
                     parsed = json.loads(text_out)

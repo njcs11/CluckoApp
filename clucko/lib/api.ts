@@ -61,6 +61,14 @@ export const getApiUrl = async (): Promise<string> => {
   const mode = await AsyncStorage.getItem("api_url_mode"); // "auto" (default) or "manual"
   const saved = await AsyncStorage.getItem("api_url");
 
+  // Automatically migrate away from obsolete temporary Render URLs or localhost
+  if (saved && (saved.includes("gamefowl-disease-detector.onrender.com") || saved.includes("localhost") || saved.includes("127.0.0.1"))) {
+    await AsyncStorage.removeItem("api_url");
+    await AsyncStorage.setItem("api_url_mode", "auto");
+    cachedApiUrl = DEFAULT_API_URL;
+    return cachedApiUrl;
+  }
+
   // If user explicitly configured manual mode, respect the manual URL
   if (mode === "manual" && saved) {
     cachedApiUrl = saved;

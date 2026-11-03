@@ -248,6 +248,13 @@ export default function CaptureScreen() {
     }
   }, [modeParam]);
 
+  useEffect(() => {
+    // Proactively warm up backend container on camera screen entry
+    getApiUrl().then((url) => {
+      fetch(`${url}/api/health`).catch(() => {});
+    }).catch(() => {});
+  }, []);
+
   // --- Farms / chickens (backend-backed) ------------------------------------
   const [farms, setFarms] = useState<Farm[]>([]);
   const [chickens, setChickens] = useState<Chicken[]>([]);
@@ -837,19 +844,45 @@ export default function CaptureScreen() {
   // Transmits both the frame-aligned crop (image) and broad bird context (full_image).
   const analyzeWithBackend = async (base64Image: string, fullImageBase64?: string) => {
     const API_URL = await getApiUrl();
-    const response = await fetch(`${API_URL}/api/detect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: base64Image,
-        full_image: fullImageBase64 || base64Image,
-        module: selectedPart,
-        is_macro: isMacro,
-        zoom: cameraZoom,
-      }),
+    const payload = JSON.stringify({
+      image: base64Image,
+      full_image: fullImageBase64 || base64Image,
+      module: selectedPart,
+      is_macro: isMacro,
+      zoom: cameraZoom,
     });
+
+    const callApi = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 75000);
+      try {
+        const res = await fetch(`${API_URL}/api/detect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        return res;
+      } catch (e) {
+        clearTimeout(timeoutId);
+        throw e;
+      }
+    };
+
+    let response: Response;
+    try {
+      response = await callApi();
+    } catch (err: any) {
+      console.warn('First detect attempt failed, retrying once...', err);
+      // Wait 1.5 seconds and retry in case Render was spinning up
+      await new Promise((r) => setTimeout(r, 1500));
+      response = await callApi();
+    }
+
     if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}`);
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Server responded with ${response.status}: ${errText.slice(0, 100)}`);
     }
     return response.json();
   };
