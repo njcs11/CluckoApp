@@ -44,10 +44,12 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen name="server-settings" options={{ animation: 'ios_from_right', animationDuration: 280 }} />
+            <Stack.Screen name="expo-auth-session" options={{ animation: 'fade' }} />
+            <Stack.Screen name="oauth" options={{ animation: 'fade' }} />
           </Stack>
           <InteractiveProductTour />
         </TourProvider>
       </NotificationProvider>
     </DarkModeProvider>
   );
-}
+}
