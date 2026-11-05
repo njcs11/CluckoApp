@@ -32,13 +32,13 @@ export function getEffectiveReturnUrl(): string {
     return window.location.origin;
   }
 
-  // Check if running in Expo Go
+  // Check strictly if running inside Expo Go client
+  // In a standalone APK, executionEnvironment is 'standalone' and expoVersion is null.
+  // In Expo Go, executionEnvironment is 'storeClient', appOwnership is 'expo', and expoVersion is a string.
   const isExpoGo =
-    Boolean((Constants as any).appOwnership === 'expo') ||
+    (Constants as any).appOwnership === 'expo' ||
     Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
-    Boolean((Constants as any).expoGoConfig) ||
-    Boolean((Constants as any).manifest?.debuggerHost) ||
-    Boolean((Constants as any).expoConfig?.hostUri);
+    Boolean(Constants.expoVersion);
 
   if (isExpoGo) {
     let host = '';
@@ -82,10 +82,8 @@ export function getEffectiveReturnUrl(): string {
     return `exp://${host}/--/expo-auth-session`;
   }
 
-  return AuthSession.makeRedirectUri({
-    scheme: 'clucko',
-    path: 'expo-auth-session',
-  });
+  // Standalone installed Android APK (Direct custom scheme registered in AndroidManifest.xml)
+  return 'clucko://expo-auth-session';
 }
 
 /**

@@ -1,8 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 
-// Default fallback — change this to your most common IP
-const DEFAULT_API_URL = "http://192.168.1.7:5000";
+// Default fallback — Live cloud backend on Render
+const DEFAULT_API_URL = "https://clucko-backend.onrender.com";
 
 let cachedApiUrl: string | null = null;
 
