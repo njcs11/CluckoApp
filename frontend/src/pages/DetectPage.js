@@ -5,7 +5,7 @@ import { VisionSuiteSkeleton } from '../components/SkeletonLoader';
 import {
   MapPin, Compass, Search, X, ArrowRight, Eye, Feather,
   ShieldCheck, CheckCircle2, Cpu, Database, FlaskConical,
-  ZoomIn, ZoomOut, RotateCcw
+  ZoomIn, ZoomOut, RotateCcw, Layers, Globe, Mountain
 } from 'lucide-react';
 import './DetectPage.css';
 
@@ -80,28 +80,50 @@ const SEEDED_DAVAO_FARMS = [
     latitude: 7.2461,
     longitude: 125.6472,
     gamefowl_count: 31
+  },
+  {
+    id: 108,
+    farm_name: 'Buda Alpine Rooster Ridge',
+    owner_name: 'Datu Ronald Matigsalug',
+    farm_location: 'Brgy. Buda, Marilog District, Davao City',
+    district: 'Marilog District',
+    latitude: 7.3621,
+    longitude: 125.2914,
+    gamefowl_count: 55
+  },
+  {
+    id: 109,
+    farm_name: 'Paquibato Sun Valley Farm',
+    owner_name: 'Col. Dante Alimurung',
+    farm_location: 'Brgy. Malabog, Paquibato District, Davao City',
+    district: 'Paquibato District',
+    latitude: 7.3815,
+    longitude: 125.5120,
+    gamefowl_count: 46
   }
 ];
 
 const DAVAO_DISTRICTS = [
   'All Districts',
+  'Marilog District',
+  'Paquibato District',
   'Calinan District',
-  'Toril District',
+  'Baguio District',
   'Tugbok District',
+  'Toril District',
   'Talomo District',
   'Buhangin District',
-  'Baguio District',
   'Bunawan District',
-  'Marilog District',
-  'Paquibato District'
+  'Poblacion District',
+  'Agdao District'
 ];
 
-/* Project Davao City Geographic Lat/Lng (6.95..7.60 N, 125.20..125.70 E) onto SVG (820x510) */
+/* Project Davao City Geographic Lat/Lng (6.92..7.60 N, 125.16..125.74 E) onto SVG (860x560) */
 function projectDavaoCoords(lat, lng) {
-  const minLat = 6.95;
+  const minLat = 6.92;
   const maxLat = 7.60;
-  const minLng = 125.20;
-  const maxLng = 125.70;
+  const minLng = 125.16;
+  const maxLng = 125.74;
 
   const clampedLat = Math.max(minLat, Math.min(maxLat, Number(lat) || 7.15));
   const clampedLng = Math.max(minLng, Math.min(maxLng, Number(lng) || 125.50));
@@ -109,8 +131,13 @@ function projectDavaoCoords(lat, lng) {
   const nx = (clampedLng - minLng) / (maxLng - minLng);
   const ny = 1 - (clampedLat - minLat) / (maxLat - minLat);
 
-  const svgX = Math.round(75 + nx * 640);
-  const svgY = Math.round(35 + ny * 440);
+  const padX = 40;
+  const padY = 25;
+  const drawW = 860 - padX * 2;
+  const drawH = 560 - padY * 2;
+
+  const svgX = Math.round((padX + nx * drawW) * 10) / 10;
+  const svgY = Math.round((padY + ny * drawH) * 10) / 10;
   return { x: svgX, y: svgY };
 }
 
@@ -199,6 +226,7 @@ export default function DetectPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredFarmId, setHoveredFarmId] = useState(null);
   const [mapZoom, setMapZoom] = useState(1);
+  const [mapMode, setMapMode] = useState('satellite'); // 'satellite' | 'terrain' | 'roadmap'
   const [activeArchTab, setActiveArchTab] = useState('ocular');
 
   useEffect(() => {
@@ -257,12 +285,12 @@ export default function DetectPage() {
     return farms.reduce((sum, f) => sum + (Number(f.gamefowl_count) || 0), 0);
   }, [farms]);
 
-  /* Compute smart clamped position for the floating hover card inside the 820x510 map stage */
+  /* Compute smart clamped position for the floating hover card inside the 860x560 map stage */
   const activeFarmProjected = useMemo(() => {
-    if (!activeFarm) return { x: 410, y: 255, leftPct: 50, topPct: 45 };
+    if (!activeFarm) return { x: 430, y: 280, leftPct: 50, topPct: 45 };
     const pt = projectDavaoCoords(activeFarm.latitude, activeFarm.longitude);
-    const leftPct = Math.max(6, Math.min(58, (pt.x / 820) * 100));
-    const topPct = pt.y > 290 ? Math.max(8, (pt.y / 510) * 100 - 34) : Math.min(64, (pt.y / 510) * 100 + 6);
+    const leftPct = Math.max(6, Math.min(58, (pt.x / 860) * 100));
+    const topPct = pt.y > 300 ? Math.max(8, (pt.y / 560) * 100 - 34) : Math.min(64, (pt.y / 560) * 100 + 6);
     return { ...pt, leftPct, topPct };
   }, [activeFarm]);
 
@@ -442,7 +470,7 @@ export default function DetectPage() {
               <div className="vs-map-HUD-top">
                 <div className="vs-map-compass-badge">
                   <Compass size={14} color="#22c55e" />
-                  <span>Davao City, Philippines (7.07° N, 125.61° E)</span>
+                  <span>Davao City, Philippines</span>
                 </div>
 
                 <div className="vs-map-zoom-controls" aria-label="Map Zoom Controls">
@@ -451,7 +479,7 @@ export default function DetectPage() {
                     className="vs-zoom-btn"
                     title="Zoom In"
                     aria-label="Zoom In"
-                    onClick={() => setMapZoom((z) => Math.min(1.35, Number((z + 0.12).toFixed(2))))}
+                    onClick={() => setMapZoom((z) => Math.min(1.45, Number((z + 0.12).toFixed(2))))}
                   >
                     <ZoomIn size={15} />
                   </button>
@@ -480,126 +508,269 @@ export default function DetectPage() {
                 </div>
               </div>
 
-              <div className="vs-map-svg-wrap">
+              <div className={`vs-map-svg-wrap vs-mode-${mapMode}`}>
                 <svg
-                  viewBox="0 0 820 510"
+                  viewBox="0 0 860 560"
                   className="vs-davao-svg"
                   style={{ transform: `scale(${mapZoom})` }}
                   role="img"
-                  aria-label="Interactive Map of Davao City showing registered gamefowl farms"
+                  aria-label="Accurate Geographic Map of Davao City Territory showing 11 districts and registered farms"
                 >
                   <defs>
-                    <linearGradient id="davaoGulfGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#121417" />
-                      <stop offset="100%" stopColor="#0e1013" />
+                    {/* Google Satellite Water Texture */}
+                    <linearGradient id="gmapOceanSat" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#1e3b62" />
+                      <stop offset="60%" stopColor="#152e4d" />
+                      <stop offset="100%" stopColor="#0e2137" />
                     </linearGradient>
-                    <linearGradient id="davaoLandGrad" x1="0%" y1="0%" x2="85%" y2="100%">
-                      <stop offset="0%" stopColor="#1f232b" />
-                      <stop offset="55%" stopColor="#1a1d24" />
-                      <stop offset="100%" stopColor="#15181e" />
+
+                    {/* Google Roadmap / Terrain Water */}
+                    <linearGradient id="gmapOceanRoad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#a3c4ed" />
+                      <stop offset="100%" stopColor="#87addb" />
                     </linearGradient>
-                    <pattern id="davaoGrid" width="40" height="40" patternUnits="userSpaceOnUse">
-                      <path
-                        d="M 40 0 L 0 0 0 40"
-                        fill="none"
-                        stroke="rgba(34, 197, 94, 0.05)"
-                        strokeWidth="1"
-                      />
-                    </pattern>
+
+                    {/* Satellite Lush Highland Terrain */}
+                    <linearGradient id="gmapSatHighland" x1="0%" y1="0%" x2="80%" y2="100%">
+                      <stop offset="0%" stopColor="#254728" />
+                      <stop offset="50%" stopColor="#2e5430" />
+                      <stop offset="100%" stopColor="#3d6439" />
+                    </linearGradient>
+
+                    {/* Satellite Valley & Coastal Agricultural Terrain */}
+                    <linearGradient id="gmapSatValley" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#385b34" />
+                      <stop offset="60%" stopColor="#486e42" />
+                      <stop offset="100%" stopColor="#5a7e4e" />
+                    </linearGradient>
+
+                    {/* Emerald Perimeter Glow Filter */}
+                    <filter id="emeraldPerimeterGlow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#22c55e" floodOpacity="0.75" />
+                    </filter>
+
+                    <filter id="pinShadow" x="-30%" y="-30%" width="160%" height="160%">
+                      <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000000" floodOpacity="0.45" />
+                    </filter>
                   </defs>
 
-                  {/* Base Ocean (Davao Gulf) & Coordinate Grid */}
-                  <rect width="820" height="510" fill="url(#davaoGulfGrad)" />
-                  <rect width="820" height="510" fill="url(#davaoGrid)" />
-
-                  {/* Davao City Mainland Cartographic Polygon (Full Administrative Territory: Marilog, Paquibato, Bunawan, Talomo, Toril) */}
-                  <path
-                    d="M 65,30 L 280,25 L 450,18 L 520,35 L 620,70 L 650,130 L 630,190 L 605,240 L 575,290 L 530,350 L 485,415 L 435,475 L 420,490 L 240,490 L 160,465 L 120,415 L 85,330 L 60,210 L 50,120 Z"
-                    fill="url(#davaoLandGrad)"
-                    stroke="rgba(34, 197, 94, 0.30)"
-                    strokeWidth="1.5"
+                  {/* 1. Base Ocean (Davao Gulf & Pakiputan Strait) */}
+                  <rect
+                    width="860"
+                    height="560"
+                    fill={mapMode === 'satellite' ? 'url(#gmapOceanSat)' : 'url(#gmapOceanRoad)'}
                   />
 
-                  {/* Samal Island (IGACOS) Across Pakiputan Strait in Davao Gulf */}
-                  <path
-                    d="M 675,210 L 745,195 L 775,245 L 765,335 L 710,365 L 675,320 L 665,255 Z"
-                    fill="#171a20"
-                    stroke="rgba(34, 197, 94, 0.18)"
-                    strokeWidth="1.2"
-                  />
-                  <text x="722" y="282" fill="rgba(143, 148, 154, 0.45)" fontSize="10" fontWeight="600" textAnchor="middle">
-                    SAMAL ISLAND
-                  </text>
-                  <text x="640" y="415" fill="rgba(143, 148, 154, 0.35)" fontSize="11" fontWeight="700" letterSpacing="2" textAnchor="middle">
-                    DAVAO GULF
-                  </text>
+                  {/* 2. Surrounding Mindanao Provinces (Muted Real Geography Context) */}
+                  <g className="vs-surrounding-territory">
+                    {/* Northern Bukidnon & Davao del Norte landmass */}
+                    <path
+                      d="M 0,0 L 860,0 L 860,265 L 645,265 L 665,227 L 665,40 L 73,40 L 73,0 Z"
+                      fill={mapMode === 'satellite' ? '#18241a' : '#eae5dd'}
+                      opacity={mapMode === 'satellite' ? '0.75' : '0.90'}
+                    />
+                    {/* Western Cotabato landmass */}
+                    <path
+                      d="M 0,0 L 73,0 L 73,310 L 93,415 L 114,452 L 134,486 L 0,486 Z"
+                      fill={mapMode === 'satellite' ? '#162017' : '#e6e1d7'}
+                      opacity={mapMode === 'satellite' ? '0.75' : '0.90'}
+                    />
+                    {/* Southern Davao del Sur landmass */}
+                    <path
+                      d="M 0,486 L 134,486 L 174,518 L 295,521 L 477,521 L 477,560 L 0,560 Z"
+                      fill={mapMode === 'satellite' ? '#172218' : '#e4dfd5'}
+                      opacity={mapMode === 'satellite' ? '0.75' : '0.90'}
+                    />
 
-                  {/* Mt. Apo Highland Topographic Elevation Rings (Southwest Davao) */}
-                  <ellipse
-                    cx="155"
-                    cy="415"
-                    rx="95"
-                    ry="65"
-                    fill="none"
-                    stroke="rgba(34, 197, 94, 0.09)"
-                    strokeDasharray="4 4"
-                  />
-                  <ellipse
-                    cx="155"
-                    cy="415"
-                    rx="58"
-                    ry="38"
-                    fill="none"
-                    stroke="rgba(34, 197, 94, 0.14)"
-                    strokeDasharray="3 3"
-                  />
-                  <text x="155" y="420" fill="rgba(143, 148, 154, 0.45)" fontSize="9.5" fontWeight="600" textAnchor="middle">
-                    MT. APO HIGHLANDS
-                  </text>
-
-                  {/* Internal Davao City District Boundaries */}
-                  <g stroke="rgba(255, 255, 255, 0.06)" strokeWidth="1" strokeDasharray="4 4" fill="none">
-                    <path d="M 50,120 L 260,110 L 450,115" />
-                    <path d="M 260,110 L 285,255 L 595,245" />
-                    <path d="M 285,255 L 345,455" />
-                    <path d="M 415,255 L 485,385" />
-                    <path d="M 450,115 L 630,135" />
+                    {/* Neighboring Territory Labels */}
+                    <text x="490" y="24" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.30)' : '#78716c'} fontSize="10.5" fontWeight="700" letterSpacing="0.1em">
+                      BUKIDNON / DAVAO DEL NORTE
+                    </text>
+                    <text x="18" y="240" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.26)' : '#78716c'} fontSize="10" fontWeight="700" letterSpacing="0.08em" transform="rotate(-90 18,240)">
+                      NORTH COTABATO
+                    </text>
+                    <text x="210" y="546" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.26)' : '#78716c'} fontSize="10.5" fontWeight="700" letterSpacing="0.1em">
+                      DAVAO DEL SUR (SANTA CRUZ)
+                    </text>
+                    <text x="680" y="515" fill={mapMode === 'satellite' ? 'rgba(147,197,253,0.40)' : '#3b82f6'} fontSize="12" fontWeight="800" letterSpacing="0.18em">
+                      DAVAO GULF
+                    </text>
                   </g>
 
-                  {/* Davao River & Talomo River Waterways */}
-                  <path
-                    d="M 195,95 Q 320,175 415,220 T 575,285"
-                    fill="none"
-                    stroke="rgba(34, 197, 94, 0.16)"
-                    strokeWidth="2"
-                  />
-                  <path
-                    d="M 255,315 Q 375,335 512,372"
-                    fill="none"
-                    stroke="rgba(34, 197, 94, 0.12)"
-                    strokeWidth="1.5"
-                  />
-
-                  {/* Davao City District Labels */}
-                  <g fill="rgba(192, 197, 206, 0.44)" fontSize="10" fontWeight="700" letterSpacing="0.06em">
-                    <text x="135" y="75">MARILOG</text>
-                    <text x="420" y="65">PAQUIBATO</text>
-                    <text x="165" y="215">BAGUIO (MALAGOS)</text>
-                    <text x="295" y="180">CALINAN</text>
-                    <text x="315" y="295">TUGBOK (MINTAL)</text>
-                    <text x="325" y="435">TORIL (EDEN)</text>
-                    <text x="455" y="340">TALOMO</text>
-                    <text x="535" y="225">BUHANGIN</text>
-                    <text x="585" y="115">BUNAWAN</text>
-                    <text x="548" y="280" fill="rgba(34, 197, 94, 0.55)" fontSize="9.5">POBLACION</text>
+                  {/* 3. Samal Island (IGACOS) Across Pakiputan Strait */}
+                  <g className="vs-samal-island">
+                    <path
+                      d="M 720,335 L 755,315 L 778,350 L 785,420 L 748,460 L 725,415 L 712,365 Z"
+                      fill={mapMode === 'satellite' ? '#2d4b29' : '#d2e3c8'}
+                      stroke={mapMode === 'satellite' ? 'rgba(34,197,94,0.35)' : '#94a3b8'}
+                      strokeWidth="1.2"
+                    />
+                    <text x="750" y="390" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.65)' : '#475569'} fontSize="9" fontWeight="700" textAnchor="middle" letterSpacing="0.06em">
+                      SAMAL ISLAND
+                    </text>
+                    <text x="750" y="402" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.45)' : '#64748b'} fontSize="7.5" fontWeight="600" textAnchor="middle">
+                      (IGACOS)
+                    </text>
                   </g>
 
-                  {/* Interactive Green Farm Markers inside Davao City */}
+                  {/* 4. Official Davao City 11 Administrative Districts (Matching Pic 3) */}
+                  <g className="vs-davao-districts-group">
+                    {/* Marilog District (Northwest) */}
+                    <path
+                      d="M 73.6,40.0 L 376.2,40.0 L 376.2,295.0 L 255.2,310.0 L 73.6,310.0 Z"
+                      fill={mapMode === 'satellite' ? 'url(#gmapSatHighland)' : '#e0eaf6'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Paquibato District (Northeast) */}
+                    <path
+                      d="M 376.2,40.0 L 665.3,40.0 L 665.3,137.5 L 665.3,227.5 L 645.2,265.0 L 551.0,287.5 L 376.2,295.0 Z"
+                      fill={mapMode === 'satellite' ? '#2e4e2a' : '#faebe3'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Baguio District (West) */}
+                    <path
+                      d="M 73.6,310.0 L 255.2,310.0 L 349.3,370.0 L 322.4,407.5 L 93.8,415.0 L 93.8,370.0 Z"
+                      fill={mapMode === 'satellite' ? '#33572d' : '#e2f0d9'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Calinan District (Central) */}
+                    <path
+                      d="M 255.2,310.0 L 376.2,295.0 L 551.0,287.5 L 524.1,370.0 L 389.7,385.0 L 349.3,370.0 Z"
+                      fill={mapMode === 'satellite' ? 'url(#gmapSatValley)' : '#fff3cd'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Tugbok District (Central-South) */}
+                    <path
+                      d="M 349.3,370.0 L 389.7,385.0 L 524.1,370.0 L 537.6,422.5 L 416.6,445.0 L 322.4,407.5 Z"
+                      fill={mapMode === 'satellite' ? '#3c6035' : '#faeed7'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Toril District (South) */}
+                    <path
+                      d="M 93.8,415.0 L 322.4,407.5 L 416.6,445.0 L 537.6,422.5 L 524.1,467.5 L 517.4,478.7 L 490.5,508.7 L 477.1,521.5 L 295.5,521.5 L 174.5,518.5 L 134.1,486.2 L 114.0,452.5 Z"
+                      fill={mapMode === 'satellite' ? '#2a4927' : '#ece5f3'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Talomo District (South Coast) */}
+                    <path
+                      d="M 537.6,422.5 L 604.8,400.0 L 618.3,426.2 L 584.7,441.2 L 557.8,456.2 L 524.1,467.5 Z"
+                      fill={mapMode === 'satellite' ? '#46683c' : '#fef8d3'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Buhangin District (East-Central) */}
+                    <path
+                      d="M 551.0,287.5 L 705.7,347.5 L 692.2,377.5 L 678.8,400.0 L 658.6,407.5 L 604.8,400.0 L 524.1,370.0 Z"
+                      fill={mapMode === 'satellite' ? '#3f6236' : '#e0f2e9'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Bunawan District (Northeast Coast) */}
+                    <path
+                      d="M 645.2,265.0 L 725.9,272.5 L 705.7,302.5 L 705.7,347.5 L 551.0,287.5 Z"
+                      fill={mapMode === 'satellite' ? '#375730' : '#dcf0fa'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.14)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Poblacion District (City Center Waterfront - District 1) */}
+                    <path
+                      d="M 604.8,400.0 L 651.9,407.5 L 651.9,422.5 L 618.3,426.2 Z"
+                      fill={mapMode === 'satellite' ? '#5a784e' : '#f9dbdb'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.18)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                    {/* Agdao District (Harbor Coast - District 2) */}
+                    <path
+                      d="M 651.9,407.5 L 678.8,400.0 L 665.3,411.2 L 651.9,422.5 Z"
+                      fill={mapMode === 'satellite' ? '#55724b' : '#fae4cd'}
+                      stroke={mapMode === 'satellite' ? 'rgba(255,255,255,0.18)' : '#cbd5e1'}
+                      strokeWidth="1"
+                    />
+                  </g>
+
+                  {/* 5. Geographic Landmarks: Rivers & Mountain Peaks */}
+                  <g className="vs-geography-layers">
+                    {/* Davao River Winding from Marilog through Calinan to Davao Gulf */}
+                    <path
+                      d="M 210,140 Q 320,210 376,280 T 524,370 Q 580,395 625,420"
+                      fill="none"
+                      stroke={mapMode === 'satellite' ? '#38bdf8' : '#60a5fa'}
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                    {/* Tamugan / Talomo River */}
+                    <path
+                      d="M 330,340 Q 420,380 475,410 T 560,455"
+                      fill="none"
+                      stroke={mapMode === 'satellite' ? '#38bdf8' : '#60a5fa'}
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+
+                    {/* Mt. Apo Peak (2,954m Highest Peak in Philippines) in Southwest Toril */}
+                    <g transform="translate(138, 486)">
+                      <circle r="18" fill="none" stroke="rgba(239, 68, 68, 0.40)" strokeDasharray="3 3" />
+                      <circle r="9" fill="rgba(239, 68, 68, 0.20)" />
+                      <circle r="3.5" fill="#ef4444" />
+                      <text x="14" y="4" fill={mapMode === 'satellite' ? '#fca5a5' : '#b91c1c'} fontSize="8.5" fontWeight="800">
+
+                      </text>
+                    </g>
+
+                    {/* Pan-Philippine Highway AH26 (Coastal Corridor) */}
+                    <path
+                      d="M 725,273 L 705,305 L 705,348 L 680,400 L 652,422 L 585,441 L 517,479 L 477,521"
+                      fill="none"
+                      stroke="#fbbf24"
+                      strokeWidth="2.6"
+                      strokeLinecap="round"
+                    />
+                    {/* Davao-Bukidnon Road (Route 75) */}
+                    <path
+                      d="M 640,420 L 524,370 L 380,335 L 255,300 L 160,180 L 110,90"
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth="2.0"
+                      strokeLinecap="round"
+                      strokeDasharray="5 3"
+                    />
+                  </g>
+
+                  {/* 6. Official 11 District Text Labels (Pic 3 Reference) */}
+                  <g className="vs-district-labels" fill={mapMode === 'satellite' ? 'rgba(255,255,255,0.72)' : '#334155'} fontSize="9.5" fontWeight="800" letterSpacing="0.06em">
+                    <text x="215" y="170" textAnchor="middle">MARILOG</text>
+                    <text x="515" y="160" textAnchor="middle">PAQUIBATO</text>
+                    <text x="190" y="365" textAnchor="middle">BAGUIO</text>
+                    <text x="380" y="340" textAnchor="middle">CALINAN</text>
+                    <text x="430" y="410" textAnchor="middle">TUGBOK</text>
+                    <text x="300" y="475" textAnchor="middle">TORIL</text>
+                    <text x="575" y="435" textAnchor="middle">TALOMO</text>
+                    <text x="635" y="360" textAnchor="middle">BUHANGIN</text>
+                    <text x="665" y="310" textAnchor="middle">BUNAWAN</text>
+                    <text x="632" y="415" textAnchor="middle" fill="#86efac" fontSize="8">POBLACION (1)</text>
+                    <text x="665" y="412" textAnchor="middle" fill="#f97316" fontSize="7.5"></text>
+                  </g>
+
+                  {/* 7. Official Emerald Geographic Perimeter Line */}
+                  <path
+                    d="M 73.6,40.0 L 403.1,40.0 L 665.3,40.0 L 665.3,137.5 L 665.3,227.5 L 645.2,265.0 L 725.9,272.5 L 705.7,302.5 L 705.7,347.5 L 692.2,377.5 L 678.8,400.0 L 665.3,411.2 L 651.9,422.5 L 584.7,441.2 L 557.8,456.2 L 517.4,478.7 L 490.5,508.7 L 477.1,521.5 L 295.5,521.5 L 174.5,518.5 L 134.1,486.2 L 114.0,452.5 L 93.8,400.0 L 93.8,340.0 L 80.3,287.5 L 73.6,205.0 L 73.6,115.0 L 73.6,40.0 Z"
+                    fill="none"
+                    stroke="#22c55e"
+                    strokeWidth="2.8"
+                    filter="url(#emeraldPerimeterGlow)"
+                  />
+
+                  {/* 8. Interactive Gamefowl Farm Pins */}
                   {filteredFarms.map((farm) => {
                     const pt = projectDavaoCoords(farm.latitude, farm.longitude);
                     const isSelected = activeFarm && activeFarm.id === farm.id;
-                    const pinColor = isSelected ? '#4ade80' : '#22c55e';
-                    const pinStroke = isSelected ? '#ffffff' : '#121417';
+                    const pinColor = isSelected ? '#22c55e' : '#16a34a';
 
                     return (
                       <g
@@ -614,57 +785,49 @@ export default function DetectPage() {
                         onFocus={() => setHoveredFarmId(farm.id)}
                         onBlur={() => setHoveredFarmId(null)}
                       >
-                        {/* Generous 44x44px invisible hover hit target */}
+                        {/* 44x44px touch hit area */}
                         <circle r="22" fill="transparent" />
 
-                        {/* Outer Radar Pulse Ring (Green Only) */}
+                        {/* Radar Pulse Ring */}
                         <circle
-                          r={isSelected ? '18' : '14'}
+                          r={isSelected ? '19' : '13'}
                           fill="#22c55e"
                           className="vs-pin-pulse"
                         />
 
-                        {/* Hovered Halo Ring */}
-                        {isSelected && (
-                          <circle
-                            r="16"
-                            fill="none"
-                            stroke="#4ade80"
-                            strokeWidth="2"
+                        {/* Google Maps Style Marker Pin Shape */}
+                        <g filter="url(#pinShadow)">
+                          <path
+                            d="M 0,0 C -6,-6 -9,-11 -9,-16 C -9,-21 -5,-25 0,-25 C 5,-25 9,-21 9,-16 C 9,-11 6,-6 0,0 Z"
+                            fill={isSelected ? '#22c55e' : '#15803d'}
+                            stroke="#ffffff"
+                            strokeWidth="1.6"
                           />
-                        )}
+                          <circle cx="0" cy="-16" r="3.2" fill="#ffffff" />
+                        </g>
 
-                        {/* Core Green Marker Pin */}
-                        <circle
-                          r={isSelected ? '9.5' : '8'}
-                          fill={pinColor}
-                          stroke={pinStroke}
-                          strokeWidth="2.2"
-                          className="vs-pin-core"
-                        />
-
-                        {/* Pill Label Showing Farm Short Name + Gamefowl Count */}
-                        <g transform="translate(0, -16)">
+                        {/* Farm Name Pill Label */}
+                        <g transform="translate(0, -32)">
                           <rect
-                            x="-56"
-                            y="-20"
-                            width="112"
-                            height="18"
-                            rx="5"
-                            fill={isSelected ? '#22c55e' : 'rgba(23, 25, 30, 0.94)'}
-                            stroke={isSelected ? '#ffffff' : 'rgba(34, 197, 94, 0.45)'}
+                            x="-58"
+                            y="-16"
+                            width="116"
+                            height="16"
+                            rx="4"
+                            fill={isSelected ? '#15803d' : 'rgba(15, 23, 42, 0.92)'}
+                            stroke={isSelected ? '#ffffff' : 'rgba(34, 197, 94, 0.40)'}
                             strokeWidth="1"
                           />
                           <text
                             x="0"
-                            y="-8"
+                            y="-5"
                             textAnchor="middle"
-                            fill={isSelected ? '#09140e' : '#f3f4f6'}
-                            fontSize="9.5"
+                            fill="#ffffff"
+                            fontSize="8.5"
                             fontWeight="700"
                           >
-                            {farm.farm_name.length > 13
-                              ? `${farm.farm_name.slice(0, 12)}…`
+                            {farm.farm_name.length > 14
+                              ? `${farm.farm_name.slice(0, 13)}…`
                               : farm.farm_name}{' '}
                             ({farm.gamefowl_count})
                           </text>
@@ -672,6 +835,17 @@ export default function DetectPage() {
                       </g>
                     );
                   })}
+
+                  {/* Google Maps Scale Bar at Bottom Right */}
+                  <g transform="translate(710, 535)">
+                    <rect x="0" y="0" width="125" height="16" rx="3" fill="rgba(15, 23, 42, 0.82)" />
+                    <line x1="12" y1="10" x2="65" y2="10" stroke="#ffffff" strokeWidth="2.5" />
+                    <line x1="12" y1="6" x2="12" y2="14" stroke="#ffffff" strokeWidth="2.5" />
+                    <line x1="65" y1="6" x2="65" y2="14" stroke="#ffffff" strokeWidth="2.5" />
+                    <text x="74" y="12" fill="#f8fafc" fontSize="8.5" fontWeight="700">
+                      10 km
+                    </text>
+                  </g>
                 </svg>
 
                 {/* Floating Hover Telemetry Card — Shown ONLY When Hovering a Farm Pin */}

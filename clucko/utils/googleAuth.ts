@@ -2,7 +2,8 @@ import * as AuthSession from 'expo-auth-session';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NativeModules, Platform } from 'react-native';
 import { GOOGLE_AUTH_CONFIG, isGoogleAuthConfigured } from '../config/googleAuth';
 import { apiGoogleAuth } from '../lib/api';
 
@@ -18,6 +19,101 @@ export interface GoogleAuthResult {
   isNotConfigured?: boolean;
   user?: any;
   subscription?: any;
+}
+
+/**
+ * Returns a guaranteed valid return URL for OAuth callbacks:
+ * - Web: window.location.origin
+ * - Expo Go: exp://<host>/--/expo-auth-session (valid URI scheme recognized by Android OS for Expo Go)
+ * - Standalone APK: clucko://expo-auth-session
+ */
+export function getEffectiveReturnUrl(): string {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && Boolean(window.location?.origin)) {
+    return window.location.origin;
+  }
+
+  // Check if running in Expo Go
+  const isExpoGo =
+    Boolean((Constants as any).appOwnership === 'expo') ||
+    Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
+    Boolean((Constants as any).expoGoConfig) ||
+    Boolean((Constants as any).manifest?.debuggerHost) ||
+    Boolean((Constants as any).expoConfig?.hostUri);
+
+  if (isExpoGo) {
+    let host = '';
+
+    // 1. Try NativeModules.SourceCode?.scriptURL (points directly to Metro server in React Native)
+    try {
+      const scriptURL = NativeModules.SourceCode?.scriptURL;
+      if (scriptURL) {
+        const match = scriptURL.match(/^https?:\/\/([^/]+)/);
+        if (match && match[1]) {
+          host = match[1];
+        }
+      }
+    } catch {}
+
+    // 2. Try Constants.linkingUri
+    if (!host && (Constants as any).linkingUri) {
+      const match = String((Constants as any).linkingUri).match(/^[a-zA-Z0-9+.-]+:\/\/([^/]+)/);
+      if (match && match[1] && !match[1].startsWith('--')) {
+        host = match[1];
+      }
+    }
+
+    // 3. Try Constants host fields
+    if (!host) {
+      const rawHost =
+        (Constants as any).expoConfig?.hostUri ||
+        (Constants as any).manifest?.debuggerHost ||
+        (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
+        '';
+      if (rawHost) {
+        host = String(rawHost).replace(/\/.*$/, '');
+      }
+    }
+
+    // 4. Fallback to active dev server IP on local network
+    if (!host) {
+      host = '192.168.1.7:8081';
+    }
+
+    return `exp://${host}/--/expo-auth-session`;
+  }
+
+  return AuthSession.makeRedirectUri({
+    scheme: 'clucko',
+    path: 'expo-auth-session',
+  });
+}
+
+/**
+ * Extracts the access token from any OAuth redirect URL (fragment # or query ?).
+ */
+export function extractAccessTokenFromUrl(url: string): string | null {
+  if (!url) return null;
+
+  if (url.includes('#')) {
+    const fragment = url.split('#')[1];
+    const params = new URLSearchParams(fragment);
+    const token = params.get('access_token');
+    if (token) return token;
+  }
+
+  if (url.includes('?')) {
+    const query = url.split('?')[1];
+    const params = new URLSearchParams(query);
+    const token = params.get('access_token');
+    if (token) return token;
+  }
+
+  const match = url.match(/[#?&]access_token=([^&]+)/);
+  if (match && match[1]) {
+    return decodeURIComponent(match[1]);
+  }
+
+  return null;
 }
 
 /**
@@ -49,23 +145,10 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
     `&prompt=select_account`;
 
   // 3. Determine redirect URL for Expo Go vs Standalone / Web.
-  // In Expo Go, custom schemes (clucko://) are not declared in the Android OS manifest;
-  // AuthSession.getDefaultReturnUrl() generates exp://<host>:<port>/--/expo-auth-session,
-  // which Android OS automatically recognizes and routes directly into Expo Go.
-  // In standalone builds, AuthSession.makeRedirectUri({ scheme: 'clucko', path: 'oauth' }) uses clucko://oauth.
-  const isExpoGo =
-    Boolean(Constants.expoGoConfig) ||
-    Linking.createURL('').startsWith('exp://') ||
-    Linking.createURL('').startsWith('exps://');
-
-  const returnUrl = isWeb
-    ? window.location.origin
-    : isExpoGo
-    ? AuthSession.getDefaultReturnUrl()
-    : AuthSession.makeRedirectUri({
-        scheme: 'clucko',
-        path: 'oauth',
-      });
+  // In Expo Go, returnUrl is guaranteed to be exp://<host>/--/expo-auth-session,
+  // which is a valid URI accepted by auth.expo.io and routed directly into Expo Go.
+  // In standalone builds, AuthSession.makeRedirectUri uses clucko://expo-auth-session.
+  const returnUrl = getEffectiveReturnUrl();
 
   const startUrl = isWeb
     ? googleAuthUrl
@@ -120,7 +203,32 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
       }
     }
 
+    // Check if expo-auth-session route handler already completed authentication and stored session
     if (!capturedUrl) {
+      await new Promise((r) => setTimeout(r, 600));
+      const token = await AsyncStorage.getItem('token');
+      const userStr = await AsyncStorage.getItem('userData');
+      if (token && userStr) {
+        try {
+          return {
+            success: true,
+            user: JSON.parse(userStr),
+          };
+        } catch {}
+      }
+    }
+
+    if (!capturedUrl) {
+      const token = await AsyncStorage.getItem('token');
+      const userStr = await AsyncStorage.getItem('userData');
+      if (token && userStr) {
+        try {
+          return {
+            success: true,
+            user: JSON.parse(userStr),
+          };
+        } catch {}
+      }
       return { success: false, error: 'Sign in was cancelled.' };
     }
 
@@ -140,19 +248,20 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
       };
     }
 
-    let accessToken: string | null = null;
-
-    if (url.includes('#')) {
-      const fragment = url.split('#')[1];
-      const params = new URLSearchParams(fragment);
-      accessToken = params.get('access_token');
-    } else if (url.includes('?')) {
-      const query = url.split('?')[1];
-      const params = new URLSearchParams(query);
-      accessToken = params.get('access_token');
-    }
+    const accessToken = extractAccessTokenFromUrl(url);
 
     if (!accessToken) {
+      // Check if session was stored by expo-auth-session
+      const token = await AsyncStorage.getItem('token');
+      const userStr = await AsyncStorage.getItem('userData');
+      if (token && userStr) {
+        try {
+          return {
+            success: true,
+            user: JSON.parse(userStr),
+          };
+        } catch {}
+      }
       return {
         success: false,
         error: 'Could not extract access token from Google response.',
@@ -218,7 +327,7 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
         }
       }
     } catch {
-      // People API optional if scopes don't include it
+      // People API optional
     }
 
     // 7. Authenticate / register with Clucko backend

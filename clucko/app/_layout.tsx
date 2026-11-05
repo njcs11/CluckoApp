@@ -5,7 +5,10 @@ import InteractiveProductTour from '../components/ui/InteractiveProductTour';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
+import * as WebBrowser from 'expo-web-browser';
 import { apiCheckHeartbeatStatus } from '../lib/api';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RootLayout() {
   useEffect(() => {
